@@ -1,4 +1,5 @@
-import { asTokenId, asTokenDecimals } from '@xln/core/account/tx/units';
+import { asTokenDecimals } from '@xln/core/account/tx/units';
+import { asTokenId } from '@xln/core/protocol/units';
 import { useEffect, useState } from 'react';
 import { fetchExternalTokenCatalog } from '@xln/frontend/lib/components/Entity/external-wallet-reader';
 import { requireAdapter } from '../../adapter';

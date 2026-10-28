@@ -18,7 +18,7 @@ import { encodeBuffer, decodeBuffer } from '../../../storage/codec/codec';
 import { hydrateAccountDocFromStorage, projectPortableAccountDoc } from '../../../storage/read/projections';
 import { validateStorageAccountDocValue } from '../../../storage/schema/schema-state-docs';
 import type { AccountReplica, AccountTx } from '../../../types/account';
-import { asTokenId } from '../../../account/tx/units';
+import { asTokenId } from '../../../protocol/units';
 
 const left = entity('11');
 const right = entity('22');

@@ -1,3 +1,4 @@
+import { toEntityId, toSignerId } from '../../protocol/identity';
 import type { EntityReplica, EntityState } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';
 import { compareStableText } from '../../protocol/serialization';
@@ -7,7 +8,7 @@ import {
   type CertifiedEntityHeadPlan,
 } from './entity-head';
 import { computeStorageReplicaMetaDigest } from './replica-meta-digest';
-import { keyLiveReplicaMeta, normalizeEntityId } from '../keys';
+import { keyLiveReplicaMeta } from '../keys';
 import { encodeReplicaMeta } from '../read/projections';
 import { decodeBuffer, encodeBuffer } from '../codec/codec';
 import type { StorageReplicaLookup } from '../types';
@@ -30,7 +31,7 @@ import { projectCertifiedEntityFrameLinkIdentity } from '../../entity/consensus/
 export const areStorageCheckpointReplicasConverged = (env: RuntimeReplica): boolean => {
   const endpoints = new Map<string, { state: EntityState; height: number; head: string; root?: string }>();
   for (const replica of env.state.eReplicas.values()) {
-    const entityId = normalizeEntityId(replica.entityId || replica.state.entityId || '');
+    const entityId = toEntityId(replica.entityId || replica.state.entityId || '');
     if (!entityId) continue;
     const height = replica.state.height;
     const head = height === 0 ? 'genesis' : String(replica.state.prevFrameHash || '').toLowerCase();
@@ -87,7 +88,7 @@ export const findReplicaForEntity = (
   entityId: string,
   lookup?: StorageReplicaLookup,
 ): { replicaKey: string; replica: EntityReplica; state: EntityState } | null => {
-  const normalized = normalizeEntityId(entityId);
+  const normalized = toEntityId(entityId);
   return (lookup ?? buildReplicaLookup(env)).get(normalized) ?? null;
 };
 
@@ -107,7 +108,7 @@ const buildLiveReplicaLookup = (env: RuntimeReplica): StorageReplicaLookup => {
     compareStableText(String(left).toLowerCase(), String(right).toLowerCase())
   ))) {
     if (!replica?.state) continue;
-    const entityId = normalizeEntityId(replica.entityId || replica.state.entityId || '');
+    const entityId = toEntityId(replica.entityId || replica.state.entityId || '');
     if (!entityId) continue;
     const current = lookup.get(entityId);
     if (current) {
@@ -154,8 +155,8 @@ export const buildStorageReplicaMetaCommitmentFromCheckpointPlan = (
   const entries: Array<{ key: Buffer; value: Buffer }> = [];
   for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
     if (!replica?.state) continue;
-    const entityId = normalizeEntityId(replica.entityId || replica.state.entityId || '');
-    const signerId = normalizeEntityId(replica.signerId || '');
+    const entityId = toEntityId(replica.entityId || replica.state.entityId || '');
+    const signerId = toSignerId(String(replica.signerId || '').toLowerCase());
     if (!entityId || !signerId) {
       throw new Error(`STORAGE_REPLICA_SIGNER_MISSING:${entityId}`);
     }
@@ -176,8 +177,8 @@ export const buildStorageLiveReplicaMetaCommitment = (env: RuntimeReplica): {
   const entries: Array<{ key: Buffer; value: Buffer }> = [];
   for (const [replicaKey, replica] of env.state.eReplicas.entries()) {
     if (!replica?.state) continue;
-    const entityId = normalizeEntityId(replica.entityId || replica.state.entityId || '');
-    const signerId = normalizeEntityId(replica.signerId || '');
+    const entityId = toEntityId(replica.entityId || replica.state.entityId || '');
+    const signerId = toSignerId(String(replica.signerId || '').toLowerCase());
     if (!entityId || !signerId) throw new Error(`STORAGE_REPLICA_SIGNER_MISSING:${entityId}`);
     // EntityState cannot include its own certified frame because the frame
     // contains stateRoot. The parent Runtime commitment therefore binds the
@@ -200,7 +201,7 @@ export const buildStorageLiveReplicaMetaCommitment = (env: RuntimeReplica): {
         signerId,
         isProposer: replica.isProposer,
         entityHead: {
-          entityId: normalizeEntityId(replica.state.entityId),
+          entityId: toEntityId(replica.state.entityId),
           height: replica.state.height,
           timestamp: replica.state.timestamp,
           frameHash: replica.state.prevFrameHash ?? '',

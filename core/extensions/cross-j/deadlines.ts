@@ -1,3 +1,4 @@
+import { toUnixMs, toUnixS, unixMsToUnixSFloor, type UnixS, type UnixMs } from '../../protocol/units';
 import { haltRuntimeFailure } from '../../protocol/errors/failure-taxonomy';
 import { BLOCKCHAIN, TIMING } from '../../config/constants';
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
@@ -16,16 +17,21 @@ const CROSS_J_DELIVERY_BOUNDS = {
 // independent of dispute starts and every pending processBatch nonce/ACK.
 export const CROSS_J_LEG_MARGIN = Object.values(CROSS_J_DELIVERY_BOUNDS).reduce((sum, seconds) => sum + seconds, 0);
 
-export const crossJDeadlines = (route: Pick<CrossJurisdictionSwapRoute, 'expiresAt'>) => {
+/** Domain math consumes validated milliseconds and emits only settlement seconds. */
+export const crossJDeadlines = (expiry: UnixMs): { source: UnixS; target: UnixS } => {
+  const source = unixMsToUnixSFloor(expiry);
+  return { source, target: toUnixS(source + CROSS_J_LEG_MARGIN) };
+};
+
+export const parseCrossJDeadlines = (route: Pick<CrossJurisdictionSwapRoute, 'expiresAt'>): { source: UnixS; target: UnixS } => {
   const expiry = route.expiresAt;
   if (typeof expiry !== 'number' || !Number.isSafeInteger(expiry) || expiry < 1000)
     throw haltRuntimeFailure('CROSS_J_DEADLINE_MISSING', 'CROSS_J_DEADLINE_MISSING');
-  const source = Math.floor(expiry / 1000);
-  return { source, target: source + CROSS_J_LEG_MARGIN };
+  return crossJDeadlines(toUnixMs(expiry));
 };
 
 export const assertCrossJDeadlines = (route: CrossJurisdictionSwapRoute): void => {
-  const deadlines = crossJDeadlines(route);
+  const deadlines = parseCrossJDeadlines(route);
   if (!route.sourcePull && !route.targetPull) return;
   const source = route.sourcePull?.deadline;
   const target = route.targetPull?.deadline;

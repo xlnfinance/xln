@@ -3,7 +3,7 @@
   Compact sortable list with expandable details.
 -->
 <script lang="ts">
-import { asTokenId } from "@xln/core/account/tx/units";
+import { asTokenId } from '@xln/core/protocol/units';
   import type { RuntimeReplica, RuntimeInput } from '@xln/core/api/public/runtime-module';
   import { errorLog } from '../../../stores/errorLogStore';
   import { runtimeControllerHandle } from '../../../stores/runtimeControllerStore';

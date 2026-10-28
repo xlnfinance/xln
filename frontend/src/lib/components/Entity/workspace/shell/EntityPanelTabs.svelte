@@ -1,5 +1,5 @@
 <script lang="ts">
-import { asTokenId } from "@xln/core/account/tx/units";
+import { asTokenId } from '@xln/core/protocol/units';
 import WalletGuide from "#lib/tutorial/WalletGuide.svelte";
 import { replaceState } from "$app/navigation";
 import { createEventDispatcher } from "svelte";

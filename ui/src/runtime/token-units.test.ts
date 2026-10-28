@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
-import { asTokenId, asTokenDecimals, type TokenId, type TokenDecimals } from '@xln/core/account/tx/units';
+import { asTokenDecimals, type TokenDecimals } from '@xln/core/account/tx/units';
+import { asTokenId, type TokenId } from '@xln/core/protocol/units';
 import { getTokenInfo } from '@xln/core/account/utils';
 import {
   getTokenUsdMicros,

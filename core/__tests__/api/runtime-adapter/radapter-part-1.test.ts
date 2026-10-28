@@ -1,3 +1,4 @@
+import { toEntityId } from '../../../protocol/identity';
 import type { RuntimeAdapterCrossOrder } from '../../../api/runtime-adapter/read/cross-order';
 import { acquireRuntimeFrameWriter } from '../../../runtime/frame/lifecycle/writer-lock';
 import { createEmptyEnv, saveEnvToDB, closeRuntimeDb, closeInfraDb } from '../../../runtime';
@@ -57,19 +58,7 @@ import {
 
 import { decodeBuffer, encodeBuffer } from '../../../storage/codec/codec';
 
-import {
-  KEY_HEAD,
-  STORAGE_SCHEMA_VERSION,
-  hexBytes,
-  keyLiveAccount,
-  keyLiveEntity,
-  keySnapshotAccountPrefix,
-  keySnapshotBookPrefix,
-  keySnapshotEntity,
-  keySnapshotManifest,
-  normalizeEntityId,
-  textBytes,
-} from '../../../storage/keys';
+import { KEY_HEAD, STORAGE_SCHEMA_VERSION, hexBytes, keyLiveAccount, keyLiveEntity, keySnapshotAccountPrefix, keySnapshotBookPrefix, keySnapshotEntity, keySnapshotManifest, textBytes } from '../../../storage/keys';
 
 import {
   projectAccountDoc,
@@ -1486,10 +1475,10 @@ test('runtime adapter historical batch without entityId defaults to live entity 
       }),
       listEntityIdsAtHeight: async () => [staleEntityId, emptyEntityId, entityId],
       loadEntityViewPage: async requestedEntityId => {
-        const normalizedEntityId = normalizeEntityId(requestedEntityId);
+        const normalizedEntityId = toEntityId(requestedEntityId);
         if (normalizedEntityId === staleEntityId) return null;
         const replica = Array.from(env.state.eReplicas.values()).find(
-          item => normalizeEntityId(item.entityId) === normalizedEntityId,
+          item => toEntityId(item.entityId) === normalizedEntityId,
         );
         if (!replica) return null;
         const account = replica.state.accounts.get(counterpartyId);
@@ -1900,7 +1889,7 @@ test('runtime adapter historical view frame skips missing non-active summaries w
       listEntityIdsAtHeight: async () => [missingEntityId, entityId],
       loadEntityState: async () => null,
       loadEntityViewPage: async requestedEntityId => {
-        if (normalizeEntityId(requestedEntityId) !== entityId) return null;
+        if (toEntityId(requestedEntityId) !== entityId) return null;
         return {
           core: projectEntityReplicaCoreView(replica.state, replica),
           accounts: { items: [], nextCursor: null },

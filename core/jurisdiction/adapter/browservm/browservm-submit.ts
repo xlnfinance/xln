@@ -1,5 +1,6 @@
+import { toEntityId } from '../../../protocol/identity';
 import { hashTargetReveal } from '../../../protocol/htlc/target-reveal';
-import { normalizeEntityId } from '../../../entity/id';
+
 import { compactHankoForChain } from '../../../hanko/short';
 import { batchOpCount, isBatchEmpty } from '../../machine/batch';
 import { assertSealedJBatchBinding } from '../../machine/batch/sealed-batch';
@@ -45,7 +46,7 @@ const submitEntityProviderAction = async (
   if (!jTx.data.hankoSignature) {
     return {
       success: false,
-      error: `ENTITY_PROVIDER_ACTION_CONSENSUS_HANKO_MISSING:${normalizeEntityId(jTx.entityId)}`,
+      error: `ENTITY_PROVIDER_ACTION_CONSENSUS_HANKO_MISSING:${toEntityId(jTx.entityId)}`,
     };
   }
   try {
@@ -58,7 +59,7 @@ const submitEntityProviderAction = async (
     // a lazy single-signer entity, so compact at the submission boundary only.
     const hankoData = compactHankoForChain(jTx.data.hankoSignature, jTx.data.intent.actionHash);
     const events = await context.browserVM.submitEntityProviderAction(jTx.data.intent, hankoData, {
-      entityId: normalizeEntityId(jTx.entityId),
+      entityId: toEntityId(jTx.entityId),
       kind:
         jTx.type === 'entityProviderTransfer'
           ? 'entityTransferTokens'

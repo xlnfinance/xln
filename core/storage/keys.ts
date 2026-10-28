@@ -115,7 +115,6 @@ export const STORAGE_VERIFY_TAIL_FRAMES = 128;
 
 export const ZERO_FRAME_HASH = `0x${'00'.repeat(32)}`;
 
-export const normalizeEntityId = (value: string): string => String(value || '').toLowerCase();
 
 const exactHexBytes = (value: string, byteLength: number, code: string): Buffer => {
   const raw = String(value);

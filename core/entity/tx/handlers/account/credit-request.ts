@@ -1,4 +1,4 @@
-import { asTokenId } from '../../../../account/tx/units';
+import { asTokenId } from '../../../../protocol/units';
 import type { AccountTx } from '../../../../types/account';
 import type { EntityInput, EntityState } from '../../../types';
 import type { EntityTx } from '../../../../types/entity-tx';

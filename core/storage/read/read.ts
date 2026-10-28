@@ -1,43 +1,11 @@
+import { toEntityId, toSignerId } from '../../protocol/identity';
 import { assertTypeScriptStorageFrame } from './integrity/native-authority';
 import type { BookState } from '../../swapbook';
 import type { EntityState } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';
 import { decodeBuffer, decodeValidatedBuffer } from '../codec/codec';
 import { readBoundedValidatedValue } from '../codec/bounded-value';
-import {
-  KEY_LIVE_ACCOUNT,
-  KEY_HEAD,
-  KEY_LIVE_ENTITY,
-  decodeEntityId,
-  keySnapshotAccount,
-  keyCertifiedBoardNodePrefix,
-  keyCertifiedBoardPathNode,
-  keyAccountJClaimNodePrefix,
-  keyAccountJClaimPathNode,
-  keySnapshotGraphPrefix,
-  keySnapshotManifest,
-  parseSnapshotGraphKey,
-  keyFrame,
-  keyLiveAccount,
-  keyLiveAccountPrefix,
-  keyLiveBook,
-  keyLiveBookPrefix,
-  keyLiveEntity,
-  keyLiveReplicaMeta,
-  keyLiveReplicaMetaPrefix,
-  keySnapshotAccountPrefix,
-  keySnapshotBookPrefix,
-  keySnapshotEntityPrefix,
-  keySnapshotReplicaMeta,
-  keySnapshotReplicaMetaPrefix,
-  normalizeEntityId,
-  parseLiveAccountKey,
-  parseLiveBookKey,
-  parseSnapshotAccountKey,
-  parseSnapshotEntityKey,
-  prefixUpperBound,
-  keySnapshotBook,
-} from '../keys';
+import { KEY_LIVE_ACCOUNT, KEY_HEAD, KEY_LIVE_ENTITY, decodeEntityId, keySnapshotAccount, keyCertifiedBoardNodePrefix, keyCertifiedBoardPathNode, keyAccountJClaimNodePrefix, keyAccountJClaimPathNode, keySnapshotGraphPrefix, keySnapshotManifest, parseSnapshotGraphKey, keyFrame, keyLiveAccount, keyLiveAccountPrefix, keyLiveBook, keyLiveBookPrefix, keyLiveEntity, keyLiveReplicaMeta, keyLiveReplicaMetaPrefix, keySnapshotAccountPrefix, keySnapshotBookPrefix, keySnapshotEntityPrefix, keySnapshotReplicaMeta, keySnapshotReplicaMetaPrefix, parseLiveAccountKey, parseLiveBookKey, parseSnapshotAccountKey, parseSnapshotEntityKey, prefixUpperBound, keySnapshotBook } from '../keys';
 import { readAccountStorageLayout } from '../schema/account-layout';
 import { readEntityStorageLayout } from '../schema/entity/layout';
 import {
@@ -391,7 +359,7 @@ const listReplicaMetas = async (
 ): Promise<StorageReplicaMeta[]> => {
   const metas: StorageReplicaMeta[] = [];
   const seenSigners = new Set<string>();
-  const expectedEntityId = normalizeEntityId(entityId);
+  const expectedEntityId = toEntityId(entityId);
   for await (const key of iterateKeys(db, { prefix })) {
     const decoded = decodeBuffer(await readRequiredRaw(db, key));
     if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded)) {
@@ -404,8 +372,8 @@ const listReplicaMetas = async (
       throw new Error(`STORAGE_REPLICA_META_SHARED_STATE_REQUIRED:0x${key.toString('hex')}`);
     }
     const meta = validateStorageReplicaMeta(decoded, `StorageReplicaMeta[0x${key.toString('hex')}]`);
-    const metaEntityId = normalizeEntityId(String(meta.entityId || ''));
-    const signerId = normalizeEntityId(String(meta.signerId || ''));
+    const metaEntityId = toEntityId(String(meta.entityId || ''));
+    const signerId = toSignerId(String(meta.signerId || '').toLowerCase());
     if (!metaEntityId || metaEntityId !== expectedEntityId) {
       throw new Error(
         `STORAGE_REPLICA_META_ENTITY_KEY_MISMATCH:expected=${expectedEntityId}:actual=${metaEntityId || 'missing'}`,
@@ -416,10 +384,10 @@ const listReplicaMetas = async (
         `STORAGE_REPLICA_META_KEY_BINDING_MISMATCH:entity=${metaEntityId}:signer=${signerId || 'missing'}`,
       );
     }
-    if (normalizeEntityId(String(sharedState.entityId || '')) !== metaEntityId) {
+    if (toEntityId(String(sharedState.entityId || '')) !== metaEntityId) {
       throw new Error(
         `STORAGE_REPLICA_META_STATE_ENTITY_MISMATCH:meta=${metaEntityId}:` +
-          `state=${normalizeEntityId(String(sharedState.entityId || '')) || 'missing'}`,
+          `state=${toEntityId(String(sharedState.entityId || '')) || 'missing'}`,
       );
     }
     if (seenSigners.has(signerId)) {
@@ -427,7 +395,7 @@ const listReplicaMetas = async (
     }
     seenSigners.add(signerId);
     const validators = sharedState.config.validators;
-    if (!Array.isArray(validators) || !validators.some(validator => normalizeEntityId(validator) === signerId)) {
+    if (!Array.isArray(validators) || !validators.some(validator => toSignerId(validator.toLowerCase()) === signerId)) {
       throw new Error(`STORAGE_REPLICA_META_SIGNER_NOT_IN_BOARD:entity=${metaEntityId}:signer=${signerId}`);
     }
     metas.push(meta satisfies StorageReplicaMeta);
@@ -482,7 +450,7 @@ const readPageLimit = (query?: StoragePageQuery): number => {
 };
 
 const readAccountCursor = (query?: StoragePageQuery): string =>
-  query?.cursor ? normalizeEntityId(query.cursor) : '';
+  query?.cursor ? toEntityId(query.cursor) : '';
 
 const isAfterAccountCursor = (
   counterpartyId: string,
@@ -498,7 +466,7 @@ const pushAccountCandidate = (
   limit: number,
   direction: 'asc' | 'desc',
 ): void => {
-  const normalized = normalizeEntityId(counterpartyId);
+  const normalized = toEntityId(counterpartyId);
   if (seen.has(normalized)) return;
   seen.add(normalized);
   const compare = (left: string, right: string): number =>
@@ -555,7 +523,7 @@ const listAccountPageFromKeyspace = async (options: {
         : { prefix, reverse: true });
   for await (const key of iterateKeys(db, range)) {
     const { counterpartyId } = parseKey(key);
-    const normalized = normalizeEntityId(counterpartyId);
+    const normalized = toEntityId(counterpartyId);
     if (!isAfterAccountCursor(normalized, cursor, direction)) continue;
     if (overlay?.has(normalized)) continue;
     const stored = key[0] === KEY_LIVE_ACCOUNT
@@ -674,7 +642,7 @@ const loadSnapshotDocsForEntity = async (db: RuntimeDbLike, snapshotHeight: numb
     `snapshot:${snapshotHeight}`,
   );
   if (entityBuffer) {
-    docs.set(`e:${normalizeEntityId(entityId)}`, { family: 'entity', entityId: normalizeEntityId(entityId), value: entityBuffer });
+    docs.set(`e:${toEntityId(entityId)}`, { family: 'entity', entityId: toEntityId(entityId), value: entityBuffer });
   }
 
   for await (const key of iterateKeys(db, { prefix: keySnapshotAccountPrefix(snapshotHeight, entityId) })) {
@@ -693,10 +661,10 @@ const loadSnapshotDocsForEntity = async (db: RuntimeDbLike, snapshotHeight: numb
       counterparty,
       `snapshot:${snapshotHeight}`,
     );
-    docs.set(`a:${normalizeEntityId(entity)}:${normalizeEntityId(counterparty)}`, {
+    docs.set(`a:${toEntityId(entity)}:${toEntityId(counterparty)}`, {
       family: 'account',
-      entityId: normalizeEntityId(entity),
-      counterpartyId: normalizeEntityId(counterparty),
+      entityId: toEntityId(entity),
+      counterpartyId: toEntityId(counterparty),
       value,
     });
   }
@@ -705,9 +673,9 @@ const loadSnapshotDocsForEntity = async (db: RuntimeDbLike, snapshotHeight: numb
     const parsed = parseLiveBookKey(key, 9);
     const value = await readSnapshotBookGraph(db, snapshotHeight, parsed.entityId, parsed.pairId);
     if (!value) throw new Error(`STORAGE_SNAPSHOT_BOOK_GRAPH_MISSING:${snapshotHeight}:${parsed.entityId}:${parsed.pairId}`);
-    docs.set(`b:${normalizeEntityId(parsed.entityId)}:${parsed.pairId}`, {
+    docs.set(`b:${toEntityId(parsed.entityId)}:${parsed.pairId}`, {
       family: 'book',
-      entityId: normalizeEntityId(parsed.entityId),
+      entityId: toEntityId(parsed.entityId),
       pairId: parsed.pairId,
       value,
     });
@@ -737,7 +705,7 @@ const loadSnapshotDocsAtHeight = async (
       entityId,
       `snapshot:${snapshotHeight}`,
     );
-    if (value) docs.set(`e:${normalizeEntityId(entityId)}`, { family: 'entity', entityId, value });
+    if (value) docs.set(`e:${toEntityId(entityId)}`, { family: 'entity', entityId, value });
   }
   for await (const key of iterateKeys(db, { prefix: keySnapshotAccountPrefix(snapshotHeight) })) {
     const { entityId, counterpartyId } = parseSnapshotAccountKey(key);
@@ -754,7 +722,7 @@ const loadSnapshotDocsAtHeight = async (
       counterpartyId,
       `snapshot:${snapshotHeight}`,
     );
-    docs.set(`a:${normalizeEntityId(entityId)}:${normalizeEntityId(counterpartyId)}`, {
+    docs.set(`a:${toEntityId(entityId)}:${toEntityId(counterpartyId)}`, {
       family: 'account', entityId, counterpartyId, value,
     });
   }
@@ -762,7 +730,7 @@ const loadSnapshotDocsAtHeight = async (
     const { entityId, pairId } = parseLiveBookKey(key, 9);
     const value = await readSnapshotBookGraph(db, snapshotHeight, entityId, pairId);
     if (!value) throw new Error(`STORAGE_SNAPSHOT_BOOK_GRAPH_MISSING:${snapshotHeight}:${entityId}:${pairId}`);
-    docs.set(`b:${normalizeEntityId(entityId)}:${pairId}`, {
+    docs.set(`b:${toEntityId(entityId)}:${pairId}`, {
       family: 'book',
       entityId,
       pairId,
@@ -782,12 +750,12 @@ const hydrateEntityStatesFromDocs = async (
   const accounts = new Map<string, Map<string, StorageAccountDoc>>();
   const books = new Map<string, Map<string, BookState>>();
   for (const doc of docs.values()) {
-    const entityId = normalizeEntityId(doc.entityId);
+    const entityId = toEntityId(doc.entityId);
     if (doc.family === 'entity') {
       cores.set(entityId, doc.value);
     } else if (doc.family === 'account') {
       const entityAccounts = accounts.get(entityId) ?? new Map<string, StorageAccountDoc>();
-      entityAccounts.set(normalizeEntityId(doc.counterpartyId), doc.value);
+      entityAccounts.set(toEntityId(doc.counterpartyId), doc.value);
       accounts.set(entityId, entityAccounts);
     } else {
       const entityBooks = books.get(entityId) ?? new Map<string, BookState>();
@@ -817,7 +785,7 @@ const loadEntityCoreDocAtHeight = async (
   latestMaterializedHeight: number,
   liveStateReadable = true,
 ): Promise<StorageEntityCoreDoc | null> => {
-  const normalized = normalizeEntityId(entityId);
+  const normalized = toEntityId(entityId);
   const source = await requireDirectGraphSource(
     db,
     targetHeight,
@@ -853,7 +821,7 @@ const loadAccountDocPageAtHeight = async (
   query?: StoragePageQuery,
   liveStateReadable = true,
 ): Promise<StorageAccountDocPage | null> => {
-  const normalized = normalizeEntityId(entityId);
+  const normalized = toEntityId(entityId);
   const limit = readPageLimit(query);
   const direction = query?.sortDir === 'desc' ? 'desc' : 'asc';
   const cursor = readAccountCursor(query);
@@ -900,8 +868,8 @@ const loadAccountDocAtHeight = async (
   latestMaterializedHeight: number,
   liveStateReadable = true,
 ): Promise<StorageAccountDoc | null> => {
-  const normalized = normalizeEntityId(entityId);
-  const counterparty = normalizeEntityId(counterpartyId);
+  const normalized = toEntityId(entityId);
+  const counterparty = toEntityId(counterpartyId);
 
   const source = await requireDirectGraphSource(
     db,
@@ -1047,7 +1015,7 @@ const loadBookDocPageAtHeight = async (
   query?: StoragePageQuery,
   liveStateReadable = true,
 ): Promise<StorageBookDocPage> => {
-  const normalized = normalizeEntityId(entityId);
+  const normalized = toEntityId(entityId);
   const limit = readPageLimit(query);
   const cursor = readBookCursor(query);
   const direction = query?.sortDir === 'desc' ? 'desc' : 'asc';
@@ -1103,8 +1071,8 @@ export const loadEntityViewPageFromStorage = async (options: {
   const db = options.getRuntimeDb(options.env);
   const head = await readStorageHead(db);
   if (!head) return null;
-  const targetHeight = resolveTargetStorageHeight(head, options.height, `entity-view:${normalizeEntityId(options.entityId)}`);
-  const entityId = normalizeEntityId(options.entityId);
+  const targetHeight = resolveTargetStorageHeight(head, options.height, `entity-view:${toEntityId(options.entityId)}`);
+  const entityId = toEntityId(options.entityId);
   const latestMaterializedHeight = Math.max(
     0,
     Math.floor(Number(head.latestMaterializedHeight ?? head.latestSnapshotHeight ?? 0)),
@@ -1152,7 +1120,7 @@ export const loadEntityAccountDocFromStorage = async (options: {
   const targetHeight = resolveTargetStorageHeight(
     head,
     options.height,
-    `account:${normalizeEntityId(options.entityId)}:${normalizeEntityId(options.counterpartyId)}`,
+    `account:${toEntityId(options.entityId)}:${toEntityId(options.counterpartyId)}`,
   );
   const latestMaterializedHeight = Math.max(
     0,
@@ -1183,8 +1151,8 @@ export const loadEntityStateFromStorage = async (options: {
   const db = options.getRuntimeDb(options.env);
   const head = await readStorageHead(db);
   if (!head) return null;
-  const targetHeight = resolveTargetStorageHeight(head, options.height, `entity-state:${normalizeEntityId(options.entityId)}`);
-  const entityId = normalizeEntityId(options.entityId);
+  const targetHeight = resolveTargetStorageHeight(head, options.height, `entity-state:${toEntityId(options.entityId)}`);
+  const entityId = toEntityId(options.entityId);
   const latestMaterializedHeight = Math.max(
     0,
     Math.floor(Number(head.latestMaterializedHeight ?? head.latestSnapshotHeight ?? 0)),
@@ -1243,9 +1211,9 @@ export const loadEntityStateFromStorage = async (options: {
   const accounts = new Map<string, StorageAccountDoc>();
   const books = new Map<string, BookState>();
   for (const doc of docs.values()) {
-    if (doc.family === 'account' && normalizeEntityId(doc.entityId) === entityId) {
+    if (doc.family === 'account' && toEntityId(doc.entityId) === entityId) {
       accounts.set(doc.counterpartyId, doc.value);
-    } else if (doc.family === 'book' && normalizeEntityId(doc.entityId) === entityId) {
+    } else if (doc.family === 'book' && toEntityId(doc.entityId) === entityId) {
       books.set(doc.pairId, doc.value);
     }
   }

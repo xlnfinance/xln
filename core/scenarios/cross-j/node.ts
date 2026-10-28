@@ -1,4 +1,4 @@
-import { asTokenId, type TokenId } from '../../account/tx/units';
+import { asTokenId, type TokenId } from '../../protocol/units';
 /**
  * Cross-j P2P node — one Runtime per process.
  *

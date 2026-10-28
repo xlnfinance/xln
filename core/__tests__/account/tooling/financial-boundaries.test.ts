@@ -20,7 +20,7 @@ test('only absent rebalance policy inherits defaults', () => {
 
 test('swap intent rejects a short requested expiry instead of extending it', () => {
   const party = (side: string, chain: number) => ({
-    entityId: side, signerId: side, hubEntityId: `${side}-hub`, hubSignerId: `${side}-signer`,
+    entityId: `0x${(chain === 1 ? '11' : '22').repeat(32)}`, signerId: side, hubEntityId: `0x${(chain === 1 ? '33' : '44').repeat(32)}`, hubSignerId: `${side}-signer`,
     jurisdiction: `stack:${chain}:0x${'11'.repeat(20)}`,
     disputeConfig: { leftResponseSeconds: 3_600, rightResponseSeconds: 86_400 },
   });

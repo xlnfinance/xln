@@ -1,4 +1,5 @@
-import { normalizeEntityId } from '../../../entity/id';
+import { toEntityId } from '../../../protocol/identity';
+
 import type { BrowserVMProvider } from './browservm-provider';
 import type { JAdapter, JEvent } from '../types';
 import { receiptFromEvents } from './browservm-submit';
@@ -50,22 +51,22 @@ export const createBrowserVmIoMethods = (
     return await browserVM.getAccountInfo(entityId, counterpartyId);
   },
   async getEntityNonce(entityId) {
-    return await browserVM.getEntityNonce(normalizeEntityId(entityId));
+    return await browserVM.getEntityNonce(toEntityId(entityId));
   },
   async hasProcessedBatch(entityId, batchHash, entityNonce) {
-    return browserVM.hasProcessedBatch(normalizeEntityId(entityId), batchHash, entityNonce);
+    return browserVM.hasProcessedBatch(toEntityId(entityId), batchHash, entityNonce);
   },
   async getEntityProviderActionNonce(entityId) {
-    return await browserVM.getEntityProviderActionNonce(normalizeEntityId(entityId));
+    return await browserVM.getEntityProviderActionNonce(toEntityId(entityId));
   },
   async getEntityProviderActionReceipt(entityId, actionNonce) {
     return browserVM.getEntityProviderActionReceipt(
-      normalizeEntityId(entityId),
+      toEntityId(entityId),
       actionNonce,
     );
   },
   async isEntityRegistered(entityId) {
-    return (await browserVM.getEntityInfo(normalizeEntityId(entityId))).exists;
+    return (await browserVM.getEntityInfo(toEntityId(entityId))).exists;
   },
   async getTokenRegistry() {
     return browserVM.getTokenRegistry();

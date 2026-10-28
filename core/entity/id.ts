@@ -2,12 +2,14 @@
  * Entity ID normalization, comparison, and provider-scoped ids.
  * Ensures deterministic ordering and cross-provider compatibility.
  */
+import { toEntityId, type EntityId } from '../protocol/identity';
+
 
 import { ethers } from 'ethers';
 import { cachedChecksumAddress } from '../protocol/crypto/address-cache';
-import { normalizeEntityId } from '../protocol/identity/entity-id';
 
-export { compareEntityIds, isLeftEntity, normalizeEntityId } from '../protocol/identity/entity-id';
+
+export { compareEntityIds, isLeftEntity } from '../protocol/identity/entity-id';
 
 /**
  * Create a provider-scoped entity ID.
@@ -18,14 +20,14 @@ export { compareEntityIds, isLeftEntity, normalizeEntityId } from '../protocol/i
  * @param entityId - The entity's ID within that provider (32 bytes)
  * @returns Globally unique 32-byte hash
  */
-export function createProviderScopedEntityId(provider: string, entityId: string): string {
-  // Normalize inputs
+export function createProviderScopedEntityId(provider: string, entityId: string): EntityId {
+  // Provider address and Entity id are validated at this construction boundary.
   const providerAddr = cachedChecksumAddress(provider);
-  const normalizedEntity = normalizeEntityId(entityId);
+  const normalizedEntity = toEntityId(entityId);
 
   // ABI encode packed: address (20 bytes) + bytes32 (32 bytes)
   const packed = ethers.solidityPacked(['address', 'bytes32'], [providerAddr, normalizedEntity]);
 
   // Hash to get final 32-byte ID
-  return ethers.keccak256(packed);
+  return toEntityId(ethers.keccak256(packed));
 }

@@ -1,4 +1,4 @@
-import { asTokenId } from '../../account/tx/units';
+import { asTokenId } from '../../protocol/units';
 import { getDefaultRebalancePolicyForToken, hasRebalanceTokenMetadata } from '../../account/config/defaults';
 import { hasPendingSettlementTransition } from '../../account/tx/handlers/settlement/transition';
 import { deriveDelta } from '../../account/utils';

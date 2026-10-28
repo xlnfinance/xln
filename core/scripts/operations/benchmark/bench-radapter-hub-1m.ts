@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { toEntityId } from '../../../protocol/identity';
 
 import { createHash } from 'crypto';
 import { mkdirSync, readdirSync, rmSync, statSync } from 'fs';
@@ -27,11 +28,7 @@ import {
 import { encodeBuffer, writeBatch } from '../../../storage/codec/codec';
 import { prepareStorageBookGraphWrite } from '../../../storage/commit/book-graph';
 import { prepareLiveStateGraph } from '../../../storage/commit/live-state-graph';
-import {
-  KEY_HEAD,
-  STORAGE_SCHEMA_VERSION,
-  normalizeEntityId,
-} from '../../../storage/keys';
+import { KEY_HEAD, STORAGE_SCHEMA_VERSION } from '../../../storage/keys';
 import { inspectStorage } from '../../../storage/read/inspect';
 import { createSnapshot, seedFreshStorageEpoch } from '../../../storage/database/lifecycle';
 import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../../../storage/read/projections';
@@ -449,7 +446,7 @@ const seedHubBulk = async (
     const end = Math.min(cli.accounts, offset + cli.chunk);
     const docs: StorageDoc[] = [];
     for (let index = offset; index < end; index += 1) {
-      const counterpartyId = normalizeEntityId(randomEntityId(cli.seed, index));
+      const counterpartyId = toEntityId(randomEntityId(cli.seed, index));
       const accountHeight = 2;
       const timestamp = 1_000 + accountHeight;
       const account = await makeAccount(entityId, counterpartyId, accountHeight, timestamp);
@@ -485,7 +482,7 @@ const seedHub = async (
     const docs: StorageDoc[] = [];
     const end = Math.min(cli.accounts, offset + cli.chunk);
     for (let index = offset; index < end; index += 1) {
-      const counterpartyId = normalizeEntityId(randomEntityId(cli.seed, index));
+      const counterpartyId = toEntityId(randomEntityId(cli.seed, index));
       const accountHeight = height + 1;
       const timestamp = 1_000 + accountHeight;
       const account = await makeAccount(entityId, counterpartyId, accountHeight, timestamp);
@@ -532,7 +529,7 @@ const touchAccounts = async (
   state.height = env.state.height;
   state.timestamp = env.state.timestamp;
   for (let index = startIndex; index < limit; index += 1) {
-    const counterpartyId = normalizeEntityId(randomEntityId(cli.seed, index));
+    const counterpartyId = toEntityId(randomEntityId(cli.seed, index));
     const account = await makeAccount(entityId, counterpartyId, env.state.height, env.state.timestamp);
     if (state.accounts.has(counterpartyId)) putResidentAccount(state, counterpartyId, account);
     docs.push({ family: 'account', entityId, counterpartyId, value: account });
@@ -563,7 +560,7 @@ const insertNewAccountsAfterRead = async (
   state.height = env.state.height;
   state.timestamp = env.state.timestamp;
   for (let index = startIndex; index < startIndex + count; index += 1) {
-    const counterpartyId = normalizeEntityId(randomEntityId(`${cli.seed}:new-after-read`, index));
+    const counterpartyId = toEntityId(randomEntityId(`${cli.seed}:new-after-read`, index));
     const account = await makeAccount(entityId, counterpartyId, env.state.height, env.state.timestamp);
     if (cli.memory !== 'none') putResidentAccount(state, counterpartyId, account);
     docs.push({ family: 'account', entityId, counterpartyId, value: account });
@@ -730,7 +727,7 @@ const runSnapshotRotationProbe = async (
 async function main() {
   const cli = readCli();
   const trace = new Trace();
-  const entityId = normalizeEntityId(hubEntityId(cli.seed));
+  const entityId = toEntityId(hubEntityId(cli.seed));
   const dbPath = join(cli.dbRoot, entityId.slice(2, 18));
 
   console.log(`[bench] config ${JSON.stringify({ ...cli, entityId, dbPath })}`);
@@ -916,7 +913,7 @@ async function main() {
     });
 
     const coldAccountIndex = Math.max(0, cli.accounts - 1);
-    const coldAccountId = normalizeEntityId(randomEntityId(cli.seed, coldAccountIndex));
+    const coldAccountId = toEntityId(randomEntityId(cli.seed, coldAccountIndex));
     if (cli.memory === 'hot' && coldAccountIndex >= cli.hotAccounts && state.accounts.has(coldAccountId)) {
       throw new Error(`COLD_ACCOUNT_UNEXPECTEDLY_IN_MEMORY: ${coldAccountId}`);
     }

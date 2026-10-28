@@ -1,6 +1,7 @@
+import { toEntityId } from '../../../../protocol/identity';
 import type { Signer } from 'ethers';
 import { ethers } from 'ethers';
-import { normalizeEntityId } from '../../../../entity/id';
+
 import { prepareSignedBatch } from '../../../../hanko/batch';
 import { decodeJBatch, type JBatch } from '../../../machine/batch';
 import { parseReceiptLogsToJEvents } from '../../j-event-log-decoder';
@@ -77,7 +78,7 @@ export const processRpcSignedBatch = async (
   const activeSigner = txSigner ?? context.signer;
   return context.sequencer.runFor(activeSigner, async () => {
     try {
-      const currentNonce = await context.stack.depository.entityNonces(normalizeEntityId(entityId));
+      const currentNonce = await context.stack.depository.entityNonces(toEntityId(entityId));
       const prepared = prepareSignedBatch(
         batch,
         entityId,

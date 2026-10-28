@@ -11,22 +11,13 @@
  */
 
 import type { AccountReplica, SettlementOp, SettlementDiff } from '../../types/account';
-import { TOKENS } from '../../config/constants';
+import { asTokenId, type TokenId } from '../units';
 import { UINT256_MAX } from '../boundary/integer-ranges';
 const MAX_SETTLEMENT_DIFFS = 32;
 const MAX_SETTLEMENT_FORGIVENESS_IDS = 32;
 
-export const assertSettlementTokenId = (value: unknown, context: string): number => {
-  if (
-    typeof value !== 'number'
-    || !Number.isSafeInteger(value)
-    || value < 0
-    || value > TOKENS.MAX_TOKEN_ID
-  ) {
-    throw new Error(`SETTLEMENT_TOKEN_INVALID:${context}:${String(value)}`);
-  }
-  return value;
-};
+export const assertSettlementTokenId = (value: unknown, context: string): TokenId =>
+  asTokenId(value, `SETTLEMENT_TOKEN_INVALID:${context}`);
 
 /**
  * Cooperative settlement and both sides' dispute proofs share the Account

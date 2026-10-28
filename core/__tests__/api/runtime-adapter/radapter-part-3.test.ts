@@ -1,3 +1,4 @@
+import { toEntityId } from '../../../protocol/identity';
 import { XLN_PROTOCOL_VERSION } from '../../../protocol/version';
 import { readFileSync } from 'node:fs';
 
@@ -50,19 +51,7 @@ import {
 
 import { decodeBuffer, encodeBuffer } from '../../../storage/codec/codec';
 
-import {
-  KEY_HEAD,
-  STORAGE_SCHEMA_VERSION,
-  hexBytes,
-  keyLiveAccount,
-  keyLiveEntity,
-  keySnapshotAccountPrefix,
-  keySnapshotBookPrefix,
-  keySnapshotEntity,
-  keySnapshotManifest,
-  normalizeEntityId,
-  textBytes,
-} from '../../../storage/keys';
+import { KEY_HEAD, STORAGE_SCHEMA_VERSION, hexBytes, keyLiveAccount, keyLiveEntity, keySnapshotAccountPrefix, keySnapshotBookPrefix, keySnapshotEntity, keySnapshotManifest, textBytes } from '../../../storage/keys';
 
 import { projectAccountDoc, projectEntityCoreDoc, projectEntityReplicaCoreView } from '../../../storage/read/projections';
 

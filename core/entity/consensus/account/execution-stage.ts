@@ -1,3 +1,4 @@
+import { toEntityId, toSignerId, type EntityId, type SignerId } from '../../../protocol/identity';
 import type {
   AccountAuthorityInputRequest,
   AccountAuthorityProposalRequest,
@@ -121,8 +122,8 @@ export type AccountAuthorityEntityBatchOutbound = AccountAuthorityEntityParent &
 }>;
 
 interface AccountAuthorityEntityStage extends AccountAuthorityEntityStageCapability {
-  readonly ownerEntityId: string;
-  readonly ownerSignerId: string;
+  readonly ownerEntityId: EntityId;
+  readonly ownerSignerId: SignerId;
   typeScriptExecutionCounts(): TypeScriptAccountExecutionCounts;
   discard(): Promise<void>;
 }
@@ -202,7 +203,6 @@ export const printAccountAuthorityExecutionLedger = (): void => {
   console.error(`RSCORE_ACCOUNT_EXECUTION ${safeStringify(executionLedger)}`);
 };
 
-const normalizeEntityId = (value: string): string => value.trim().toLowerCase();
 
 const assertOccurrence = (occurrence: AccountAuthorityEntityOccurrence): void => {
   const value = occurrence.kind === 'runtime-input'
@@ -225,8 +225,8 @@ const assertNoTypeScriptAccountExecution = (
 };
 
 class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
-  readonly ownerEntityId: string;
-  readonly ownerSignerId: string;
+  readonly ownerEntityId: EntityId;
+  readonly ownerSignerId: SignerId;
   private readonly options: AccountAuthorityEntityStageOptions;
   private readonly occurrence: AccountAuthorityEntityOccurrence;
   private unsupportedEntityTxTypes: EntityTx['type'][] | null = null;
@@ -264,8 +264,8 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
   constructor(options: AccountAuthorityEntityStageOptions) {
     assertOccurrence(options.occurrence);
     this.options = options;
-    this.ownerEntityId = normalizeEntityId(options.ownerEntityId);
-    this.ownerSignerId = normalizeEntityId(options.ownerSignerId);
+    this.ownerEntityId = toEntityId(options.ownerEntityId);
+    this.ownerSignerId = toSignerId(options.ownerSignerId.trim().toLowerCase());
     this.occurrence = options.occurrence.kind === 'runtime-input'
       ? { kind: 'runtime-input', inputIndex: options.occurrence.inputIndex }
       : { kind: 'local-event', ordinal: options.occurrence.ordinal };
@@ -309,7 +309,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
   }
 
   async beginEntityAccountFrame(request: AccountAuthorityFrameBeginRequest): Promise<void> {
-    if (normalizeEntityId(request.ownerEntityId) !== this.ownerEntityId) {
+    if (toEntityId(request.ownerEntityId) !== this.ownerEntityId) {
       throw new Error(`ACCOUNT_AUTHORITY_FRAME_OWNER_MISMATCH:${this.ownerEntityId}:${request.ownerEntityId}`);
     }
     await this.discardOpenFrameAttempt();
@@ -324,7 +324,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     const prepareStartedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
     const newAccounts = new Map<string, AccountAuthorityInputRequest['account']>();
     this.inboundRequests = inboundArrivals(request.entityTxs).flatMap(arrival => {
-      const accountId = normalizeEntityId(arrival.accountId);
+      const accountId = toEntityId(arrival.accountId);
       const existing = request.accountForWrite(accountId) ?? newAccounts.get(accountId);
       if (existing !== undefined) {
         // Entity owns the frozen-input drop before Account consensus. Do not
@@ -339,7 +339,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
         }];
       }
       const created = request.createInboundAccount(arrival.input);
-      const actualAccountId = normalizeEntityId(created.account.proofHeader.toEntity);
+      const actualAccountId = toEntityId(created.account.proofHeader.toEntity);
       if (actualAccountId !== accountId) {
         throw new Error(`ACCOUNT_AUTHORITY_INBOUND_CREATE_ACCOUNT_MISMATCH:${accountId}:${actualAccountId}`);
       }
@@ -411,7 +411,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     if (this.frameOutboundPrepared) {
       throw new Error(`ACCOUNT_AUTHORITY_ENVELOPE_UPDATE_AFTER_OUTBOUND:${this.ownerEntityId}`);
     }
-    this.envelopeUpdates.push({ accountId: normalizeEntityId(accountId), update });
+    this.envelopeUpdates.push({ accountId: toEntityId(accountId), update });
   }
 
   async prepareEntityAccountOutbound(request: AccountAuthorityFrameOutboundRequest): Promise<void> {
@@ -423,7 +423,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     if (!this.frameBooksExecuted) throw new Error(`ACCOUNT_AUTHORITY_BOOKS_NOT_EXECUTED:${this.ownerEntityId}`);
     this.frameOutboundPrepared = true;
     const prepareStartedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
-    const proposalIds = [...new Set(request.proposalAccountIds.map(normalizeEntityId))]
+    const proposalIds = [...new Set(request.proposalAccountIds.map(toEntityId))]
       .filter(accountId => request.accounts.has(accountId));
     const proposals = proposalIds.map(accountId => {
       // Selection only reads the replica. Claiming it for write would fork an
@@ -440,7 +440,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     });
     const run = this.options.provider.executeAccountOutboundBatch;
     const materializeAccountIds = [...new Set(this.inboundRequests.map(request =>
-      normalizeEntityId(request.account.proofHeader.toEntity)))];
+      toEntityId(request.account.proofHeader.toEntity)))];
     countFrameApplyPhase('outbound.prepare', prepareStartedAt);
     const providerStartedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
     const prepared = await run.call(this.options.provider, {
@@ -455,7 +455,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     });
     countFrameApplyPhase('outbound.provider', providerStartedAt);
     const materializeStartedAt = OP_COUNTERS_ENABLED ? getPerfMs() : 0;
-    this.preparedProposalIds = prepared.proposals.map(row => normalizeEntityId(row.accountId));
+    this.preparedProposalIds = prepared.proposals.map(row => toEntityId(row.accountId));
     this.proposalResults = prepared.proposals.map(row => row.result);
     this.proposalSelections = prepared.proposals.map(row => row.selectedMempoolTxs);
     this.generatedAdmissions = [...prepared.generatedAdmissions];
@@ -464,9 +464,9 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     }
     const originalProposalIds = new Set(proposalIds);
     const retainedOriginalOrder = this.preparedProposalIds.filter(accountId =>
-      originalProposalIds.has(accountId));
+      originalProposalIds.has(toEntityId(accountId)));
     const retainedSet = new Set(retainedOriginalOrder);
-    const expectedRetainedOrder = proposalIds.filter(accountId => retainedSet.has(accountId));
+    const expectedRetainedOrder = proposalIds.filter(accountId => retainedSet.has(toEntityId(accountId)));
     if (safeStringify(retainedOriginalOrder) !== safeStringify(expectedRetainedOrder)) {
       throw new Error(
         `ACCOUNT_AUTHORITY_PROPOSAL_ORDER_MISMATCH:${safeStringify(expectedRetainedOrder)}:${safeStringify(retainedOriginalOrder)}`,
@@ -480,17 +480,17 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
   }
 
   hasPreparedAccountProposal(accountId: string): boolean {
-    return this.preparedProposalIds.includes(normalizeEntityId(accountId));
+    return this.preparedProposalIds.includes(toEntityId(accountId));
   }
 
   preparedAccountProposalTxs(accountId: string): readonly AccountTx[] | undefined {
-    const index = this.preparedProposalIds.indexOf(normalizeEntityId(accountId));
+    const index = this.preparedProposalIds.indexOf(toEntityId(accountId));
     if (index < 0) throw new Error(`ACCOUNT_AUTHORITY_PROPOSAL_NOT_PREPARED:${accountId}`);
     return this.proposalSelections[index];
   }
 
   hasPreparedAccountInput(accountId: string, input: AccountInput): boolean {
-    const normalized = normalizeEntityId(accountId);
+    const normalized = toEntityId(accountId);
     // Serialize the needle at most once, and only if no arrival is the very
     // object the Entity is holding. The frame hands the engine the same
     // `entityTx.data` references it later dispatches, so the scan is normally
@@ -508,7 +508,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
   }
 
   preparedInboundGenesis(accountId: string, input: AccountInput): AccountAuthorityInputRequest['account'] | null {
-    const normalized = normalizeEntityId(accountId);
+    const normalized = toEntityId(accountId);
     let serializedInput: string | undefined;
     for (let index = this.inboundCursor; index < this.inboundRequests.length; index += 1) {
       const request = this.inboundRequests[index];
@@ -534,7 +534,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
   }
 
   async installCommittedAccountHankos(request: AccountAuthorityCommittedHankosRequest): Promise<void> {
-    if (normalizeEntityId(request.ownerEntityId) !== this.ownerEntityId) {
+    if (toEntityId(request.ownerEntityId) !== this.ownerEntityId) {
       throw new Error(
         `ACCOUNT_AUTHORITY_COMMITTED_HANKO_OWNER_MISMATCH:${this.ownerEntityId}:${request.ownerEntityId}`,
       );
@@ -565,7 +565,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
 
   hasQueuedSettlementTransition(accountId: string): boolean {
     return this.admissionRequests.some(request =>
-      normalizeEntityId(request.account.proofHeader.toEntity) === normalizeEntityId(accountId)
+      toEntityId(request.account.proofHeader.toEntity) === toEntityId(accountId)
       && request.input.kind === 'enqueue'
       && request.input.txs.some(tx => tx.type === 'settle_transition'));
   }
@@ -575,12 +575,12 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     if (request.input.kind === 'enqueue') {
       if (this.frameOutboundPrepared) {
         const prepared = this.generatedAdmissions[this.generatedAdmissionCursor];
-        const actualAccount = normalizeEntityId(request.account.proofHeader.toEntity);
+        const actualAccount = toEntityId(request.account.proofHeader.toEntity);
         const sameInput = prepared?.input === request.input
           || (prepared !== undefined && safeStringify(prepared.input) === safeStringify(request.input));
         if (
           prepared === undefined
-          || normalizeEntityId(prepared.accountId) !== actualAccount
+          || toEntityId(prepared.accountId) !== actualAccount
           || !sameInput
         ) {
           throw new Error(
@@ -599,7 +599,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
       throw new Error(`ACCOUNT_AUTHORITY_INBOUND_UNPREPARED:${request.account.proofHeader.toEntity}`);
     }
     const expectedAccount = expected.accountId;
-    const actualAccount = normalizeEntityId(request.account.proofHeader.toEntity);
+    const actualAccount = toEntityId(request.account.proofHeader.toEntity);
     // Identity is the common case and is exactly as strong as comparing the
     // canonical bytes: both sides hold the same `entityTx.data`. A frame that
     // rebuilt its inputs still gets the full byte comparison.
@@ -624,7 +624,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
     // though the scan can only affect the collision-only diagnostic below.
     if (!collision) return result;
     const alreadyQueued = this.admissionRequests
-      .filter(entry => normalizeEntityId(entry.account.proofHeader.toEntity) === accountId)
+      .filter(entry => toEntityId(entry.account.proofHeader.toEntity) === accountId)
       .reduce((count, entry) => count + (entry.input.kind === 'enqueue' ? entry.input.txs.length : 0), 0);
     if (alreadyQueued === 0) return result;
     const warningPrefix = '⚠️ LEFT has ';
@@ -673,7 +673,7 @@ class AccountAuthorityEntityStageImpl implements AccountAuthorityEntityStage {
       throw new Error('ACCOUNT_AUTHORITY_PROPOSAL_SELECTION_MISMATCH');
     }
     const expectedId = this.preparedProposalIds[this.proposalCursor];
-    const actualId = normalizeEntityId(request.account.proofHeader.toEntity);
+    const actualId = toEntityId(request.account.proofHeader.toEntity);
     const result = this.proposalResults[this.proposalCursor];
     if (expectedId === undefined || result === undefined || expectedId !== actualId) {
       throw new Error(`ACCOUNT_AUTHORITY_PROPOSAL_ORDER_MISMATCH:${safeStringify({

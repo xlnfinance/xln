@@ -1,4 +1,4 @@
-import { asTokenId } from '../../../core/account/tx/units';
+import { asTokenId } from '../../../core/protocol/units';
 import { expect, test } from 'bun:test';
 import { withdrawableCollateral } from '../../../frontend/src/lib/components/Entity/move-routes';
 import { getHubOpeningCredit, getOpenAccountRebalancePolicyData } from '../../../frontend/src/lib/utils/onboarding/onboardingPreferences';

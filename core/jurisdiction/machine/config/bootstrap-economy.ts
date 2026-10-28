@@ -1,4 +1,4 @@
-import { asTokenId } from '../../../account/tx/units';
+import { asTokenId } from '../../../protocol/units';
 import { CATALOG_TOKENS } from './default-tokens';
 import { wholeUsdToTokenAmount } from './usd-reference-rate';
 

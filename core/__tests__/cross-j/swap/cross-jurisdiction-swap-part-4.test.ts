@@ -1,3 +1,4 @@
+import { ethers } from 'ethers';
 import { describe, expect, test } from 'bun:test';
 
 import {
@@ -156,8 +157,8 @@ describe('cross-jurisdiction canonical market surface', () => {
     targetAmount,
     expectedSide,
   }) => {
-    const sourceHub = entity(`stable-source-${sourceTokenId}`);
-    const targetHub = entity(`stable-target-${targetTokenId}`);
+    const sourceHub = ethers.id(`stable-source-${sourceTokenId}`);
+    const targetHub = ethers.id(`stable-target-${targetTokenId}`);
     const sourceRef = `stack:728126428:0x${'31'.repeat(20)}`;
     const targetRef = `stack:11155111:0x${'21'.repeat(20)}`;
     const canonicalMarket = deriveCanonicalCrossJurisdictionMarketForLegs(
@@ -169,12 +170,12 @@ describe('cross-jurisdiction canonical market surface', () => {
     const route = {
       ...buildPreparedCrossJurisdictionRoute({
         orderId: `cross-stable-quote-${sourceTokenId}-${targetTokenId}`,
-        makerEntityId: entity(`stable-maker-${sourceTokenId}`),
+        makerEntityId: ethers.id(`stable-maker-${sourceTokenId}`),
         hubEntityId: sourceHub,
         bookOwnerEntityId: targetHub,
         source: {
           jurisdiction: sourceRef,
-          entityId: entity(`stable-maker-${sourceTokenId}`),
+          entityId: ethers.id(`stable-maker-${sourceTokenId}`),
           counterpartyEntityId: sourceHub,
           tokenId: sourceTokenId,
           amount: sourceAmount,
@@ -182,7 +183,7 @@ describe('cross-jurisdiction canonical market surface', () => {
         target: {
           jurisdiction: targetRef,
           entityId: targetHub,
-          counterpartyEntityId: entity(`stable-taker-${targetTokenId}`),
+          counterpartyEntityId: ethers.id(`stable-taker-${targetTokenId}`),
           tokenId: targetTokenId,
           amount: targetAmount,
         },

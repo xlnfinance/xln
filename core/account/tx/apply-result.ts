@@ -15,12 +15,8 @@ import type {
   SwapOfferEvent,
 } from './apply-types';
 import { ACCOUNT_TX_REJECTION_CODES } from './apply-types';
-import {
-  toHashlock,
-  toHtlcSecret,
-  toTokenAmount,
-  asTokenId,
-} from './units';
+import { toHashlock, toHtlcSecret, toTokenAmount } from './units';
+import { asTokenId } from '../../protocol/units';
 
 const eventsOf = (events: readonly string[]): string[] => [...events];
 

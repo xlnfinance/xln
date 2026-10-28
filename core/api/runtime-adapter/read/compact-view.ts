@@ -1,8 +1,9 @@
+import { toEntityId, type EntityId } from '../../../protocol/identity';
 import { getBookSideLevels, projectBookDepth, type BookState } from '../../../swapbook';
 import { projectBookPricePageTree, type BookPricePage } from '../../../swapbook/pages/page';
 import type { ExternalWalletState } from '../../../entity/types';
 import type { JBatch, JBatchState, SentJBatch } from '../../../jurisdiction/machine/batch';
-import { normalizeEntityId } from '../../../storage/keys';
+
 import type { StorageAccountDoc, StorageEntityCoreDoc } from '../../../storage/types';
 import { compareAscii } from '../../../support/collections/sorted-map-index';
 import { copyAccountStateDomain } from '../../../protocol/state/account-input-clone';
@@ -456,9 +457,9 @@ const accountCounterpartyIdForView = (
   entityId: string,
   doc: StorageAccountDoc | RuntimeAdapterAccountDoc,
 ): string => {
-  const normalized = normalizeEntityId(entityId);
-  const left = normalizeEntityId(doc.state.leftEntity);
-  const right = normalizeEntityId(doc.state.rightEntity);
+  const normalized = toEntityId(entityId);
+  const left = toEntityId(doc.state.leftEntity);
+  const right = toEntityId(doc.state.rightEntity);
   return left === normalized ? right : left;
 };
 
@@ -510,9 +511,9 @@ export const accountPageSummaryForView = (
   };
 };
 
-const compactBookLevels = (book: BookState, side: 0 | 1, depth: number, owner: string): PortableBookLevel[] =>
+const compactBookLevels = (book: BookState, side: 0 | 1, depth: number, owner: EntityId | ''): PortableBookLevel[] =>
   getBookSideLevels(book, side, depth).map(({ priceTicks, qtyLots, orderIds, ownerIds }) => {
-    const owners = ownerIds.map(normalizeEntityId);
+    const owners = ownerIds.map(toEntityId);
     const ordered = owner !== '' && owners.includes(owner) ? [owner, ...owners.filter((id) => id !== owner)] : owners;
     return { priceTicks, qtyLots, orderCount: orderIds.length, ownerIds: ordered.slice(0, BOOK_VIEW_MAX_LEVEL_OWNERS) };
   });
@@ -526,7 +527,8 @@ const compactBookStateForView = (
   // the original Patricia header/branch/leaf graph directly. Level aggregates
   // follow the requested depth; the order sample stays at the default depth.
   const depth = options.depth ?? BOOK_VIEW_DEFAULT_DEPTH;
-  const owner = options.ownerEntityId ? normalizeEntityId(options.ownerEntityId) : '';
+  // Viewer selectors are unsigned user input; canonicalize at this read boundary.
+  const owner = options.ownerEntityId ? toEntityId(options.ownerEntityId.toLowerCase()) : '';
   const compact = projectBookDepth(book, BOOK_VIEW_DEFAULT_DEPTH, maxOrdersPerLevel);
   return {
     params: compact.params,

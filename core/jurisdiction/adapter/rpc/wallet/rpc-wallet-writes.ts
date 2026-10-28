@@ -1,6 +1,7 @@
+import { toEntityId } from '../../../../protocol/identity';
 import type { Provider, Signer } from 'ethers';
 import { ethers } from 'ethers';
-import { normalizeEntityId } from '../../../../entity/id';
+
 import { resolveApprovalReceiptLogIndex, type ApprovalReceiptLog } from '../../rpc-public';
 import type { JAdapter, JEvent } from '../../types';
 
@@ -28,7 +29,7 @@ type RpcWalletWriteDeps = {
 };
 
 const buildApprovalDelta = (receipt: RpcReceipt, allowance: bigint, context: ApprovalDeltaContext): JEvent[] => {
-  const entityId = normalizeEntityId(context.entityId || '');
+  const entityId = toEntityId(context.entityId || '');
   const tokenId = Number(context.tokenId);
   if (!entityId || !Number.isInteger(tokenId) || tokenId < 0) return [];
   const logIndex = resolveApprovalReceiptLogIndex({

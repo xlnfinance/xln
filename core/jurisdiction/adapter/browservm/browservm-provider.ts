@@ -1,3 +1,4 @@
+import { toEntityId } from '../../../protocol/identity';
 import { storageFailure } from '../../../protocol/errors/failure-taxonomy';
 import { resolveDisputeLogReferences, disputeReferenceFilter } from '../events/dispute/log-reference';
 /**
@@ -34,7 +35,7 @@ import { safeStringify } from '../../../protocol/serialization/index.js';
 import { decodeInt512, decodeUint512, decodeUint768 } from '../../../protocol/crypto/abi-money';
 import { toUnixMs, unixMsToUnixSFloor } from '../../../protocol/units';
 import { createStructuredLogger } from '../../../support/logger';
-import { isLeftEntity, normalizeEntityId } from '../../../entity/id';
+import { isLeftEntity } from '../../../entity/id';
 import { encodeSingleSignerBoard, hashBoard } from '../../../entity/factory';
 import { requireBoundaryUint } from '../../../protocol/boundary-validation';
 import type { EntityProviderActionIntent } from '../../../types/entity-provider-actions';
@@ -1614,7 +1615,7 @@ export class BrowserVMProvider {
       chainId: this.getChainId(),
       entityProviderAddress: this.entityProviderAddress.toString(),
       depositoryAddress: this.depositoryAddress?.toString() ?? '',
-      entityId: normalizeEntityId(expected.entityId),
+      entityId: toEntityId(expected.entityId),
       expectedKind: expected.kind,
     });
     const chainNonce = await this.getEntityProviderActionNonce(intent.entityId);
@@ -1908,7 +1909,7 @@ export class BrowserVMProvider {
     if (!this.depositoryAddress || !this.depositoryInterface) {
       throw new Error('Depository not deployed');
     }
-    const normalizedEntityId = normalizeEntityId(entityId);
+    const normalizedEntityId = toEntityId(entityId);
     const callData = this.depositoryInterface.encodeFunctionData('entityNonces', [normalizedEntityId]);
     const result = await this.runReadOnlyCall({
       to: this.depositoryAddress,
@@ -1930,7 +1931,7 @@ export class BrowserVMProvider {
     if (!this.entityProviderAddress || !this.entityProviderInterface) {
       throw new Error('EntityProvider not deployed');
     }
-    const normalizedEntityId = normalizeEntityId(entityId);
+    const normalizedEntityId = toEntityId(entityId);
     const callData = this.entityProviderInterface.encodeFunctionData('entityActionNonces', [normalizedEntityId]);
     const result = await this.runReadOnlyCall({
       to: this.entityProviderAddress,
@@ -1958,7 +1959,7 @@ export class BrowserVMProvider {
       address: this.depositoryAddress.toString(),
       topics: [
         event.topicHash,
-        ethers.zeroPadValue(normalizeEntityId(entityId), 32),
+        ethers.zeroPadValue(toEntityId(entityId), 32),
         ethers.zeroPadValue(batchHash, 32),
       ],
     }).filter((log) => {
@@ -1989,7 +1990,7 @@ export class BrowserVMProvider {
           address: this.entityProviderAddress!.toString(),
           topics: [
             event.topicHash,
-            ethers.zeroPadValue(normalizeEntityId(entityId), 32),
+            ethers.zeroPadValue(toEntityId(entityId), 32),
             ethers.zeroPadValue(ethers.toBeHex(actionNonce), 32),
           ],
         });

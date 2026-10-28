@@ -1,5 +1,6 @@
+import { toEntityId } from '../../../protocol/identity';
 import type { EntityReplica } from '../../../entity/types';
-import { normalizeEntityId } from '../../../storage/keys';
+
 import type { StorageHead } from '../../../storage/types';
 import { compareAscii } from '../../../support/collections/sorted-map-index';
 import { RuntimeAdapterError } from '../errors';
@@ -88,10 +89,10 @@ const chooseDefaultActiveEntityId = (
 ): string | null => {
   if (entities.length === 0) return null;
 
-  const available = new Set(entities.map((entity) => normalizeEntityId(entity.entityId)).filter(Boolean));
+  const available = new Set(entities.map((entity) => toEntityId(entity.entityId)).filter(Boolean));
   let best: { entityId: string; score: number } | null = null;
   for (const replica of ctx.env.state.eReplicas?.values?.() ?? []) {
-    const entityId = normalizeEntityId(replica.entityId);
+    const entityId = toEntityId(replica.entityId);
     if (!entityId || !available.has(entityId)) continue;
     const score = scoreDefaultLiveEntity(replica);
     if (
@@ -125,7 +126,7 @@ export const projectViewFrame = async (
   const head = persistedHead ?? await readBestHead(ctx);
   const height = requestedHeight ?? currentEnvHeight;
   const heightQuery = requestedHeight !== null && height > 0 ? { ...query, atHeight: height } : query;
-  const requestedEntityId = normalizeEntityId(String(query?.entityId || ''));
+  const requestedEntityId = (query?.entityId ? toEntityId(query.entityId) : '');
   const entities = await listEntitySummaries(ctx, heightQuery, {
     allowPartial: !isCurrentHeight || Boolean(requestedEntityId),
   });
@@ -162,7 +163,7 @@ export const projectViewFrame = async (
   const stored = await loadViewPageForHeight(ctx, activeEntityId, height, isCurrentHeight, storedQuery);
   const compactStored = compactViewPageForRemote(activeEntityId, stored);
   const storedJurisdiction = jurisdictionSummary(compactStored.core.config?.jurisdiction);
-  const summary = entities.find((entity) => normalizeEntityId(entity.entityId) === activeEntityId) ?? {
+  const summary = entities.find((entity) => toEntityId(entity.entityId) === activeEntityId) ?? {
     entityId: activeEntityId,
     label: String(compactStored.core.profile?.name || '').trim() || activeEntityId,
     height: Math.max(0, Math.floor(Number(compactStored.core.height ?? height))),

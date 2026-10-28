@@ -1,7 +1,8 @@
+import { toEntityId } from '../protocol/identity';
 import { ethers } from 'ethers';
 
 import { computeBatchHankoHash, encodeJBatch, type JBatch } from '../jurisdiction/machine/batch';
-import { normalizeEntityId } from '../entity/id';
+
 import { encodeSignedHanko } from './codec';
 import { resolveHankoBoardDelays } from './claims';
 import { compactHankoForChain } from './short';
@@ -15,7 +16,7 @@ export function buildSingleSignerHanko(
   hash: string,
   privateKey: string | Uint8Array,
 ): string {
-  const paddedEntityId = ethers.zeroPadValue(normalizeEntityId(entityId), 32).toLowerCase() as `0x${string}`;
+  const paddedEntityId = toEntityId(entityId);
   const envelope = encodeSignedHanko({
     digest: hash,
     privateKeys: [typeof privateKey === 'string' ? ethers.getBytes(privateKey) : privateKey],

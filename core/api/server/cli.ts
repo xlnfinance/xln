@@ -6,11 +6,13 @@
  *   bun core/api/server/cli.ts                    # local anvil
  *   bun core/api/server/cli.ts remote             # xln.finance/rpc
  */
+import { toEntityId } from '../../protocol/identity';
+
 
 import * as readline from 'readline';
 import { createXlnJsonRpcProvider } from '../../jurisdiction/adapter';
 import { ethers } from 'ethers';
-import { createProviderScopedEntityId, normalizeEntityId } from '../../entity/id';
+import { createProviderScopedEntityId } from '../../entity/id';
 import { createEmptyBatch, batchAddReserveToReserve, encodeJBatch } from '../../jurisdiction/machine/batch';
 import { loadCliJurisdiction, type CliJurisdiction } from '../../jurisdiction/adapter/kernel/cli-jurisdiction';
 import { getTokenInfo } from '../../account/utils';
@@ -66,11 +68,11 @@ async function init(remote: boolean) {
     provider,
     addresses: activeJurisdiction.contracts,
     async getReserves(entityId: string, tokenId: number) {
-      const entityAddress = createProviderScopedEntityId(activeJurisdiction.contracts.entityProvider, normalizeEntityId(entityId));
+      const entityAddress = createProviderScopedEntityId(activeJurisdiction.contracts.entityProvider, toEntityId(entityId));
       return depository._reserves(entityAddress, tokenId);
     },
     async getEntityNonce(entityId: string) {
-      const entityAddress = createProviderScopedEntityId(activeJurisdiction.contracts.entityProvider, normalizeEntityId(entityId));
+      const entityAddress = createProviderScopedEntityId(activeJurisdiction.contracts.entityProvider, toEntityId(entityId));
       return depository.entityNonces(entityAddress);
     },
     async reserveToReserve(from: string, to: string, tokenId: number, amount: bigint, options?: { entityProvider?: string; hankoData?: string; nonce?: bigint }) {
@@ -78,8 +80,8 @@ async function init(remote: boolean) {
         throw new Error('reserveToReserve requires hankoData and nonce');
       }
       const providerAddr = options.entityProvider || activeJurisdiction.contracts.entityProvider;
-      const fromAddr = createProviderScopedEntityId(providerAddr, normalizeEntityId(from));
-      const toAddr = createProviderScopedEntityId(providerAddr, normalizeEntityId(to));
+      const fromAddr = createProviderScopedEntityId(providerAddr, toEntityId(from));
+      const toAddr = createProviderScopedEntityId(providerAddr, toEntityId(to));
       console.log(`Submitting reserveToReserve from ${fromAddr} to ${toAddr}`);
       const batch = createEmptyBatch();
       batchAddReserveToReserve(

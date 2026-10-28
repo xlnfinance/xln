@@ -496,9 +496,9 @@ fn prepared_route(
                 "deadline".into(),
                 number(
                     if leg_name == "source" {
-                        deadlines.0
+                        deadlines.0.get()
                     } else {
-                        deadlines.1
+                        deadlines.1.get()
                     },
                     kind,
                     "DEADLINE",
@@ -6333,16 +6333,34 @@ mod tests {
 
     #[test]
     fn route_hash_matches_typescript_abi_vector_and_materializes_defaults() {
+        // The shared TS vector uses canonical bytes32 parties, preserving the
+        // original source-hub < source-user < target-hub < target-user ordering.
+        fn canonical_parties(value: &mut CanonicalValue) {
+            match value {
+                CanonicalValue::String(text) => {
+                    let byte = match text.as_str() {
+                        "source-hub" => "11", "source-user" => "22",
+                        "target-hub" => "33", "target-user" => "44", _ => return,
+                    };
+                    *text = format!("0x{}", byte.repeat(32));
+                }
+                CanonicalValue::Object(fields) => fields.iter_mut().for_each(|(_, v)| canonical_parties(v)),
+                CanonicalValue::Array(values) => values.iter_mut().for_each(canonical_parties),
+                _ => {}
+            }
+        }
+        let mut raw = route("intent", false);
+        canonical_parties(&mut raw);
         let canonical = canonical_route(
-            &route("intent", false),
+            &raw,
             EntityTxKind::PrepareCrossJurisdictionSwap,
         )
         .expect("canonical route");
         assert_eq!(
             text(&canonical, "routeHash"),
-            Some("0x25d85d1a0fe2a866e331e7d0d3511478f5c9aa15f38d54b344492f6a77681aa7")
+            Some("0x64af903419431eedc0dcba34221c1f60cdb004beba15f258c50f4c9a96eb7538")
         );
-        assert_eq!(text(&canonical, "bookOwnerEntityId"), Some("source-hub"));
+        assert_eq!(text(&canonical, "bookOwnerEntityId"), Some("0x1111111111111111111111111111111111111111111111111111111111111111"));
         assert_eq!(
             text(&canonical, "venueId"),
             Some(

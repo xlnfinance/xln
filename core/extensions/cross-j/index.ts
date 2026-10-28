@@ -1,4 +1,5 @@
-import { assertCrossJDeadlines, crossJDeadlines } from './deadlines';
+import { toEntityId } from '../../protocol/identity';
+import { assertCrossJDeadlines, parseCrossJDeadlines } from './deadlines';
 import { rejectFailure, haltRuntimeFailure } from '../../protocol/errors/failure-taxonomy';
 
 import { ethers } from 'ethers';
@@ -478,7 +479,6 @@ export function applyCrossJurisdictionFillProgress(
 }
 
 const normalizeJurisdiction = (value: string): string => String(value || '').trim().toLowerCase();
-const normalizeEntityId = (value: string): string => String(value || '').toLowerCase();
 const ROUTE_HASH_ABI_TYPES = [
   'string',
   'string',
@@ -877,23 +877,23 @@ export function deriveCrossJurisdictionRouteHash(route: CrossJurisdictionSwapRou
     ROUTE_HASH_SCHEMAS,
     [
       String(policyRoute.orderId || ''),
-      normalizeEntityId(policyRoute.bookOwnerEntityId || policyRoute.source.counterpartyEntityId || policyRoute.hubEntityId),
+      toEntityId(policyRoute.bookOwnerEntityId || policyRoute.source.counterpartyEntityId || policyRoute.hubEntityId),
       String(policyRoute.venueId || ''),
-      normalizeEntityId(policyRoute.makerEntityId),
-      normalizeEntityId(policyRoute.hubEntityId),
-      normalizeEntityId(policyRoute.sourceSignerId || ''),
-      normalizeEntityId(policyRoute.sourceHubSignerId || ''),
-      normalizeEntityId(policyRoute.targetHubSignerId || ''),
-      normalizeEntityId(policyRoute.targetSignerId || ''),
-      normalizeEntityId(policyRoute.bookHubSignerId || ''),
+      toEntityId(policyRoute.makerEntityId),
+      toEntityId(policyRoute.hubEntityId),
+      String(policyRoute.sourceSignerId || '').toLowerCase(),
+      String(policyRoute.sourceHubSignerId || '').toLowerCase(),
+      String(policyRoute.targetHubSignerId || '').toLowerCase(),
+      String(policyRoute.targetSignerId || '').toLowerCase(),
+      String(policyRoute.bookHubSignerId || '').toLowerCase(),
       normalizeJurisdiction(policyRoute.source.jurisdiction),
-      normalizeEntityId(policyRoute.source.entityId),
-      normalizeEntityId(policyRoute.source.counterpartyEntityId),
+      toEntityId(policyRoute.source.entityId),
+      toEntityId(policyRoute.source.counterpartyEntityId),
       String(Math.floor(Number(policyRoute.source.tokenId))),
       BigInt(policyRoute.source.amount),
       normalizeJurisdiction(policyRoute.target.jurisdiction),
-      normalizeEntityId(policyRoute.target.entityId),
-      normalizeEntityId(policyRoute.target.counterpartyEntityId),
+      toEntityId(policyRoute.target.entityId),
+      toEntityId(policyRoute.target.counterpartyEntityId),
       String(Math.floor(Number(policyRoute.target.tokenId))),
       BigInt(policyRoute.target.amount),
       policyRoute.priceTicks !== undefined,
@@ -924,7 +924,7 @@ export function deriveCrossJurisdictionRouteHash(route: CrossJurisdictionSwapRou
 }
 
 function withCrossJurisdictionVenueDefaults(route: CrossJurisdictionSwapRoute): CrossJurisdictionSwapRoute {
-  const bookOwnerEntityId = normalizeEntityId(route.bookOwnerEntityId || deriveCanonicalCrossJurisdictionBookOwner(route));
+  const bookOwnerEntityId = toEntityId(route.bookOwnerEntityId || deriveCanonicalCrossJurisdictionBookOwner(route));
   const venueId = route.venueId || deriveCanonicalCrossJurisdictionVenueId(route);
   return {
     ...route,
@@ -968,7 +968,7 @@ export function signedCrossJurisdictionAmountForBeneficiary(
   counterpartyEntityId: string,
   amount: bigint,
 ): bigint {
-  return isLeftEntity(normalizeEntityId(beneficiaryEntityId), normalizeEntityId(counterpartyEntityId))
+  return isLeftEntity(toEntityId(beneficiaryEntityId), toEntityId(counterpartyEntityId))
     ? amount
     : -amount;
 }
@@ -1003,7 +1003,7 @@ export function buildPreparedCrossJurisdictionRoute(
   const proof = deriveCrossJurisdictionHashLadderProof(canonicalRoute, privateSeed);
   const sourceAmount = BigInt(canonicalRoute.source.amount);
   const targetAmount = BigInt(canonicalRoute.target.amount);
-  const deadlines = crossJDeadlines(canonicalRoute);
+  const deadlines = parseCrossJDeadlines(canonicalRoute);
   const sourcePullId = deriveCrossJurisdictionPullId(canonicalRoute, 'source');
   const targetPullId = deriveCrossJurisdictionPullId(canonicalRoute, 'target');
   return {

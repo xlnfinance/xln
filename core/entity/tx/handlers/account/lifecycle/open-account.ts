@@ -1,4 +1,4 @@
-import { asTokenId } from '../../../../../account/tx/units';
+import { asTokenId } from '../../../../../protocol/units';
 import { isLeftEntity } from '../../../../id';
 import { isValidEntityId } from '../../../../../protocol/identity';
 import type { Delta, HtlcLock, PullCommitment, SwapOffer } from '../../../../../types/account';
@@ -151,7 +151,7 @@ const seedOpenAccountPolicies = async (
   const tokenId = tx.data.tokenId ?? 1;
   const tokenIds = Array.from(new Set([tokenId, ...DEFAULT_ACCOUNT_TOKEN_IDS]))
     .filter(id => Number.isFinite(id) && id > 0)
-    .map(asTokenId);
+    .map(value => asTokenId(value));
   if (tx.data.rebalancePolicy) assertRequestedRebalancePolicy(tokenId, tx.data.rebalancePolicy);
   // The policy is part of the Entity account leaf even though it is outside
   // AccountStateRoot. Install the complete H=0 envelope before admissions below

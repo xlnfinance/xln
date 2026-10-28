@@ -7,13 +7,8 @@ import { handleHtlcLock } from '../../../account/tx/handlers/htlc/lock';
 import { handleHtlcResolve } from '../../../account/tx/handlers/htlc/resolve';
 import { createSettlementWorkspaceHash } from '../../../account/tx/handlers/settlement/transition';
 import { ACCOUNT_TX_REJECTION_CODES } from '../../../account/tx/apply-types';
-import {
-  toHashlock,
-  toHtlcSecret,
-  toTokenAmount,
-  asTokenId,
-} from '../../../account/tx/units';
-import {
+import { toHashlock, toHtlcSecret, toTokenAmount } from '../../../account/tx/units';
+import { asTokenId ,
   toJHeight,
   toUnixMs,
   toUnixS,

@@ -9,6 +9,7 @@
  */
 
 import { readPositiveIntegerEnv } from './environment';
+import { MAX_TOKEN_ID } from '../protocol/units';
 
 // ═══════════════════════════════════════════════════════════════
 // SYSTEM LIMITS
@@ -257,7 +258,7 @@ export const TOKENS = {
   NATIVE_TOKEN_ID: 1,
 
   /** Maximum token ID (65535 = uint16 max) */
-  MAX_TOKEN_ID: 65535,
+  MAX_TOKEN_ID,
 
   /** Default decimal places for display */
   DEFAULT_DECIMALS: 18,

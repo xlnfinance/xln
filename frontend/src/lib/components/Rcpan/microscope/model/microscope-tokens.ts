@@ -1,4 +1,4 @@
-import { asTokenId } from '@xln/core/account/tx/units';
+import { asTokenId } from '@xln/core/protocol/units';
 import { getTokenInfo } from '@xln/core/account/utils';
 import { getTokenUsdMicros } from '@xln/core/jurisdiction/machine/config/usd-reference-rate';
 

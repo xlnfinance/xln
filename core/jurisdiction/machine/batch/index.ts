@@ -10,9 +10,11 @@
  * - Batch is cleared after successful submission
  * - Failed batches are retried (with exponential backoff)
  */
+import { toEntityId } from '../../../protocol/identity';
+
 
 import { ethers } from 'ethers';
-import { normalizeEntityId, compareEntityIds } from '../../../entity/id';
+import { compareEntityIds } from '../../../entity/id';
 import { createStructuredLogger, shortHash, shortId } from '../../../support/logger';
 import { PROOF_BODY_ABI } from '../../../protocol/dispute/proof-body';
 import {
@@ -120,11 +122,11 @@ export function summarizeBatch(batch: JBatch): Record<string, unknown> {
 
 export function preflightBatchForE2(entityId: string, batch: JBatch): string[] {
   const issues: string[] = [];
-  const normalizedEntityId = normalizeEntityId(entityId);
+  const normalizedEntityId = toEntityId(entityId);
 
   const zeroEntity = '0x0000000000000000000000000000000000000000000000000000000000000000';
   for (const op of batch.externalTokenToReserve) {
-    const target = op.entity ? normalizeEntityId(op.entity) : zeroEntity;
+    const target = op.entity ? toEntityId(op.entity) : zeroEntity;
     if (target !== zeroEntity && target !== normalizedEntityId) {
       issues.push(`externalTokenToReserve entity mismatch: ${target.slice(-4)} != ${normalizedEntityId.slice(-4)}`);
     }
@@ -140,7 +142,7 @@ export function preflightBatchForE2(entityId: string, batch: JBatch): string[] {
   // The contract will handle actual validation - no preflight check needed here
 
   for (const s of batch.settlements) {
-    if (compareEntityIds(s.leftEntity, s.rightEntity) >= 0) {
+    if (compareEntityIds(toEntityId(s.leftEntity), toEntityId(s.rightEntity)) >= 0) {
       issues.push(`settlement left>=right: ${s.leftEntity.slice(-4)} >= ${s.rightEntity.slice(-4)}`);
     }
     const hasChanges = s.diffs.length > 0 || s.forgiveDebtsInTokenIds.length > 0;
@@ -179,11 +181,11 @@ export function preflightBatchForE2(entityId: string, batch: JBatch): string[] {
 export function getDraftBatchReserveDelta(entityId: string, batch: JBatch | null | undefined, tokenId: number): bigint {
   if (!batch) return 0n;
 
-  const normalizedEntityId = normalizeEntityId(entityId);
+  const normalizedEntityId = toEntityId(entityId);
   let delta = 0n;
 
   for (const op of batch.externalTokenToReserve) {
-    const target = op.entity ? normalizeEntityId(op.entity) : normalizedEntityId;
+    const target = op.entity ? toEntityId(op.entity) : normalizedEntityId;
     if (target === normalizedEntityId && op.internalTokenId === tokenId) {
       delta += op.amount;
     }
@@ -198,9 +200,9 @@ export function getDraftBatchReserveDelta(entityId: string, batch: JBatch | null
   for (const settlement of batch.settlements) {
     for (const diff of settlement.diffs) {
       if (diff.tokenId !== tokenId) continue;
-      if (normalizeEntityId(settlement.leftEntity) === normalizedEntityId) {
+      if (toEntityId(settlement.leftEntity) === normalizedEntityId) {
         delta += diff.leftDiff;
-      } else if (normalizeEntityId(settlement.rightEntity) === normalizedEntityId) {
+      } else if (toEntityId(settlement.rightEntity) === normalizedEntityId) {
         delta += diff.rightDiff;
       }
     }
@@ -209,7 +211,7 @@ export function getDraftBatchReserveDelta(entityId: string, batch: JBatch | null
   for (const op of batch.reserveToReserve) {
     if (op.tokenId !== tokenId) continue;
     delta -= op.amount;
-    if (normalizeEntityId(op.receivingEntity) === normalizedEntityId) {
+    if (toEntityId(op.receivingEntity) === normalizedEntityId) {
       delta += op.amount;
     }
   }
@@ -432,8 +434,8 @@ const sameUnsignedInteger = (left: number | bigint, right: number | bigint): boo
  * after the Hanko has authorized those exact bytes.
  */
 const isExactSettlementRetry = (existing: SettlementBatchOp, candidate: SettlementBatchOp): boolean =>
-  normalizeEntityId(existing.leftEntity) === normalizeEntityId(candidate.leftEntity) &&
-  normalizeEntityId(existing.rightEntity) === normalizeEntityId(candidate.rightEntity) &&
+  toEntityId(existing.leftEntity) === toEntityId(candidate.leftEntity) &&
+  toEntityId(existing.rightEntity) === toEntityId(candidate.rightEntity) &&
   existing.diffs.length === candidate.diffs.length &&
   existing.diffs.every((diff, index) => {
     const other = candidate.diffs[index];
@@ -486,7 +488,7 @@ export function batchAddSettlement(
   );
 
   // Validate entities are in canonical order
-  if (compareEntityIds(leftEntity, rightEntity) >= 0) {
+  if (compareEntityIds(toEntityId(leftEntity), toEntityId(rightEntity)) >= 0) {
     throw new Error(`Settlement entities must be ordered: ${leftEntity} >= ${rightEntity}`);
   }
 
@@ -508,8 +510,8 @@ export function batchAddSettlement(
   // Check the signed full-settlement lane before any shortcut or mutation.
   const existing = jBatchState.batch.settlements.find(
     settlement =>
-      normalizeEntityId(settlement.leftEntity) === normalizeEntityId(leftEntity) &&
-      normalizeEntityId(settlement.rightEntity) === normalizeEntityId(rightEntity),
+      toEntityId(settlement.leftEntity) === toEntityId(leftEntity) &&
+      toEntityId(settlement.rightEntity) === toEntityId(rightEntity),
   );
   if (existing) {
     if (isExactSettlementRetry(existing, candidate)) return;
@@ -532,18 +534,18 @@ export function batchAddSettlement(
     c2rResult.isPureC2R &&
     !!sig &&
     !disablePureC2RShortcut &&
-    (!initiatorEntity || normalizeEntityId(initiatorEntity) === normalizeEntityId(shortcutWithdrawer!));
-  const batchOwner = normalizeEntityId(initiatorEntity ?? leftEntity);
+    (!initiatorEntity || toEntityId(initiatorEntity) === toEntityId(shortcutWithdrawer!));
+  const batchOwner = toEntityId(initiatorEntity ?? leftEntity);
   const pairCounterparty = shortcutAllowed
     ? shortcutCounterparty
-    : batchOwner === normalizeEntityId(leftEntity)
+    : batchOwner === toEntityId(leftEntity)
       ? rightEntity
-      : batchOwner === normalizeEntityId(rightEntity)
+      : batchOwner === toEntityId(rightEntity)
         ? leftEntity
         : undefined;
   const existingShortcut = pairCounterparty
     ? jBatchState.batch.collateralToReserve.find(
-        operation => normalizeEntityId(operation.counterparty) === normalizeEntityId(pairCounterparty),
+        operation => toEntityId(operation.counterparty) === toEntityId(pairCounterparty),
       )
     : undefined;
   if (existingShortcut) {
@@ -558,7 +560,7 @@ export function batchAddSettlement(
   }
 
   if (c2rResult.isPureC2R && sig && !disablePureC2RShortcut) {
-    if (initiatorEntity && normalizeEntityId(initiatorEntity) !== normalizeEntityId(shortcutWithdrawer!)) {
+    if (initiatorEntity && toEntityId(initiatorEntity) !== toEntityId(shortcutWithdrawer!)) {
       // Initiator isn't the withdrawer; keep full settlement to avoid C2R signature mismatch.
     } else {
       requireBatchRoom(jBatchState.batch, 'collateralToReserve');

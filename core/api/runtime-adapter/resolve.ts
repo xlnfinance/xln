@@ -1,9 +1,10 @@
+import { toEntityId, toRuntimeId, isValidEntityId } from '../../protocol/identity';
 import { batchResponseDeadline, quoteJReplacement } from '../../runtime/j-submit/evm/evm-replacement';
 import { readLendingEvidence } from './read/lending-evidence';
 import type { EntityReplica, EntityState } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';
 import { readRuntimeEntityMetricStats } from '../../runtime/observability/entity-metrics';
-import { normalizeEntityId } from '../../storage/keys';
+
 import {
   projectEntityCoreDoc,
   projectEntityReplicaCoreView,
@@ -128,7 +129,7 @@ const inferRecoverySignersForAdapter = (env: RuntimeReplica): RuntimeRecoverySig
       ...(replica?.state?.config?.validators || []),
     ].map(normalizeRuntimeIdForRecovery);
     if (signerId !== runtimeId && !validators.includes(runtimeId)) continue;
-    entityId = normalizeEntityId(replica?.state?.entityId || replica?.entityId || String(key).split(':')[0] || '');
+    entityId = toEntityId(replica?.state?.entityId || replica?.entityId || String(key).split(':')[0] || '');
     jurisdiction = String(replica?.state?.config?.jurisdiction?.name || '').trim();
     name = String(replica?.state?.profile?.name || replica?.entityId || 'Runtime signer').trim();
     break;
@@ -215,8 +216,8 @@ const readActivityQuery = (
   if (kind !== 'all' && kind !== 'onchain' && kind !== 'offchain') {
     throw new RuntimeAdapterError('E_BAD_QUERY', 'activity kind must be all, onchain, or offchain');
   }
-  const entityId = query?.entityId ? normalizeEntityId(String(query.entityId)) : '';
-  if (entityId && !/^0x[0-9a-f]{64}$/.test(entityId)) {
+  const entityId = query?.entityId ? String(query.entityId) : '';
+  if (entityId && !isValidEntityId(entityId)) {
     throw new RuntimeAdapterError('E_BAD_QUERY', 'activity entityId must be 0x + 64 hex chars');
   }
   return {
@@ -237,7 +238,7 @@ const resolveEntityState = async (
   entityId: string,
   query?: RuntimeAdapterReadQuery,
 ): Promise<{ state: EntityState; replica?: EntityReplica }> => {
-  const normalized = normalizeEntityId(entityId);
+  const normalized = toEntityId(entityId);
   const height = readAtHeight(query);
   if (height !== null && height !== envHeight(ctx.env)) {
     if (!ctx.loadEntityState) {
@@ -287,7 +288,7 @@ const projectTimelineIndex = async (
   if (!ctx.readFrame) throw new RuntimeAdapterError('E_BAD_QUERY', 'timeline-index requires persisted frame storage');
   const head = await readBestHead(ctx);
   const latestHeight = Math.max(0, Math.min(envHeight(ctx.env), Math.floor(Number(head.latestHeight || 0))));
-  const runtimeIdForPage = normalizeEntityId(String(ctx.env.runtimeId || '')) || 'embedded';
+  const runtimeIdForPage = (ctx.env.runtimeId ? toRuntimeId(ctx.env.runtimeId) : '') || 'embedded';
   // A runtime that has not persisted a frame yet is an empty timeline, not a bad request.
   // Erroring here made every fresh browser runtime report a broken time machine.
   if (latestHeight < 1 && query?.beforeHeight === undefined) {
@@ -398,7 +399,7 @@ const resolveScopedRuntimeAdapterRead = async <T>(
         throw new RuntimeAdapterError('E_BAD_QUERY', 'historical settlement counters are unavailable');
       }
       const replica = findReplica(ctx.env, entityId);
-      if (!replica) throw new RuntimeAdapterError('E_NOT_FOUND', `entity not found: ${normalizeEntityId(entityId)}`);
+      if (!replica) throw new RuntimeAdapterError('E_NOT_FOUND', `entity not found: ${toEntityId(entityId)}`);
       return {
         height: replica.state.height,
         paybookOpen: replica.state.paybook.entries.size,
@@ -411,13 +412,13 @@ const resolveScopedRuntimeAdapterRead = async <T>(
       const height = readAtHeight(query);
       const targetHeight = height ?? envHeight(ctx.env);
       if (targetHeight < 1) throw new RuntimeAdapterError('E_BAD_QUERY', 'paged entity reads require a persisted runtime height');
-      const accountId = normalizeEntityId(String(query?.accountId || ''));
+      const accountId = (query?.accountId ? toEntityId(query.accountId) : '');
       if (parts[2] === 'accounts' && accountId) {
         const limit = readBoundedLimit(query?.accountsLimit ?? query?.limit, 10);
         const isCurrentHeight = height === null || targetHeight === envHeight(ctx.env);
         if (isCurrentHeight) {
           const replica = findReplica(ctx.env, entityId);
-          if (!replica) throw new RuntimeAdapterError('E_NOT_FOUND', `entity not found: ${normalizeEntityId(entityId)}`);
+          if (!replica) throw new RuntimeAdapterError('E_NOT_FOUND', `entity not found: ${toEntityId(entityId)}`);
           const account = replica.state.accounts.get(accountId);
           const page = singleAccountViewPage(accountId, account ? compactAccountDocForView(account) : null, limit);
           return { ...page, summary: accountPageSummaryForView(entityId, page) } as T;
@@ -438,7 +439,7 @@ const resolveScopedRuntimeAdapterRead = async <T>(
     if (parts.length === 5 && parts[2] === 'account' && parts[4] === 'frames') {
       // A dispute is argued from the frames both parties signed. The aggregate
       // Entity view carries only the current one, so this is a point read.
-      const counterpartyId = normalizeEntityId(parts[3] ?? '');
+      const counterpartyId = toEntityId(parts[3] ?? '');
       if (!counterpartyId) throw new RuntimeAdapterError('E_BAD_PATH', 'account id is required');
       if (readAtHeight(query) !== null) {
         throw new RuntimeAdapterError('E_BAD_QUERY', 'historical frame reads are not available through a live adapter');
@@ -454,7 +455,7 @@ const resolveScopedRuntimeAdapterRead = async <T>(
     }
 
     if (parts.length === 5 && parts[2] === 'account' && parts[4] === 'swap-history') {
-      const counterpartyId = normalizeEntityId(parts[3] ?? '');
+      const counterpartyId = toEntityId(parts[3] ?? '');
       if (!counterpartyId) throw new RuntimeAdapterError('E_BAD_PATH', 'account id is required');
       if (readAtHeight(query) !== null) {
         throw new RuntimeAdapterError('E_BAD_QUERY', 'historical swap-history reads are not available through a live adapter');
@@ -474,19 +475,19 @@ const resolveScopedRuntimeAdapterRead = async <T>(
     }
 
     if (parts.length === 4 && parts[2] === 'account') {
-      const counterpartyId = normalizeEntityId(parts[3] ?? '');
+      const counterpartyId = toEntityId(parts[3] ?? '');
       const height = readAtHeight(query);
       if (height !== null && height !== envHeight(ctx.env)) {
         if (!ctx.loadEntityAccountDoc) {
           throw new RuntimeAdapterError('E_BAD_QUERY', 'historical account reads are unavailable for this adapter');
         }
         const loaded = await ctx.loadEntityAccountDoc(entityId, counterpartyId, height);
-        if (!loaded) throw new RuntimeAdapterError('E_NOT_FOUND', `account not found at height ${height}: ${normalizeEntityId(entityId)}/${counterpartyId}`);
+        if (!loaded) throw new RuntimeAdapterError('E_NOT_FOUND', `account not found at height ${height}: ${toEntityId(entityId)}/${counterpartyId}`);
         return compactAccountDocForView(loaded) as T;
       }
       const { state } = await resolveEntityState(ctx, entityId, query);
       const account = state.accounts.get(counterpartyId);
-      if (!account) throw new RuntimeAdapterError('E_NOT_FOUND', `account not found: ${normalizeEntityId(entityId)}/${counterpartyId}`);
+      if (!account) throw new RuntimeAdapterError('E_NOT_FOUND', `account not found: ${toEntityId(entityId)}/${counterpartyId}`);
       return compactAccountDocForView(account) as T;
     }
 

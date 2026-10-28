@@ -49,7 +49,7 @@ const resolvableAccount = (): AccountReplica => {
     quantizedGive: amount,
     quantizedWant: amount,
   });
-  const account = makeAccount('alice', 'hub');
+  const account = makeAccount(`0x${'11'.repeat(32)}`, `0x${'22'.repeat(32)}`);
   const giveDelta = createDefaultDelta(offer.giveTokenId);
   const wantDelta = createDefaultDelta(offer.wantTokenId);
   giveDelta.leftCreditLimit = giveDelta.rightCreditLimit = 10n ** 30n;
@@ -258,7 +258,7 @@ describe('swap net authorization', () => {
 
   test('validates and commits authorization into canonical Account offer state', async () => {
     const amount = 2n * SWAP_LOT_SCALE;
-    const account = beginAccountStateDraft(makeAccount('alice', 'hub')).draft;
+    const account = beginAccountStateDraft(makeAccount(`0x${'11'.repeat(32)}`, `0x${'22'.repeat(32)}`)).draft;
     const accepted = await handleSwapOffer(
       account,
       {

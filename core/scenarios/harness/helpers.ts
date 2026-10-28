@@ -1,4 +1,4 @@
-import { asTokenId } from '../../account/tx/units';
+import { asTokenId } from '../../protocol/units';
 /**
  * Shared scenario helpers
  */

@@ -40,8 +40,8 @@ fn object(entries: Vec<(&str, CanonicalValue)>) -> CanonicalValue {
 fn route(route_hash: Option<&str>) -> CanonicalValue {
     let mut fields = vec![
         ("orderId", string("order-1")),
-        ("makerEntityId", string("source-user")),
-        ("hubEntityId", string("source-hub")),
+        ("makerEntityId", string("0x2222222222222222222222222222222222222222222222222222222222222222")),
+        ("hubEntityId", string("0x1111111111111111111111111111111111111111111111111111111111111111")),
         ("sourceSignerId", string("source-user-signer")),
         ("sourceHubSignerId", string("source-hub-signer")),
         ("targetHubSignerId", string("target-hub-signer")),
@@ -53,8 +53,8 @@ fn route(route_hash: Option<&str>) -> CanonicalValue {
                     "jurisdiction",
                     string("stack:1:0x1111111111111111111111111111111111111111"),
                 ),
-                ("entityId", string("source-user")),
-                ("counterpartyEntityId", string("source-hub")),
+                ("entityId", string("0x2222222222222222222222222222222222222222222222222222222222222222")),
+                ("counterpartyEntityId", string("0x1111111111111111111111111111111111111111111111111111111111111111")),
                 ("tokenId", number(2)),
                 (
                     "amount",
@@ -69,8 +69,8 @@ fn route(route_hash: Option<&str>) -> CanonicalValue {
                     "jurisdiction",
                     string("stack:2:0x2222222222222222222222222222222222222222"),
                 ),
-                ("entityId", string("target-hub")),
-                ("counterpartyEntityId", string("target-user")),
+                ("entityId", string("0x3333333333333333333333333333333333333333333333333333333333333333")),
+                ("counterpartyEntityId", string("0x4444444444444444444444444444444444444444444444444444444444444444")),
                 ("tokenId", number(1)),
                 (
                     "amount",
@@ -140,7 +140,7 @@ fn authority(signer: &str) -> EntityFrameAuthority {
 
 fn source_account_view() -> BTreeMap<String, LocalAccountFinancialView> {
     BTreeMap::from([(
-        "source-hub".into(),
+        "0x1111111111111111111111111111111111111111111111111111111111111111".into(),
         LocalAccountFinancialView {
             dispute_config: xln_rscore_engine::AccountDisputeConfig::new(3600, 86400).unwrap(),
             ..test_fixtures::account_view()
@@ -150,7 +150,7 @@ fn source_account_view() -> BTreeMap<String, LocalAccountFinancialView> {
 
 #[test]
 fn typescript_route_hash_vector_is_materialized_before_state_commit() {
-    let mut state = EntityStateSlice::empty("source-user", 1_000);
+    let mut state = EntityStateSlice::empty("0x2222222222222222222222222222222222222222222222222222222222222222", 1_000);
     apply_cross_jurisdiction_entity_txs(
         &mut state,
         &source_account_view(),
@@ -173,7 +173,7 @@ fn typescript_route_hash_vector_is_materialized_before_state_commit() {
     assert_eq!(
         hash,
         Some(&string(
-            "0x25d85d1a0fe2a866e331e7d0d3511478f5c9aa15f38d54b344492f6a77681aa7"
+            "0x64af903419431eedc0dcba34221c1f60cdb004beba15f258c50f4c9a96eb7538"
         ))
     );
     assert_eq!(
@@ -185,13 +185,13 @@ fn typescript_route_hash_vector_is_materialized_before_state_commit() {
                 .expect("authorization map")
                 .root_hash())
         ),
-        "0xc18d45324ce14b76ccd44dc3608c10abc5ba18e7ad32df7505e28838a751038c"
+        "0xbc7346f0d9b1605bdd52b1879fe576bb58bc1bdde6bf7d415db24f39a38b2207"
     );
 }
 
 #[test]
 fn cross_j_domain_override_preserves_typescript_authorization_and_rejects_substitution() {
-    let signed_hash = "0xfcaf4f40285e6167a873ffbcd8dcb1667a3da84ca4694f18d4e27cd9d5c21053";
+    let signed_hash = "0x791d0fcfccc414f5d5d28d129fb1a0573243e72cfb5ca69829f92b4c3c081069";
     let mut supplied = route(Some(signed_hash));
     let CanonicalValue::Object(fields) = &mut supplied else {
         panic!("route object")
@@ -209,7 +209,7 @@ fn cross_j_domain_override_preserves_typescript_authorization_and_rejects_substi
             ),
         ]),
     ));
-    let mut state = EntityStateSlice::empty("source-user", 1_000);
+    let mut state = EntityStateSlice::empty("0x2222222222222222222222222222222222222222222222222222222222222222", 1_000);
     // The source user's existing board authorizes this exact domain and both
     // leg jurisdictions. A hub cannot substitute the default domain under
     // the same hash, nor may canonicalization rewrite the signed domain.
@@ -246,7 +246,7 @@ fn cross_j_domain_override_preserves_typescript_authorization_and_rejects_substi
 
 #[test]
 fn supplied_route_hash_mismatch_is_rejected_before_state_mutation() {
-    let mut state = EntityStateSlice::empty("source-user", 1_000);
+    let mut state = EntityStateSlice::empty("0x2222222222222222222222222222222222222222222222222222222222222222", 1_000);
     let error = apply_cross_jurisdiction_entity_txs(
         &mut state,
         &std::collections::BTreeMap::new(),

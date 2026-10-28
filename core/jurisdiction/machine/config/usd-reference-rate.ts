@@ -1,4 +1,4 @@
-import { type TokenId } from '../../../account/tx/units';
+import { type TokenId } from '../../../protocol/units';
 /**
  * Deterministic USD reference pricing for built-in catalog tokens.
  *

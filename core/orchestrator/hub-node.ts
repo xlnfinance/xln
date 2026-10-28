@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { toEntityId } from '../protocol/identity';
 import { canDeployHubDefaultTokens, ensureTokenCatalog, waitForTokenCatalog } from './hub/node/token-catalog';
 import { importJurisdiction } from './hub/node/import-jurisdiction';
 import {
@@ -6,13 +7,7 @@ import {
   hasLiveJAdapterForJurisdiction,
 } from './hub/node/hub-jurisdiction-binding';
 import { buildPairHealth, planMeshBootstrapInputs, supportPeerProvisioningReady } from './hub/node/hub-mesh-plan';
-import {
-  buildHubBootstrapReserveHealth,
-  ensureHubBootstrapReserves,
-  getEntityJurisdictionName,
-  normalizeEntityId,
-  type HubReserveDeps,
-} from './hub/node/hub-reserves';
+import { buildHubBootstrapReserveHealth, ensureHubBootstrapReserves, getEntityJurisdictionName, type HubReserveDeps } from './hub/node/hub-reserves';
 import { createHubControlRequestHandler, handleHubHttpRequest, type HubHttpContext } from './hub/node/hub-http';
 import { configureCryptoPoolEntry } from '../protocol/crypto/crypto-pool';
 import { ethers } from 'ethers';
@@ -1509,7 +1504,7 @@ const run = async (): Promise<void> => {
     : await waitForTokenCatalog(jadapter);
   live.activeTokenCatalog = tokenCatalog;
   if (live.bootstrap?.entityId) {
-    tokenCatalogsByEntityId.set(normalizeEntityId(live.bootstrap.entityId), tokenCatalog);
+    tokenCatalogsByEntityId.set(toEntityId(live.bootstrap.entityId), tokenCatalog);
   }
 
   startJurisdictionWatchers(env);

@@ -24,7 +24,7 @@ import { createEmptyEnv } from '../../../runtime';
 import type { AccountInput, AccountReplica, AccountTx } from '../../../types/account';
 import type { EntityTx } from '../../../types/entity-tx';
 import { entity, jref, makeAccount, makeJurisdiction, putTestAccountDelta, putTestAccountPull } from '../../helpers/cross-j';
-import { crossJDeadlines } from '../../../extensions/cross-j/deadlines';
+import { parseCrossJDeadlines } from '../../../extensions/cross-j/deadlines';
 
 const SELF = entity('11');
 const PEER = entity('22');
@@ -135,7 +135,7 @@ describe('peer Account input is a typed reject, never a Runtime halt', () => {
   });
 
   const expiresAt = 20_000;
-  const deadlines = crossJDeadlines({ expiresAt });
+  const deadlines = parseCrossJDeadlines({ expiresAt });
   const pull = { pullId: `0x${'aa'.repeat(32)}`, tokenId: 1, amount: 10n ** 18n, signedAmount: 10n ** 18n, deadline: deadlines.source,
     fullHash: `0x${'bb'.repeat(32)}`, partialRoot: `0x${'cc'.repeat(32)}` };
   const validRoute = (): Record<string, unknown> => ({

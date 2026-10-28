@@ -1,4 +1,5 @@
-import { asTokenId, asTokenDecimals } from '@xln/core/account/tx/units';
+import { asTokenDecimals } from '@xln/core/account/tx/units';
+import { asTokenId } from '@xln/core/protocol/units';
 import { expect, test } from 'bun:test';
 import { prepareSwapOrderForDimensions } from '@xln/core/swapbook/types';
 import type { TokenCatalogEntry } from '../../token-meta';

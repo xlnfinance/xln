@@ -1,7 +1,8 @@
+import { toEntityId } from '../../protocol/identity';
 import { type RuntimeOverlayRecord } from '../../types/account';
 import { type RuntimeReplica } from '../../runtime/types';
 import { docRefKey } from './doc-refs';
-import { normalizeEntityId } from '../keys';
+
 import { storageOverlayRecordKey } from '../../protocol/state/overlay';
 import { projectAccountDoc } from '../read/projections';
 import type { EntityState } from '../../entity/types';
@@ -16,12 +17,12 @@ import type {
 
 const addAccountRef = (target: Map<string, StorageAccountRef>, entityId: string, counterpartyId: string): void => {
   if (!entityId || !counterpartyId) return;
-  const ref: StorageDocRef = { family: 'account', entityId: normalizeEntityId(entityId), counterpartyId: normalizeEntityId(counterpartyId) };
+  const ref: StorageDocRef = { family: 'account', entityId: toEntityId(entityId), counterpartyId: toEntityId(counterpartyId) };
   target.set(docRefKey(ref), ref);
 };
 
 const addBookRef = (target: Map<string, StorageBookRef>, entityId: string, pairId: string): void => {
-  const normalizedEntityId = normalizeEntityId(entityId);
+  const normalizedEntityId = toEntityId(entityId);
   const normalizedPairId = String(pairId || '').trim();
   if (!normalizedEntityId || !normalizedPairId) return;
   const ref: StorageBookRef = {
@@ -48,7 +49,7 @@ export const buildBookDeletionsFromOverlay = (
   const dels = new Map<string, StorageBookRef>();
   for (const record of records ?? []) {
     if (record.family !== 'book' || record.deleted !== true) continue;
-    const entityId = normalizeEntityId(record.entityId);
+    const entityId = toEntityId(record.entityId);
     const pairId = String(record.pairId || '').trim();
     if (!entityId || !pairId) continue;
     const ref: StorageBookRef = { family: 'book', entityId, pairId };
@@ -67,14 +68,14 @@ export const storageRefsFromOverlay = (
 
   for (const record of records ?? []) {
     if (record.family === 'entity') {
-      const entityId = normalizeEntityId(record.entityId);
+      const entityId = toEntityId(record.entityId);
       if (entityId) touchedEntities.add(entityId);
       continue;
     }
 
     if (record.family === 'account') {
-      const entityId = normalizeEntityId(record.entityId);
-      const counterpartyId = normalizeEntityId(record.counterpartyId);
+      const entityId = toEntityId(record.entityId);
+      const counterpartyId = toEntityId(record.counterpartyId);
       if (!entityId || !counterpartyId) continue;
       touchedEntities.add(entityId);
       addAccountRef(touchedAccounts, entityId, counterpartyId);
@@ -82,7 +83,7 @@ export const storageRefsFromOverlay = (
     }
 
     if (record.family === 'book') {
-      const entityId = normalizeEntityId(record.entityId);
+      const entityId = toEntityId(record.entityId);
       const pairId = String(record.pairId || '').trim();
       if (!entityId || !pairId) continue;
       touchedEntities.add(entityId);

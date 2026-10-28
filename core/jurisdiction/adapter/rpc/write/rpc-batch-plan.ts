@@ -1,4 +1,5 @@
-import { normalizeEntityId } from '../../../../entity/id';
+import { toEntityId } from '../../../../protocol/identity';
+
 import { isBatchEmpty, preflightBatchForE2, type JBatch } from '../../../machine/batch';
 import { assertSealedJBatchBinding, type SealedBatchJTx } from '../../../machine/batch/sealed-batch';
 import { resolveEntityProposerId } from '../../../../runtime/delivery/entity-output-signer';
@@ -69,7 +70,7 @@ export const planRpcBatchSubmission = (
     }
   }
 
-  const normalizedEntityId = normalizeEntityId(jTx.entityId);
+  const normalizedEntityId = toEntityId(jTx.entityId);
   for (const settlement of batch.settlements) {
     if (
       (settlement.diffs.length > 0 || settlement.forgiveDebtsInTokenIds.length > 0) &&

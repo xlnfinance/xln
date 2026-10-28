@@ -1,4 +1,4 @@
-import { asTokenId, type TokenId } from '../tx/units';
+import { asTokenId, type TokenId } from '../../protocol/units';
 import type { JurisdictionConfig } from '../../protocol/config/jurisdiction-config';
 import type { RebalancePolicy } from '../../types/finance/rebalance';
 import {

@@ -1,4 +1,5 @@
-import { asTokenId, asTokenDecimals, type TokenId, type TokenDecimals } from '@xln/core/account/tx/units';
+import { asTokenDecimals, type TokenDecimals } from '@xln/core/account/tx/units';
+import { asTokenId, type TokenId } from '@xln/core/protocol/units';
 /**
  * The signer's on-chain wallet and the faucets. Balances come straight from
  * the jurisdiction adapter (the same `readWalletSnapshot` the SvelteKit

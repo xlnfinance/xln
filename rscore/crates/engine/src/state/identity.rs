@@ -22,14 +22,13 @@ pub struct EntityId([u8; 32]);
 
 impl EntityId {
     pub fn parse(value: &str) -> Result<Self, StateError> {
-        if value != value.trim().to_ascii_lowercase() {
-            return Err(StateError::InvalidEntityId(value.into()));
-        }
-        let normalized = value.to_ascii_lowercase();
-        let payload = normalized
+        // A validated Entity id is already canonical; never renormalize signed bytes.
+        let payload = value
             .strip_prefix("0x")
             .ok_or_else(|| StateError::InvalidEntityId(value.into()))?;
-        if payload.len() != 64 || !payload.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        if payload.len() != 64
+            || !payload.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
             return Err(StateError::InvalidEntityId(value.into()));
         }
         let mut bytes = [0_u8; 32];

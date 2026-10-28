@@ -1,15 +1,9 @@
+import { toEntityId, toRuntimeId } from '../../../protocol/identity';
 import type { BookState } from '../../../swapbook';
 import type { AccountFrame } from '../../../types/account';
 import type { EntityReplica, EntityState } from '../../../entity/types';
 import type { RuntimeEntityMetricStats, RuntimeReplica } from '../../../runtime/types';
-import {
-  DEFAULT_ACCOUNT_MERKLE_RADIX,
-  DEFAULT_EPOCH_MAX_BYTES,
-  DEFAULT_RETAIN_SNAPSHOTS,
-  DEFAULT_SNAPSHOT_PERIOD_FRAMES,
-  STORAGE_SCHEMA_VERSION,
-  normalizeEntityId,
-} from '../../../storage/keys';
+import { DEFAULT_ACCOUNT_MERKLE_RADIX, DEFAULT_EPOCH_MAX_BYTES, DEFAULT_RETAIN_SNAPSHOTS, DEFAULT_SNAPSHOT_PERIOD_FRAMES, STORAGE_SCHEMA_VERSION } from '../../../storage/keys';
 import { projectAccountDoc, projectEntityReplicaCoreView } from '../../../storage/read/projections';
 import type {
   StorageAccountDoc,
@@ -179,9 +173,9 @@ export const assertRequestedHeightAvailable = (
 };
 
 export const findReplica = (env: RuntimeReplica, entityId: string): EntityReplica | null => {
-  const normalized = normalizeEntityId(entityId);
+  const normalized = toEntityId(entityId);
   for (const replica of env.state.eReplicas?.values?.() ?? []) {
-    if (normalizeEntityId(replica.entityId) === normalized) return replica;
+    if (toEntityId(replica.entityId) === normalized) return replica;
   }
   return null;
 };
@@ -224,11 +218,11 @@ const summaryFromProfile = (
   profile: Profile,
   defaultHeight: number,
 ): RuntimeAdapterEntitySummary | null => {
-  const entityId = normalizeEntityId(profile.entityId);
+  const entityId = toEntityId(profile.entityId);
   if (!entityId) return null;
   const profileName = String(profile.name || profile.metadata?.hubName || '').trim();
   const jurisdiction = jurisdictionSummary(profile.metadata?.jurisdiction);
-  const runtimeId = normalizeEntityId(profile.runtimeId);
+  const runtimeId = (profile.runtimeId ? toRuntimeId(profile.runtimeId) : '');
   return {
     entityId,
     ...(runtimeId ? { runtimeId } : {}),
@@ -265,12 +259,12 @@ const mergeEntitySummaries = (
     return merged;
   };
   for (const summary of additions) {
-    const entityId = normalizeEntityId(summary.entityId);
+    const entityId = toEntityId(summary.entityId);
     if (!entityId) continue;
     byEntityId.set(entityId, { ...summary, entityId });
   }
   for (const summary of summaries) {
-    const entityId = normalizeEntityId(summary.entityId);
+    const entityId = toEntityId(summary.entityId);
     if (!entityId) continue;
     byEntityId.set(entityId, mergeSummary(byEntityId.get(entityId), summary, entityId));
   }
@@ -335,9 +329,9 @@ export const listLiveEntitySummaries = (
     .map((replica) => {
       const isHub = isHubState(replica.state);
       const jurisdiction = jurisdictionSummary(replica.state.config?.jurisdiction);
-      const runtimeId = normalizeEntityId(String(ctx.env.runtimeId || ''));
+      const runtimeId = (ctx.env.runtimeId ? toRuntimeId(ctx.env.runtimeId) : '');
       return {
-        entityId: normalizeEntityId(replica.entityId),
+        entityId: toEntityId(replica.entityId),
         ...(runtimeId ? { runtimeId } : {}),
         ...withDefinedProp('signerId', replica.signerId),
         label: labelForState(replica.state),
@@ -369,10 +363,10 @@ export const listEntitySummaries = async (
     }
     const ids = await ctx.listEntityIdsAtHeight(height);
     const summaries: RuntimeAdapterEntitySummary[] = [];
-    const requestedEntityId = normalizeEntityId(String(query?.entityId || ''));
-    const ctxRuntimeId = normalizeEntityId(String(ctx.env.runtimeId || ''));
+    const requestedEntityId = (query?.entityId ? toEntityId(query.entityId) : '');
+    const ctxRuntimeId = (ctx.env.runtimeId ? toRuntimeId(ctx.env.runtimeId) : '');
     for (const id of ids) {
-      const normalizedId = normalizeEntityId(id);
+      const normalizedId = toEntityId(id);
       const loadedView = ctx.loadEntityViewPage
         ? await ctx.loadEntityViewPage(id, height, { limit: 1, accountsLimit: 1, booksLimit: 1 })
         : null;
@@ -466,7 +460,7 @@ const projectLiveAccountsPage = (
   query?: RuntimeAdapterReadQuery,
 ): RuntimeAdapterAccountPage => {
   const limit = readBoundedLimit(query?.accountsLimit ?? query?.limit, 10);
-  const accountId = normalizeEntityId(String(query?.accountId || ''));
+  const accountId = (query?.accountId ? toEntityId(query.accountId) : '');
   if (accountId) {
     const account = state.accounts.get(accountId);
     return singleAccountPage(
@@ -475,7 +469,7 @@ const projectLiveAccountsPage = (
       limit,
     );
   }
-  const cursor = normalizeEntityId(String(query?.accountsCursor ?? query?.cursor ?? ''));
+  const cursor = ((query?.accountsCursor ?? query?.cursor) ? toEntityId(String(query?.accountsCursor ?? query?.cursor)) : '');
   const pageIndex = readPageIndex(query?.accountsPage);
   const orderedKeys = sortedStringMapKeys(state.accounts);
   const keys = query?.sortDir === 'desc' ? [...orderedKeys].reverse() : orderedKeys;
@@ -543,7 +537,7 @@ export const projectLiveEntityViewPage = (
   books: RuntimeAdapterBookPage;
 } => {
   const replica = findReplica(ctx.env, entityId);
-  if (!replica) throw new RuntimeAdapterError('E_NOT_FOUND', `entity not found: ${normalizeEntityId(entityId)}`);
+  if (!replica) throw new RuntimeAdapterError('E_NOT_FOUND', `entity not found: ${toEntityId(entityId)}`);
   return {
     core: projectEntityReplicaCoreView(replica.state, replica),
     accounts: projectLiveAccountsPage(replica.state, query),
@@ -565,7 +559,7 @@ const loadRequiredEntityViewPage = async (
     throw new RuntimeAdapterError('E_INTERNAL', 'storage view page loader is required for paged entity reads');
   }
   const stored = await ctx.loadEntityViewPage(entityId, height, query);
-  if (!stored) throw new RuntimeAdapterError('E_NOT_FOUND', `entity view not found at height ${height}: ${normalizeEntityId(entityId)}`);
+  if (!stored) throw new RuntimeAdapterError('E_NOT_FOUND', `entity view not found at height ${height}: ${toEntityId(entityId)}`);
   return stored;
 };
 

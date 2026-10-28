@@ -1,4 +1,4 @@
-import { asTokenId } from '../../account/tx/units';
+import { asTokenId } from '../../protocol/units';
 import type { AccountReplica, SettlementOp } from '../../types/account';
 import type { EntityInput } from '../types';
 import type { EntityRuntimeContext } from '../runtime-context';

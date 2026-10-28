@@ -1,6 +1,7 @@
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import type { AccountOutput, AccountTx } from '../../types/account';
-import type { Hashlock, HtlcSecret, TokenAmount, TokenId } from './units';
+import type { Hashlock, HtlcSecret, TokenAmount } from './units';
+import type { TokenId } from '../../protocol/units';
 
 export interface SwapOfferEvent {
   offerId: string;

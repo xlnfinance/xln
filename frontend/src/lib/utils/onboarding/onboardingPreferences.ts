@@ -1,4 +1,4 @@
-import type { TokenId } from '@xln/core/account/tx/units';
+import type { TokenId } from '@xln/core/protocol/units';
 import { wholeUsdToTokenAmount } from '@xln/core/jurisdiction/machine/config/usd-reference-rate';
 
 export type HubJoinPreference = 'manual' | '1' | '2' | '3';

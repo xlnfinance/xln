@@ -1,4 +1,4 @@
-import { asTokenId } from '../../../account/tx/units';
+import { asTokenId } from '../../../protocol/units';
 import { describe, expect, test } from 'bun:test';
 
 import {

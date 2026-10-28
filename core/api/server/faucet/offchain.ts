@@ -1,4 +1,4 @@
-import { asTokenId } from '../../../account/tx/units';
+import { asTokenId } from '../../../protocol/units';
 import type { EntityTx } from '../../../types/entity-tx';
 import type { RuntimeReplica, RuntimeInput } from '../../../runtime/types';
 import { safeStringify } from '../../../protocol/serialization';

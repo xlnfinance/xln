@@ -1,4 +1,4 @@
-import { asTokenId } from '../../account/tx/units';
+import { asTokenId } from '../../protocol/units';
 /**
  * P2P node runner for multi-runtime relay tests.
  * Usage (internal): bun run core/scenarios/network/p2p-node.ts --role hub|alice|bob ...

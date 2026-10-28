@@ -1,3 +1,4 @@
+import { toEntityId } from '../../protocol/identity';
 import { requireCertifiedEntityFrameAfterQuorum } from '../../entity/consensus/frame/phase-views';
 import { validateProposedEntityFrame } from '../../entity/consensus/frame/validation';
 import { createEntityFrameHashFromStateRoot } from '../../entity/consensus/frame';
@@ -9,7 +10,7 @@ import {
 import { compareStableText } from '../../protocol/serialization';
 import type { CertifiedEntityFrameLink, EntityReplica } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';
-import { normalizeEntityId } from '../keys';
+
 import type { StorageReplicaLookup } from '../types';
 
 export type CertifiedEntityHeadPlan = {
@@ -143,9 +144,9 @@ const buildPlan = (
   const byEntity = new Map<string, ReplicaEntry[]>();
   for (const [rawReplicaKey, replica] of sourceReplicas) {
     if (!replica?.state) continue;
-    const entityId = normalizeEntityId(replica.entityId || replica.state.entityId || '');
+    const entityId = toEntityId(replica.entityId || replica.state.entityId || '');
     if (!entityId) throw new Error(`STORAGE_ENTITY_REPLICA_ID_MISSING:${String(rawReplicaKey)}`);
-    if (normalizeEntityId(replica.state.entityId) !== entityId) {
+    if (toEntityId(replica.state.entityId) !== entityId) {
       throw new Error(`STORAGE_ENTITY_REPLICA_STATE_ID_MISMATCH:${entityId}`);
     }
     const entries = byEntity.get(entityId) ?? [];

@@ -7,17 +7,17 @@ import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdicti
 // authorization commits both leg jurisdictions and the independent domain;
 // changing a domain while retaining that hash must fail before admission.
 const route = (): CrossJurisdictionSwapRoute => ({
-  orderId: 'order-1', makerEntityId: 'source-user', hubEntityId: 'source-hub',
+  orderId: 'order-1', makerEntityId: '0x2222222222222222222222222222222222222222222222222222222222222222', hubEntityId: '0x1111111111111111111111111111111111111111111111111111111111111111',
   sourceSignerId: 'source-user-signer', sourceHubSignerId: 'source-hub-signer',
   targetHubSignerId: 'target-hub-signer', targetSignerId: 'target-user-signer',
   source: {
     jurisdiction: 'stack:1:0x1111111111111111111111111111111111111111',
-    entityId: 'source-user', counterpartyEntityId: 'source-hub', tokenId: 2,
+    entityId: '0x2222222222222222222222222222222222222222222222222222222222222222', counterpartyEntityId: '0x1111111111111111111111111111111111111111111111111111111111111111', tokenId: 2,
     amount: 1_000_000_000_000_000_000n,
   },
   target: {
     jurisdiction: 'stack:2:0x2222222222222222222222222222222222222222',
-    entityId: 'target-hub', counterpartyEntityId: 'target-user', tokenId: 1,
+    entityId: '0x3333333333333333333333333333333333333333333333333333333333333333', counterpartyEntityId: '0x4444444444444444444444444444444444444444444444444444444444444444', tokenId: 1,
     amount: 2_000_000n,
   },
   sourceDisputeConfig: { leftResponseSeconds: 3_600, rightResponseSeconds: 86_400 },
@@ -27,7 +27,7 @@ const route = (): CrossJurisdictionSwapRoute => ({
 
 const SOURCE = 'stack:999:0x9999999999999999999999999999999999999999';
 const TARGET = 'stack:888:0x8888888888888888888888888888888888888888';
-const HASH = '0xfcaf4f40285e6167a873ffbcd8dcb1667a3da84ca4694f18d4e27cd9d5c21053';
+const HASH = '0x791d0fcfccc414f5d5d28d129fb1a0573243e72cfb5ca69829f92b4c3c081069';
 
 test('committed cross-j routes retain exact execution amounts at the boundary', () => {
   const committed = {
@@ -43,7 +43,7 @@ test('committed cross-j routes retain exact execution amounts at the boundary', 
 
 test('cross-j domain overrides preserve the TS/Rust signed route hash', () => {
   const baseline = withCanonicalCrossJurisdictionRouteHash(route());
-  expect(baseline.routeHash).toBe('0x25d85d1a0fe2a866e331e7d0d3511478f5c9aa15f38d54b344492f6a77681aa7');
+  expect(baseline.routeHash).toBe('0x64af903419431eedc0dcba34221c1f60cdb004beba15f258c50f4c9a96eb7538');
   const domain = {
     protocol: 'xln-cross-j' as const, hashSchema: 'route-domain' as const,
     sourceStackId: SOURCE, targetStackId: TARGET,

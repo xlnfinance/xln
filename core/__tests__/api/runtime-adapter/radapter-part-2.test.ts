@@ -1,3 +1,4 @@
+import { toEntityId } from '../../../protocol/identity';
 import { XLN_PROTOCOL_VERSION } from '../../../protocol/version';
 import { readFileSync } from 'node:fs';
 import { expect, test } from 'bun:test';
@@ -72,20 +73,7 @@ import { prepareAccountStorageLayout } from '../../../storage/schema/account-lay
 
 import { verifyLiveStorageIntegrity } from '../../../storage/read/integrity/live';
 
-import {
-  KEY_HEAD,
-  STORAGE_SCHEMA_VERSION,
-  hexBytes,
-  keyLiveAccount,
-  keyLiveBook,
-  keyLiveEntity,
-  keySnapshotAccountPrefix,
-  keySnapshotBookPrefix,
-  keySnapshotEntity,
-  keySnapshotManifest,
-  normalizeEntityId,
-  textBytes,
-} from '../../../storage/keys';
+import { KEY_HEAD, STORAGE_SCHEMA_VERSION, hexBytes, keyLiveAccount, keyLiveBook, keyLiveEntity, keySnapshotAccountPrefix, keySnapshotBookPrefix, keySnapshotEntity, keySnapshotManifest, textBytes } from '../../../storage/keys';
 
 import { projectAccountDoc, projectEntityCoreDoc, projectEntityReplicaCoreView } from '../../../storage/read/projections';
 

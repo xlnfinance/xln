@@ -6,18 +6,19 @@ use ethabi::Token;
 use ethabi::ethereum_types::U256;
 use num_bigint::{BigInt, BigUint, Sign};
 use sha3::{Digest as _, Keccak256};
-use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
+use xln_rscore_protocol::{CanonicalNumber, CanonicalValue, UnixMs, UnixS};
 
 // TS cross-j/deadlines.ts: 144s finality + 5s observation + 24s inclusion
 // + 60s relative clock skew. Hub-owned secrets require Source + margin <= Target.
 pub const CROSS_J_LEG_MARGIN: u64 = 12 * 12 + 5 + 2 * 12 + 2 * 30;
 
-pub fn absolute_deadlines(route: &CanonicalValue) -> Result<(u64, u64), String> {
+pub fn absolute_deadlines(route: &CanonicalValue) -> Result<(UnixS, UnixS), String> {
     let expiry = unsigned(route, "expiresAt")
         .filter(|value| (1000..=9_007_199_254_740_991).contains(value))
         .ok_or_else(|| "CROSS_J_DEADLINE_MISSING".to_string())?;
-    let source = expiry / 1000;
-    Ok((source, source + CROSS_J_LEG_MARGIN))
+    let source = UnixMs::new(expiry).map_err(|_| "CROSS_J_DEADLINE_MISSING")?.floor_seconds();
+    let target = source.checked_add_seconds(CROSS_J_LEG_MARGIN).map_err(|_| "CROSS_J_DEADLINE_MISSING")?;
+    Ok((source, target))
 }
 
 fn validate_deadlines(route: &CanonicalValue) -> Result<(), String> {
@@ -25,8 +26,8 @@ fn validate_deadlines(route: &CanonicalValue) -> Result<(), String> {
     let source_pull = field(route, "sourcePull");
     let target_pull = field(route, "targetPull");
     if source_pull.is_none() && target_pull.is_none() { return Ok(()); }
-    if source_pull.and_then(|pull| unsigned(pull, "deadline")) != Some(source)
-        || target_pull.and_then(|pull| unsigned(pull, "deadline")) != Some(target) {
+    if source_pull.and_then(|pull| unsigned(pull, "deadline")) != Some(source.get())
+        || target_pull.and_then(|pull| unsigned(pull, "deadline")) != Some(target.get()) {
         return Err("CROSS_J_DEADLINE_ORDER".into());
     }
     Ok(())

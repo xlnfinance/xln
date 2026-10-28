@@ -1,5 +1,6 @@
+import { toEntityId } from '../../../protocol/identity';
 import { ethers } from 'ethers';
-import { normalizeEntityId } from '../../../entity/id';
+
 import type { JEvent } from '../types';
 import type { RpcContractStack } from './rpc-contract-stack';
 import { extractCanonicalDepositoryEventArgs, validateDisputeFinalizationLog } from '../events/depository-event-codec';
@@ -24,7 +25,7 @@ export const createRpcReceiptReaders = (
   stack: RpcContractStack,
 ): RpcReceiptReaders => ({
   async readEntityProviderActionReceipt(entityId, actionNonce) {
-    const normalizedEntityId = normalizeEntityId(entityId);
+    const normalizedEntityId = toEntityId(entityId);
     if (actionNonce <= 0n || actionNonce > ethers.MaxUint256) {
       throw new Error(`ENTITY_PROVIDER_ACTION_RECEIPT_NONCE_INVALID:${actionNonce.toString()}`);
     }
@@ -66,7 +67,7 @@ export const createRpcReceiptReaders = (
   },
 
   async hasProcessedBatch(entityId, batchHash, entityNonce) {
-    const normalizedEntityId = normalizeEntityId(entityId);
+    const normalizedEntityId = toEntityId(entityId);
     if (!ethers.isHexString(batchHash, 32)) throw new Error(`HANKO_BATCH_RECEIPT_HASH_INVALID:${batchHash}`);
     if (entityNonce <= 0n || entityNonce > ethers.MaxUint256) {
       throw new Error(`HANKO_BATCH_RECEIPT_NONCE_INVALID:${entityNonce.toString()}`);
@@ -90,8 +91,8 @@ export const createRpcReceiptReaders = (
   },
 
   async readDisputeFinalizationReceipt(entityId, counterentity, initialNonce, initialProofbodyHash) {
-    const entity = normalizeEntityId(entityId);
-    const counter = normalizeEntityId(counterentity);
+    const entity = toEntityId(entityId);
+    const counter = toEntityId(counterentity);
     if (initialNonce < 0n || initialNonce > ethers.MaxUint256) {
       throw new Error(`DISPUTE_FINALIZATION_RECEIPT_NONCE_INVALID:${initialNonce.toString()}`);
     }

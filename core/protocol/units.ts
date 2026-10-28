@@ -5,6 +5,10 @@
  * intentionally boundary-focused: committed schemas keep their primitive
  * representation and reducers can continue to perform ordinary arithmetic.
  */
+// The ABI token domain is uint16 in both engines; no environment/config read mints a brand.
+export const MAX_TOKEN_ID = 0xffff;
+
+declare const TokenIdBrand: unique symbol;
 declare const UnixMsBrand: unique symbol;
 declare const UnixSBrand: unique symbol;
 declare const JHeightBrand: unique symbol;
@@ -14,6 +18,7 @@ declare const AccountHeightBrand: unique symbol;
 declare const UsdPriceTicksBrand: unique symbol;
 declare const UsdMarketCapTicksBrand: unique symbol;
 
+export type TokenId = number & { readonly [TokenIdBrand]: typeof TokenIdBrand };
 export type UnixMs = number & { readonly [UnixMsBrand]: typeof UnixMsBrand };
 export type UnixS = number & { readonly [UnixSBrand]: typeof UnixSBrand };
 export type JHeight = number & { readonly [JHeightBrand]: typeof JHeightBrand };
@@ -22,6 +27,16 @@ export type EntityHeight = number & { readonly [EntityHeightBrand]: typeof Entit
 export type AccountHeight = number & { readonly [AccountHeightBrand]: typeof AccountHeightBrand };
 export type UsdPriceTicks = bigint & { readonly [UsdPriceTicksBrand]: typeof UsdPriceTicksBrand };
 export type UsdMarketCapTicks = bigint & { readonly [UsdMarketCapTicksBrand]: typeof UsdMarketCapTicksBrand };
+
+// Token zero is representable in the uint16 protocol domain; individual actions
+// may require a positive asset id. Range validation belongs to this constructor.
+const isTokenId = (value: unknown): value is TokenId =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= MAX_TOKEN_ID;
+
+export const asTokenId = (value: unknown, code = 'ACCOUNT_TX_TOKEN_ID_INVALID'): TokenId => {
+  if (!isTokenId(value)) throw new Error(`${code}:${String(value)}`);
+  return value;
+};
 
 const requireCoordinate = (value: number, code: string): number => {
   if (!Number.isSafeInteger(value) || value < 0) {

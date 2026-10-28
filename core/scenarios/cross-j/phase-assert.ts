@@ -1,4 +1,4 @@
-import { asTokenId } from '../../account/tx/units';
+import { asTokenId } from '../../protocol/units';
 /**
  * Fail-fast phase asserts for cross-j dual-Runtime scenarios / e2e.
  * Reuses orchestrator mesh + orderbook helpers — no parallel credit math.

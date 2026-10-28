@@ -4,6 +4,8 @@
  * These helpers do not participate in the Runtime frame transition. Keeping
  * them outside core/runtime/composition.ts makes the money-moving path easier to audit.
  */
+export { toEntityId } from '../../protocol/identity';
+
 export { entityNeedsPeriodicWake } from '../../runtime/mempool/wake';
 export * from './public-utilities';
 export { planReceiveCapacity, readAccountCapacity, planAccountFunding } from '../../account/capacity-plan';
@@ -150,9 +152,4 @@ export type {
   DebtEnforcementProjectionRuntimeInputParams,
   DebtEnforcementRuntimeInputParams,
 } from '../../runtime/j-submit/api';
-export {
-  normalizeEntityId,
-  compareEntityIds,
-  isLeftEntity,
-  createProviderScopedEntityId,
-} from '../../entity/id';
+export { compareEntityIds, isLeftEntity, createProviderScopedEntityId } from '../../entity/id';

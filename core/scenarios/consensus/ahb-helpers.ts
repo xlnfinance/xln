@@ -1,4 +1,4 @@
-import { asTokenId } from '../../account/tx/units';
+import { asTokenId } from '../../protocol/units';
 import { wholeUsdToTokenAmount } from '../../jurisdiction/machine/config/usd-reference-rate';
 import type { RuntimeReplica } from '../../runtime/types';
 import type { EntityInput, EntityReplica } from '../../entity/types';

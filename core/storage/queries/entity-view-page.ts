@@ -1,6 +1,7 @@
+import { toEntityId } from '../../protocol/identity';
 import type { EntityReplica } from '../../entity/types';
 import { compareAscii, sortedStringMapKeys, sortedStringMapStartIndex } from '../../support/collections/sorted-map-index';
-import { normalizeEntityId } from '../keys';
+
 import { projectAccountDoc, projectEntityCoreDoc } from '../read/projections';
 import type { StorageEntityViewPage } from '../read/read';
 
@@ -57,9 +58,9 @@ export const findReplicaForEntityId = (
   replicas: Iterable<EntityReplica>,
   entityId: string,
 ): EntityReplica | undefined => {
-  const normalized = normalizeEntityId(entityId);
+  const normalized = toEntityId(entityId);
   for (const replica of replicas) {
-    if (normalizeEntityId(replica.entityId) === normalized) return replica;
+    if (toEntityId(replica.entityId) === normalized) return replica;
   }
   return undefined;
 };
@@ -71,7 +72,7 @@ const pageAccounts = (
   const accounts = replica.state.accounts;
   const page = pageKeys(
     accounts,
-    normalizeEntityId(String(query?.accountsCursor ?? query?.cursor ?? '')),
+    ((query?.accountsCursor ?? query?.cursor) ? toEntityId(String(query?.accountsCursor ?? query?.cursor)) : ''),
     pageLimit(query?.accountsLimit ?? query?.limit),
     query?.sortDir === 'desc' ? 'desc' : 'asc',
   );

@@ -1,10 +1,11 @@
+import { toEntityId } from '../../protocol/identity';
 import { inspectStorage, readStorageHead, type StorageHead } from '..';
 import { resolveRuntimeWalDbPath, resolveStorageDbPath } from '../runtime-dbs';
 import { verifyStorageTailIntegrity } from '../read/verify';
 import { verifyLiveStorageIntegrity } from '../read/integrity/live';
 import { assertCertifiedJHistoryIntegrity } from '../../jurisdiction/machine/local-history';
 import { projectAccountDoc } from '../read/projections';
-import { normalizeEntityId } from '../keys';
+
 import type { EntityState } from '../../entity/types';
 import type { RuntimeReplica } from '../../runtime/types';
 import type { PersistenceQueryDeps } from './deps';
@@ -131,7 +132,7 @@ export const createPersistenceEntityQueries = (deps: PersistenceQueryDeps) => {
     withReplayedEnv(env, height, async restored => {
       const replica = findReplicaForEntityId(restored.state.eReplicas.values(), entityId);
       if (!replica) return null;
-      const account = replica.state.accounts.get(normalizeEntityId(counterpartyId));
+      const account = replica.state.accounts.get(toEntityId(counterpartyId));
       return account ? projectAccountDoc(account) : null;
     });
 
@@ -149,7 +150,7 @@ export const createPersistenceEntityQueries = (deps: PersistenceQueryDeps) => {
         const replica = findReplicaForEntityId(restored.state.eReplicas.values(), entityId);
         if (!replica) continue;
         assertCertifiedJHistoryIntegrity(replica.state);
-        pages.set(normalizeEntityId(entityId), projectEntityViewPageFromReplica(replica, query));
+        pages.set(toEntityId(entityId), projectEntityViewPageFromReplica(replica, query));
       }
       return pages;
     });
@@ -161,7 +162,7 @@ export const createPersistenceEntityQueries = (deps: PersistenceQueryDeps) => {
     query?: StorageEntityViewQuery,
   ): Promise<StorageEntityViewPage | null> => {
     const pages = await loadEntityViewPagesFromStorageDb(env, [entityId], height, query);
-    return pages?.get(normalizeEntityId(entityId)) ?? null;
+    return pages?.get(toEntityId(entityId)) ?? null;
   };
 
   const listPersistedCheckpointHeights = (env: RuntimeReplica): Promise<number[]> =>

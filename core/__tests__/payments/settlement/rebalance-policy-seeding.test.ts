@@ -1,4 +1,4 @@
-import { asTokenId } from '../../../account/tx/units';
+import { asTokenId } from '../../../protocol/units';
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';

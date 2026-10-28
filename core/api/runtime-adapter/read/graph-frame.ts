@@ -1,5 +1,6 @@
+import { toEntityId, toRuntimeId } from '../../../protocol/identity';
 import type { AccountTx } from '../../../types/account';
-import { normalizeEntityId } from '../../../storage/keys';
+
 import type { StorageAccountDoc, StorageEntityCoreDoc, StorageHead } from '../../../storage/types';
 import { compareAscii } from '../../../support/collections/sorted-map-index';
 import { XLN_PROTOCOL_VERSION } from '../../../protocol/version';
@@ -212,12 +213,12 @@ const captureLiveGraph = (
     );
   }
   const localEntityIds = new Set(
-    Array.from(ctx.env.state.eReplicas?.values?.() ?? []).map(replica => normalizeEntityId(replica.entityId)),
+    Array.from(ctx.env.state.eReplicas?.values?.() ?? []).map(replica => toEntityId(replica.entityId)),
   );
   const entities: RuntimeAdapterGraphEntityFrame[] = [];
   let accountObservationCount = 0;
   for (const summary of summaries) {
-    const entityId = normalizeEntityId(summary.entityId);
+    const entityId = toEntityId(summary.entityId);
     if (!localEntityIds.has(entityId)) {
       entities.push({
         summary,
@@ -270,11 +271,11 @@ const appendGraphAccountEndpoints = (
   runtimeId: string,
   height: number,
 ): void => {
-  const knownEntityIds = new Set(entities.map(entity => normalizeEntityId(entity.summary.entityId)));
+  const knownEntityIds = new Set(entities.map(entity => toEntityId(entity.summary.entityId)));
   for (const entity of [...entities]) {
     for (const account of entity.accounts.items) {
       for (const endpoint of [account.leftEntity, account.rightEntity]) {
-        const entityId = normalizeEntityId(endpoint);
+        const entityId = toEntityId(endpoint);
         if (!entityId || knownEntityIds.has(entityId)) continue;
         if (entities.length >= entityLimit) {
           throw new RuntimeAdapterError(
@@ -309,7 +310,7 @@ export const projectGraphFrame = async (
   const height = requestedHeight ?? currentEnvHeight;
   const entityLimit = readBoundedLimit(query?.limit, 500);
   const accountsLimit = readBoundedLimit(query?.accountsLimit, 500);
-  const capturedRuntimeId = normalizeEntityId(String(ctx.env.runtimeId || ''));
+  const capturedRuntimeId = (ctx.env.runtimeId ? toRuntimeId(ctx.env.runtimeId) : '');
   const capturedTimestamp = Math.max(0, Math.floor(Number(ctx.env.state.timestamp || 0)));
 
   // A live graph read is a projection of the in-memory R-frame, not a
@@ -360,11 +361,11 @@ export const projectGraphFrame = async (
         ...ctx,
         listEntityIdsAtHeight: async () => historicalIds,
         loadEntityViewPage: async (entityId, targetHeight) => {
-          const page = historicalPages.get(normalizeEntityId(entityId));
+          const page = historicalPages.get(toEntityId(entityId));
           if (!page)
             throw new RuntimeAdapterError(
               'E_NOT_FOUND',
-              `entity view not found at height ${targetHeight}: ${normalizeEntityId(entityId)}`,
+              `entity view not found at height ${targetHeight}: ${toEntityId(entityId)}`,
             );
           return page;
         },

@@ -1,4 +1,4 @@
-import { asTokenId } from '@xln/core/account/tx/units';
+import { asTokenId } from '@xln/core/protocol/units';
 import { wholeUsdToTokenAmount } from '@xln/core/jurisdiction/machine/config/usd-reference-rate';
 import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 import type { Profile, RuntimeInput, XLNModule } from '@xln/core/api/public/runtime-module';

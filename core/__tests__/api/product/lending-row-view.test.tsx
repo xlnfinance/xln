@@ -2,7 +2,8 @@ import { expect, test } from 'bun:test';
 import { renderToStaticMarkup } from '../../../../ui/node_modules/react-dom/server';
 import { LendingPositionSummary } from '../../../../ui/src/components/LendingPositionSummary';
 import type { LendingState } from '../../../../ui/src/runtime/financial/lending';
-import { asTokenDecimals, asTokenId } from '../../../account/tx/units';
+import { asTokenDecimals } from '../../../account/tx/units';
+import { asTokenId } from '../../../protocol/units';
 
 const hub = `0x${'22'.repeat(32)}`;
 const state: LendingState = {

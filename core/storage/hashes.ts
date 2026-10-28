@@ -5,6 +5,8 @@
  * Key functions: canonical Runtime, Entity, WAL, and outbox commitment hashes.
  * Human-audit importance: 100/100 — these hashes identify crash replay state.
  */
+import { toEntityId } from '../protocol/identity';
+
 import { computeIntegrityDigest } from '../support/bytes/integrity-checksum';
 import { compareStableText } from '../protocol/serialization';
 import type { RuntimeReplica } from '../runtime/types';
@@ -13,7 +15,7 @@ import {
   computeCanonicalRuntimeStateHash,
 } from './canonical-hash';
 import { encodeBinaryPayload } from '../protocol/serialization/binary-codec';
-import { STORAGE_FRAME_FORMAT, normalizeEntityId } from './keys';
+import { STORAGE_FRAME_FORMAT } from './keys';
 import { buildReplicaLookup } from './replica/replicas';
 import type { RuntimeFrame, StorageFrameEntityHash } from './types';
 
@@ -60,7 +62,7 @@ export const computeStorageFrameHash = (record: RuntimeFrame): string => {
     ...stableRecord,
     canonicalEntityHashes: (stableRecord.canonicalEntityHashes ?? [])
       .map(entry => ({
-        entityId: normalizeEntityId(entry.entityId),
+        entityId: toEntityId(entry.entityId),
         hash: entry.hash,
         cellCount: entry.cellCount,
       }))

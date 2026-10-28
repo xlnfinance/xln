@@ -1,3 +1,4 @@
+import { toEntityId } from '../../protocol/identity';
 import { validTermNoticeSeconds } from '../../account/config/term-notice';
 import { validateSpreadDistribution } from '../../swapbook';
 import { isProfileEntityKind, isProfileEntitySector } from '../../entity/profile';
@@ -15,7 +16,7 @@ import { assertLendingCovenant } from '../../protocol/dispute/lending-covenant';
 import { HASHABLE_DELTA_FIELDS } from '../../types/hash-coverage/account-nested';
 import type { AccountFrame, AccountState } from '../../types/account';
 import type { StorageAccountDoc, StorageEntityCoreDoc } from '../types';
-import { normalizeEntityId } from '../keys';
+
 import { validateSettlementContinuationValue } from '../../entity/account/account-metadata-validation';
 import {
   requireBoundaryInteger,
@@ -456,7 +457,7 @@ export const assertStorageEntityDocBinding = (
   expectedEntityId: string,
   scope: string,
 ): StorageEntityCoreDoc => {
-  if (normalizeEntityId(doc.entityId) !== normalizeEntityId(expectedEntityId)) {
+  if (toEntityId(doc.entityId) !== toEntityId(expectedEntityId)) {
     throw new Error(`STORAGE_ENTITY_DOC_KEY_MISMATCH:scope=${scope}`);
   }
   return doc;
@@ -467,16 +468,16 @@ export const assertStorageAccountDocBinding = (
   counterpartyId: string,
   scope: string,
 ): StorageAccountDoc => {
-  const owner = normalizeEntityId(entityId);
-  const counterparty = normalizeEntityId(counterpartyId);
-  const endpoints = new Set([normalizeEntityId(doc.state.leftEntity), normalizeEntityId(doc.state.rightEntity)]);
+  const owner = toEntityId(entityId);
+  const counterparty = toEntityId(counterpartyId);
+  const endpoints = new Set([toEntityId(doc.state.leftEntity), toEntityId(doc.state.rightEntity)]);
   if (owner === counterparty || endpoints.size !== 2 || !endpoints.has(owner) || !endpoints.has(counterparty)) {
     throw new Error(`STORAGE_ACCOUNT_DOC_KEY_MISMATCH:scope=${scope}`);
   }
   // The storage key owns proof orientation; endpoint swaps cannot reinterpret one document.
   if (
-    normalizeEntityId(doc.proofHeader.fromEntity) !== owner ||
-    normalizeEntityId(doc.proofHeader.toEntity) !== counterparty
+    toEntityId(doc.proofHeader.fromEntity) !== owner ||
+    toEntityId(doc.proofHeader.toEntity) !== counterparty
   )
     throw new Error(`STORAGE_ACCOUNT_DOC_OWNER_MISMATCH:scope=${scope}`);
   return doc;

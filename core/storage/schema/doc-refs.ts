@@ -1,10 +1,11 @@
-import { keyLiveAccount, keyLiveBook, keyLiveEntity, normalizeEntityId } from '../keys';
+import { toEntityId } from '../../protocol/identity';
+import { keyLiveAccount, keyLiveBook, keyLiveEntity } from '../keys';
 import type { StorageDocRef } from '../types';
 
 export const docRefKey = (ref: StorageDocRef): string => {
-  if (ref.family === 'entity') return `e:${normalizeEntityId(ref.entityId)}`;
-  if (ref.family === 'account') return `a:${normalizeEntityId(ref.entityId)}:${normalizeEntityId(ref.counterpartyId)}`;
-  return `b:${normalizeEntityId(ref.entityId)}:${ref.pairId}`;
+  if (ref.family === 'entity') return `e:${toEntityId(ref.entityId)}`;
+  if (ref.family === 'account') return `a:${toEntityId(ref.entityId)}:${toEntityId(ref.counterpartyId)}`;
+  return `b:${toEntityId(ref.entityId)}:${ref.pairId}`;
 };
 
 export const liveKeyForRef = (ref: StorageDocRef): Buffer => {

@@ -1,4 +1,4 @@
-import { asTokenId } from '@xln/core/account/tx/units';
+import { asTokenId } from '@xln/core/protocol/units';
 import { assertDemoNetwork } from '@xln/frontend/lib/config/demo-accounts';
 import {
   assertSessionOwned,

@@ -1,7 +1,8 @@
+import { toEntityId } from '../../../protocol/identity';
 import type { Provider } from 'ethers';
 import { ethers } from 'ethers';
 import type { Depository, EntityProvider } from '../../../../jurisdictions/typechain-types/index.ts';
-import { normalizeEntityId } from '../../../entity/id';
+
 import { computeAccountKey } from '../events/contract-codec';
 import type { JAdapter, JAdapterConfig, JEvent, JTokenInfo, JWalletSnapshot, JWalletSnapshotRequest } from '../types';
 import { readRpcWalletSnapshot } from './wallet/rpc-wallet-snapshot';
@@ -151,13 +152,13 @@ export const createRpcReadMethods = (deps: RpcReadDeps): ReadMethods => {
     },
 
     async getEntityNonce(entityId: string): Promise<bigint> {
-      return deps.depository.entityNonces(normalizeEntityId(entityId));
+      return deps.depository.entityNonces(toEntityId(entityId));
     },
 
     hasProcessedBatch,
 
     async getEntityProviderActionNonce(entityId: string): Promise<bigint> {
-      return deps.entityProvider.entityActionNonces(normalizeEntityId(entityId));
+      return deps.entityProvider.entityActionNonces(toEntityId(entityId));
     },
 
     async getEntityProviderActionReceipt(entityId: string, actionNonce: bigint): Promise<JEvent | null> {

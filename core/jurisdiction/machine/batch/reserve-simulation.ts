@@ -1,5 +1,6 @@
+import { toEntityId } from '../../../protocol/identity';
 import type { JBatch } from './';
-import { normalizeEntityId } from '../../../entity/id';
+
 
 type DraftBatchReserveOpType =
   | 'reserveToReserve'
@@ -188,8 +189,8 @@ function applySettlement(
   debtSweeps: Map<number, DebtSweep>,
 ): void {
   const { state } = simulation;
-  const isLeft = normalizeEntityId(settlement.leftEntity) === entityId;
-  const isRight = normalizeEntityId(settlement.rightEntity) === entityId;
+  const isLeft = toEntityId(settlement.leftEntity) === entityId;
+  const isRight = toEntityId(settlement.rightEntity) === entityId;
   if (!isLeft && !isRight) return;
   for (const diff of settlement.diffs) {
     const ownDiff = isLeft ? diff.leftDiff : diff.rightDiff;
@@ -271,24 +272,24 @@ export function simulateDraftBatchReserveAvailability(
   };
   if (!batch) return state;
   const simulation: Simulation = { state, deficitOrigins: new Map() };
-  const entityId = normalizeEntityId(entityIdInput);
+  const entityId = toEntityId(entityIdInput);
   const settlementDebtSweeps = new Map<number, DebtSweep>();
 
   for (const op of batch.externalTokenToReserve) {
-    const target = op.entity ? normalizeEntityId(op.entity) : entityId;
+    const target = op.entity ? toEntityId(op.entity) : entityId;
     if (target === entityId) creditInitiator(state, op.internalTokenId, op.amount);
   }
   for (const [index, op] of batch.reserveToReserve.entries()) {
     if (!spendOrRecordRevert(simulation, op.tokenId, op.amount, 'reserveToReserve', index)) continue;
-    if (normalizeEntityId(op.receivingEntity) === entityId) creditInitiator(state, op.tokenId, op.amount);
+    if (toEntityId(op.receivingEntity) === entityId) creditInitiator(state, op.tokenId, op.amount);
   }
   for (const op of batch.collateralToReserve) creditInitiator(state, op.tokenId, op.amount);
 
   // Depository._enforceSettlementOutflowDebts: every outflow token is swept
   // once, before any settlement diff is applied.
   for (const settlement of batch.settlements) {
-    const isLeft = normalizeEntityId(settlement.leftEntity) === entityId;
-    const isRight = normalizeEntityId(settlement.rightEntity) === entityId;
+    const isLeft = toEntityId(settlement.leftEntity) === entityId;
+    const isRight = toEntityId(settlement.rightEntity) === entityId;
     for (const diff of settlement.diffs) {
       const ownDiff = isLeft ? diff.leftDiff : isRight ? diff.rightDiff : 0n;
       if (ownDiff >= 0n) continue;

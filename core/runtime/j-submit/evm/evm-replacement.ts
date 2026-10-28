@@ -1,3 +1,4 @@
+import { toUnixS, unixSToUnixMs, type UnixMs } from '../../../protocol/units';
 import { validateEvmFeeLimits, withinEvmFeeLimits } from './evm-fee-authorization';
 import { ethers } from 'ethers';
 import type { RuntimeReplica, RuntimeTx } from '../../types';
@@ -21,27 +22,27 @@ export type JFeeQuote = {
   attemptId: string;
   transactionHash: string;
   ceilingWei: string;
-  deadline: number | null;
+  deadline: UnixMs | null;
   remainingMs: number | null;
 };
 
-export const batchResponseDeadline = (env: RuntimeReplica, batch: Batch): number | null => {
+export const batchResponseDeadline = (env: RuntimeReplica, batch: Batch): UnixMs | null => {
   const replica = findJSubmitReplica(env, batch.entityId, batch.data.signerId ?? '');
   if (!replica) return null;
   const deadlines = batch.data.batch.counterDisputes.flatMap(op => {
     const account = replica.state.accounts.get(op.counterentity.toLowerCase());
     const active = account?.activeDispute;
     if (!account || !active?.observedOnChain) return [];
-    return [active.disputeTimeout * 1000];
+    return [unixSToUnixMs(toUnixS(active.disputeTimeout))];
   });
-  return deadlines.length ? Math.min(...deadlines) : null;
+  return deadlines.reduce<UnixMs | null>((earliest, deadline) => earliest === null || deadline < earliest ? deadline : earliest, null);
 };
 
 export const quoteJReplacement = async (
   adapter: JAdapter,
   batch: Batch,
   now: number,
-  deadline: number | null,
+  deadline: UnixMs | null,
 ): Promise<JFeeQuote> => {
   const attempt = batch.data.runtimeSubmitAttempt;
   if (!attempt?.rawTransaction || adapter.mode === 'tron') throw new Error('EVM_REPLACEMENT_WIRE_MISSING');

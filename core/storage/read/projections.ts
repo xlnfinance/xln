@@ -1,7 +1,8 @@
+import { toEntityId, toSignerId } from '../../protocol/identity';
 import type { AccountReplica } from '../../types/account';
 import type { EntityReplica, EntityState } from '../../entity/types';
 import { encodeBuffer } from '../codec/codec';
-import { normalizeEntityId } from '../keys';
+
 import type { StorageAccountDoc, StorageEntityCoreDoc, StorageReplicaMeta } from '../types';
 import {
   withDefinedProperty,
@@ -142,7 +143,7 @@ export const projectEntityReplicaCoreView = (
   replica: Pick<EntityReplica, 'signerId' | 'isProposer'>,
 ): EntityReplicaCoreViewDoc => ({
   ...projectEntityCoreDoc(state),
-  signerId: normalizeEntityId(replica.signerId),
+  signerId: toSignerId(replica.signerId.toLowerCase()),
   isProposer: replica.isProposer,
 });
 
@@ -155,8 +156,8 @@ const buildReplicaMetaProjection = (
   state: EntityState,
   options?: ReplicaMetaProjectionOptions,
 ): StorageReplicaMeta => ({
-  entityId: normalizeEntityId(replica.entityId),
-  signerId: normalizeEntityId(replica.signerId),
+  entityId: toEntityId(replica.entityId),
+  signerId: toSignerId(replica.signerId.toLowerCase()),
   isProposer: replica.isProposer,
   ...withDefinedProperty('position', replica.position),
   ...withDefinedProperty(

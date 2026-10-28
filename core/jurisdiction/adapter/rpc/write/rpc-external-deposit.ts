@@ -1,5 +1,6 @@
+import { toEntityId } from '../../../../protocol/identity';
 import { ethers } from 'ethers';
-import { normalizeEntityId } from '../../../../entity/id';
+
 import type { Signer } from 'ethers';
 import type { JBatch } from '../../../machine/batch';
 import { buildExternalTokenToReserveBatch } from '../../events/contract-codec';
@@ -61,7 +62,7 @@ export const createRpcExternalDeposit = (
       internalTokenId: options?.internalTokenId ?? 0,
     });
     const receipt = await processSignedBatch(entityId, batch, wallet, walletKey);
-    const normalized = normalizeEntityId(entityId);
+    const normalized = toEntityId(entityId);
     const processed = receipt.events.find(
       event => event.name === 'HankoBatchProcessed' && String(event.args['entityId'] || '').toLowerCase() === normalized,
     );

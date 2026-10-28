@@ -1,4 +1,5 @@
-import { asTokenId, type TokenDecimals } from './tx/units';
+import { asTokenId } from '../protocol/units';
+import type { TokenDecimals } from './tx/units';
 /**
  * Account utilities for calculating balances and derived states
  * Based on old_src/app/Channel.ts deriveDelta logic

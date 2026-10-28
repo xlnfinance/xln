@@ -1,5 +1,6 @@
+import { toEntityId } from '../../../protocol/identity';
 import { detectEntityType, extractNumberFromEntityId } from '../../../entity/factory';
-import { normalizeEntityId } from '../../../entity/id';
+
 import type { JurisdictionConfig } from '../../../entity/types';
 import { connectJurisdictionAdapter, connectJurisdictionContracts } from './jurisdiction';
 
@@ -38,7 +39,7 @@ export const getEntityInfoFromChain = async (
     };
   } catch (error) {
     throw new Error(
-      `GET_ENTITY_INFO_FROM_CHAIN_FAILED:entity=${normalizeEntityId(entityId)}:` +
+      `GET_ENTITY_INFO_FROM_CHAIN_FAILED:entity=${toEntityId(entityId)}:` +
       `${error instanceof Error ? error.message : String(error)}`,
       error instanceof Error ? { cause: error } : undefined,
     );

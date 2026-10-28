@@ -79,7 +79,7 @@ import {
   withCanonicalCrossJurisdictionRouteHash,
 } from '../../extensions/cross-j';
 import { getJurisdictionStackId } from '../../jurisdiction/machine/jurisdiction-stack';
-import { crossJDeadlines } from '../../extensions/cross-j/deadlines';
+import { parseCrossJDeadlines } from '../../extensions/cross-j/deadlines';
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import { LIMITS } from '../../config/constants';
 import type { AccountInput, AccountReplica, AccountTx } from '../../types/account';
@@ -444,7 +444,7 @@ class BilateralHarness {
     const left = account.state.leftEntity;
     const right = account.state.rightEntity;
     const expiresAt = 20_000;
-    const deadlines = crossJDeadlines({ expiresAt });
+    const deadlines = parseCrossJDeadlines({ expiresAt });
     const route: CrossJurisdictionSwapRoute = withCanonicalCrossJurisdictionRouteHash({
       orderId,
       makerEntityId: left,

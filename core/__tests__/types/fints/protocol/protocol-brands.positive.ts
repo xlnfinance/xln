@@ -1,3 +1,4 @@
+import { toAccountHeight, toEntityHeight, toJHeight, toRuntimeHeight, toUnixMs, toUnixS, type AccountHeight, type EntityHeight, type JHeight, type RuntimeHeight, type UnixMs, type UnixS, asTokenId, unixMsToUnixSFloor, unixSToUnixMs, type TokenId } from '../../../../protocol/units';
 import {
   createReplicaKey,
   formatReplicaKey,
@@ -10,20 +11,7 @@ import {
   type RuntimeId,
   type SignerId,
 } from '../../../../protocol/identity';
-import {
-  toAccountHeight,
-  toEntityHeight,
-  toJHeight,
-  toRuntimeHeight,
-  toUnixMs,
-  toUnixS,
-  type AccountHeight,
-  type EntityHeight,
-  type JHeight,
-  type RuntimeHeight,
-  type UnixMs,
-  type UnixS,
-} from '../../../../protocol/units';
+
 import type { DecodedRuntimeEntityInputsEnvelope } from '../../../../network/p2p/auth/entity-input-envelope';
 import type { DecodedRuntimeInput } from '../../../../runtime/decode';
 import type { DecodedJInput, DecodedJTx } from '../../../../storage/wal/runtime-machine-schema/j';
@@ -138,3 +126,15 @@ export const fintsPositiveProtocolBrands = (): readonly [
   true,
   true,
 ];
+
+
+import { crossJDeadlines } from '../../../../extensions/cross-j/deadlines';
+export const tokenBoundary: TokenId = asTokenId(65535);
+export const secondsBoundary: UnixS = unixMsToUnixSFloor(toUnixMs(1999));
+export const millisecondsBoundary: UnixMs = unixSToUnixMs(toUnixS(1));
+export const sourcePullDeadline: UnixS = crossJDeadlines(toUnixMs(1999)).source;
+
+import { compareEntityIds } from '../../../../protocol/identity/entity-id';
+type ComparatorTakesEntityIds = Expect<Equal<Parameters<typeof compareEntityIds>, [EntityId, EntityId]>>;
+type DeadlineTakesUnixMs = Expect<Equal<Parameters<typeof crossJDeadlines>[0], UnixMs>>;
+export const actualApiUnitContracts: [ComparatorTakesEntityIds, DeadlineTakesUnixMs] = [true, true];

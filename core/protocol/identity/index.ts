@@ -19,7 +19,7 @@ declare const JIdBrand: unique symbol;
 declare const RuntimeIdBrand: unique symbol;
 
 /** Entity identifier - 32-byte hex string (0x + 64 chars) */
-export type EntityId = string & { readonly [EntityIdBrand]: typeof EntityIdBrand };
+export type EntityId = `0x${string}` & { readonly [EntityIdBrand]: typeof EntityIdBrand };
 
 /** Signer identifier - wallet address or named signer */
 export type SignerId = string & { readonly [SignerIdBrand]: typeof SignerIdBrand };
@@ -51,9 +51,9 @@ export interface ReplicaKey {
 // TYPE GUARDS & VALIDATORS
 // =============================================================================
 
-/** Check if string is valid EntityId format (0x + 64 hex chars) */
+/** A branded EntityId is already canonical; changing case after signing changes bytes. */
 export const isValidEntityId = (s: string): s is EntityId => {
-  return typeof s === 'string' && /^0x[a-fA-F0-9]{64}$/.test(s);
+  return typeof s === 'string' && /^0x[a-f0-9]{64}$/.test(s);
 };
 
 /** Check if string is valid SignerId (non-empty string) */

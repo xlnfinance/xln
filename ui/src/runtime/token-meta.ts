@@ -1,4 +1,5 @@
-import type { TokenId, TokenDecimals } from '@xln/core/account/tx/units';
+import type { TokenDecimals } from '@xln/core/account/tx/units';
+import type { TokenId } from '@xln/core/protocol/units';
 import { useApp } from './store';
 import { tokenCatalogMeta } from './financial/swap-assets/metadata';
 

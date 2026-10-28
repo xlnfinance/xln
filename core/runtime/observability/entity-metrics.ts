@@ -1,4 +1,5 @@
-import { normalizeEntityId } from '../../storage/keys';
+import { toEntityId } from '../../protocol/identity';
+
 import type { FrameLogEntry } from '../../types/logging';
 import type { RuntimeEntityMetricStats, RuntimeReplica } from '../types';
 
@@ -14,7 +15,7 @@ const requireEventEntityId = (entry: FrameLogEntry): string => {
   if (typeof value !== 'string' || !value.trim()) {
     throw new Error(`RUNTIME_ENTITY_METRIC_EVENT_ENTITY_MISSING:${entry.message}`);
   }
-  return normalizeEntityId(value);
+  return toEntityId(value);
 };
 
 const checkedAdd = (current: number, increment: number, metric: string): number => {
@@ -29,7 +30,7 @@ export const readRuntimeEntityMetricStats = (
   env: RuntimeReplica,
   entityId: string,
 ): RuntimeEntityMetricStats =>
-  env.infrastructure?.entityMetricStats?.get(normalizeEntityId(entityId)) ?? EMPTY_ENTITY_METRICS;
+  env.infrastructure?.entityMetricStats?.get(toEntityId(entityId)) ?? EMPTY_ENTITY_METRICS;
 
 /**
  * Apply counters only after the frame WAL commit. Counting ingress, proposals,

@@ -1,4 +1,4 @@
-import { asTokenId, type TokenId } from '@xln/core/account/tx/units';
+import { asTokenId, type TokenId } from '@xln/core/protocol/units';
 import { deleteVaultDeviceKey, type ProtectedVaultSecrets } from '../../../frontend/src/lib/security/vaultProtection';
 import type { ChainSyncView } from './chain-catchup';
 import { niceUsdPerPx } from './bar-scale';

@@ -1,6 +1,7 @@
+import { toEntityId, toRuntimeId } from '@xln/core/protocol/identity';
 import { useMemo } from 'react';
 import type { RuntimeAdapterEntitySummary } from '@xln/core/api/public/runtime-module';
-import { normalizeEntityId } from '@xln/core/protocol/identity/entity-id';
+
 import { getAdapter } from './adapter';
 import { useAdapterRead } from './hooks';
 import { useApp } from './store';
@@ -26,7 +27,7 @@ export type ServedEntity = {
  */
 function servedByRuntime(summary: RuntimeAdapterEntitySummary, runtimeId: string): boolean {
 	if (!String(summary.signerId || '').trim()) return false;
-	const owner = normalizeEntityId(String(summary.runtimeId || ''));
+	const owner = summary.runtimeId ? toRuntimeId(summary.runtimeId) : null;
 	return !owner || !runtimeId || owner === runtimeId;
 }
 
@@ -48,11 +49,12 @@ export function useServedEntities(enabled = true): ServedEntity[] {
 
 	return useMemo<ServedEntity[]>(() => {
 		if (status !== 'connected' || !Array.isArray(summaries)) return [];
-		const runtimeId = normalizeEntityId(String(getAdapter()?.runtimeId || ''));
+		const adapterRuntimeId = getAdapter()?.runtimeId;
+		const runtimeId = adapterRuntimeId ? toRuntimeId(adapterRuntimeId) : '';
 		const served = summaries
 			.filter(summary => servedByRuntime(summary, runtimeId))
 			.map(summary => {
-				const entityId = normalizeEntityId(String(summary.entityId || ''));
+				const entityId = toEntityId(String(summary.entityId || ''));
 				const label = String(summary.label || '').trim();
 				return {
 					entityId,
@@ -78,9 +80,9 @@ export function useServedEntities(enabled = true): ServedEntity[] {
  * entity's frames. Callers own navigation: the screen we land on is theirs.
  */
 export function switchActiveEntity(entityId: string): void {
-	const next = normalizeEntityId(String(entityId || ''));
+	const next = toEntityId(String(entityId || ''));
 	const app = useApp.getState();
-	if (!next || normalizeEntityId(String(app.activeEntityId || '')) === next) return;
+	if (app.activeEntityId === next) return;
 	app.setExternalWallet(null);
 	app.clearToasts();
 	useReceipts.getState().dismiss();

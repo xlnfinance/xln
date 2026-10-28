@@ -1,10 +1,11 @@
+import { toEntityId } from '../../../../protocol/identity';
 import { ethers, type Signer } from 'ethers';
 import type { Depository, EntityProvider } from '../../../../../jurisdictions/typechain-types/index.ts';
 import {
   assertEntityProviderActionJTxBinding,
   assertEntityProviderActionResolutionReceipt,
 } from '../../../../entity/entity-provider-action';
-import { normalizeEntityId } from '../../../../entity/id';
+
 import type { JTx } from '../../../../types/jurisdiction-runtime';
 import { classifyJAdapterFailure, makeJAdapterFailureResult } from '../../kernel/failure';
 import { parseReceiptLogsToJEvents } from '../../j-event-log-decoder';
@@ -119,7 +120,7 @@ export const submitEntityProviderAction = async (
   if (!jTx.data.hankoSignature) {
     return {
       success: false,
-      error: `ENTITY_PROVIDER_ACTION_CONSENSUS_HANKO_MISSING:` + normalizeEntityId(jTx.entityId),
+      error: `ENTITY_PROVIDER_ACTION_CONSENSUS_HANKO_MISSING:` + toEntityId(jTx.entityId),
     };
   }
   try {

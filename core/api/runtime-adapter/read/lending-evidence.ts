@@ -1,5 +1,6 @@
+import { toEntityId } from '../../../protocol/identity';
 import { RuntimeAdapterError } from '../errors';
-import { normalizeEntityId } from '../../../storage/keys';
+
 import { compactAccountDocForView } from './compact-view';
 import { envHeight, findReplica, readAtHeight, type RuntimeAdapterResolveContext } from './context';
 import type { RuntimeAdapterReadQuery } from '../types';
@@ -13,7 +14,7 @@ export function readLendingEvidence(
 ) {
   if (readAtHeight(query) !== null)
     throw new RuntimeAdapterError('E_BAD_QUERY', 'lending evidence is a current committed read');
-  const borrower = normalizeEntityId(query?.accountId ?? '');
+  const borrower = toEntityId(query?.accountId ?? '');
   if (!borrower) throw new RuntimeAdapterError('E_BAD_QUERY', 'borrower accountId is required');
   const replica = findReplica(ctx.env, entityId);
   if (!replica) throw new RuntimeAdapterError('E_NOT_FOUND', 'bank entity unavailable');

@@ -13,6 +13,8 @@ mod radix;
 mod rlp;
 mod tokens;
 mod value;
+mod units;
+pub use units::{TimeUnitError, UnixMs, UnixS};
 pub use tokens::{
     CREDIT_REQUEST_CAP_USD, DEFAULT_REBALANCE_POLICY_USD, REBALANCE_BASE_FEE_USD_MICROS,
     USD_MICROS_PER_DOLLAR, UsdAmountError, canonical_reference_mid_price_ticks,

@@ -1,3 +1,4 @@
+import { toEntityId } from '../../../protocol/identity';
 import { applyJEventsToEnv } from '../../../jurisdiction/adapter/watcher';
 import type { JAdapter, JTokenInfo } from '../../../jurisdiction/adapter/types';
 import { getEntityJAdapter } from '../../../runtime';
@@ -17,7 +18,6 @@ import {
   tokenCatalogForHubJurisdiction,
   waitForTokenCatalog,
 } from './token-catalog';
-import { normalizeEntityRef } from '../../../support/boundary-guards';
 
 /** Hub process state the reserve bootstrap reads; hub-node owns every field. */
 export type HubReserveDeps = Readonly<{
@@ -28,7 +28,6 @@ export type HubReserveDeps = Readonly<{
   finishTiming: (stage: 'reserve_funding', startedAt: number) => void;
 }>;
 
-export const normalizeEntityId = normalizeEntityRef;
 
 const requireJAdapterForEntity = (env: RuntimeReplica, entityId: string, purpose: string): JAdapter => {
   const adapter = getEntityJAdapter(env, entityId);
@@ -163,7 +162,7 @@ const resolveEntityTokenCatalog = async (
   env: RuntimeReplica,
   entityId: string,
 ): Promise<JTokenInfo[]> => {
-  const normalizedEntityId = normalizeEntityId(entityId);
+  const normalizedEntityId = toEntityId(entityId);
   const cached = deps.tokenCatalogsByEntityId.get(normalizedEntityId);
   const jadapter = requireJAdapterForEntity(env, entityId, 'TOKEN_CATALOG');
   if (cached && cached.length >= requiredHubTokenCount(jadapter.chainId)) return cached;
@@ -210,7 +209,7 @@ export const buildHubBootstrapReserveHealth = (
         }]
       : [];
   const entities = entries.map((entry) => {
-    const catalog = deps.tokenCatalogsByEntityId.get(normalizeEntityId(entry.entityId)) ?? defaultCatalog;
+    const catalog = deps.tokenCatalogsByEntityId.get(toEntityId(entry.entityId)) ?? defaultCatalog;
     const health = getReserveHealth(env, entry.entityId, catalog);
     return {
       entityId: entry.entityId,
