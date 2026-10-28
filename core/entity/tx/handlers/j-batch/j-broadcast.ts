@@ -225,6 +225,25 @@ const commitBroadcast = (
   state.jBatchState!.status = 'sent';
 };
 
+const refreshBroadcastDisputeArguments = (
+  selected: JBatch,
+  state: EntityState,
+  env: EntityRuntimeContext,
+): void => {
+  // Refresh only the mutable selected draft, including recovery drafts. Sent
+  // bytes and starter commitments remain immutable under their original Hanko.
+  for (const proof of selected.disputeFinalizations) {
+    if (proof.finalProofbody.transformers.length === 0 || proof.cooperative
+      || (state.entityId < String(proof.counterentity)) === proof.startedByLeft) continue;
+    const account = state.accounts.get(String(proof.counterentity));
+    if (!account) throw new Error(`DISPUTE_ARGUMENT_ACCOUNT_MISSING:${proof.counterentity}`);
+    proof.otherArguments = refreshDisputeSecretArguments(
+      proof.finalProofbody, proof.otherArguments, state, String(proof.counterentity),
+      requireAccountDeltaTransformerAddress(env.state, account.state),
+    );
+  }
+};
+
 export async function handleJBroadcast(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'j_broadcast' }>,
@@ -289,18 +308,7 @@ export async function handleJBroadcast(
     : newState.jBatchState.batch;
   const { selected, remainder, disputePriority } = takeBroadcastBatch(sourceBatch, Math.floor(newState.timestamp / 1000));
   if (isBatchEmpty(selected)) return { newState, outputs, jOutputs };
-  // Refresh only the mutable selected draft, including recovery drafts. Sent
-  // bytes and starter commitments remain immutable under their original Hanko.
-  for (const proof of selected.disputeFinalizations) {
-    if (proof.finalProofbody.transformers.length === 0 || proof.cooperative
-      || (newState.entityId < String(proof.counterentity)) === proof.startedByLeft) continue;
-    const account = newState.accounts.get(String(proof.counterentity));
-    if (!account) throw new Error(`DISPUTE_ARGUMENT_ACCOUNT_MISSING:${proof.counterentity}`);
-    proof.otherArguments = refreshDisputeSecretArguments(
-      proof.finalProofbody, proof.otherArguments, newState, String(proof.counterentity),
-      requireAccountDeltaTransformerAddress(env.state, account.state),
-    );
-  }
+  refreshBroadcastDisputeArguments(selected, newState, env);
   const prepared = prepareBroadcast(
     newState,
     selected,

@@ -83,7 +83,9 @@
       ],
       "testGlobs": [
         "jurisdictions/test/**/*Depository*",
-        "jurisdictions/test/foundry/**/*.sol"
+        "jurisdictions/test/foundry/**/*.sol",
+        "core/__tests__/security/dispute/dispute-pending-exit.test.ts",
+        "core/__tests__/security/dispute/dispute-secret-arguments.test.ts"
       ],
       "dependencies": [
         "contracts-governance"
@@ -160,7 +162,9 @@
         "core/entity/**/*.ts"
       ],
       "testGlobs": [
-        "core/__tests__/**/*entity*"
+        "core/__tests__/**/*entity*",
+        "core/__tests__/security/dispute/dispute-pending-exit.test.ts",
+        "core/__tests__/security/dispute/dispute-secret-arguments.test.ts"
       ],
       "dependencies": [
         "account-consensus",
@@ -523,7 +527,9 @@
       ],
       "testGlobs": [
         "jurisdictions/test/**/*Depository*",
-        "jurisdictions/test/foundry/**/*.sol"
+        "jurisdictions/test/foundry/**/*.sol",
+        "core/__tests__/security/dispute/dispute-pending-exit.test.ts",
+        "core/__tests__/security/dispute/dispute-secret-arguments.test.ts"
       ]
     },
     {
@@ -614,7 +620,9 @@
         "core/entity/**/*.ts"
       ],
       "testGlobs": [
-        "core/__tests__/**/*entity*"
+        "core/__tests__/**/*entity*",
+        "core/__tests__/security/dispute/dispute-pending-exit.test.ts",
+        "core/__tests__/security/dispute/dispute-secret-arguments.test.ts"
       ]
     },
     {
