@@ -1087,6 +1087,16 @@ describe('Depository', () => {
             ethers.keccak256('0x'),
           ],
         )),
+        '0x',
+        [
+          dispute.finalization.initialProofbodyHash,
+          dispute.finalization.finalNonce,
+          dispute.finalization.proposerIsLeft,
+          dispute.finalization.startedByLeft,
+          ethers.keccak256(dispute.finalization.starterArguments as string),
+          dispute.finalization.otherArguments,
+          dispute.finalization.sig,
+        ],
       );
     expect((await depository._accounts(dispute.accountKey)).nonce).to.equal(maxSafeNonce);
   });
@@ -1706,6 +1716,16 @@ describe('Depository', () => {
           [initialProofbodyHash, finalNonce, true, true, ethers.keccak256('0x'), ethers.keccak256('0x'),
             ethers.keccak256(counterpartyFinalization.sig)],
         )),
+        abi.encode([PROOF_BODY_ABI], [finalProofbody]),
+        [
+          counterpartyFinalization.initialProofbodyHash,
+          counterpartyFinalization.finalNonce,
+          counterpartyFinalization.proposerIsLeft,
+          counterpartyFinalization.startedByLeft,
+          ethers.keccak256(counterpartyFinalization.starterArguments),
+          counterpartyFinalization.otherArguments,
+          counterpartyFinalization.sig,
+        ],
       );
 
     const finalizedAccount = await depository._accounts(acctKey);
@@ -2925,7 +2945,8 @@ describe('Depository', () => {
         ),
     )
       .to.emit(depository, 'CounterDisputeRegistered')
-      .withArgs(right.entityId, left.entityId, finalNonce, true, finalProofbodyHash);
+      .withArgs(right.entityId, left.entityId, finalNonce, true, finalProofbodyHash,
+        abi.encode([PROOF_BODY_ABI], [finalProofbody]));
 
     // The tower may lock the newer signed branch during the last-resort
     // window, but the same finalization barrier T applies to everyone. A

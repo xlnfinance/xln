@@ -762,6 +762,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
         dispute.disputeNonce,
         true,
         leftHash,
+        abi.encode([PROOF_BODY_ABI], [leftBody]),
       );
     const selected = await dispute.depository._accounts(dispute.acctKey);
     expect(selected.disputeCounterNonce).to.equal(dispute.disputeNonce);

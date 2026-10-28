@@ -673,7 +673,7 @@ describe('EntityProvider board rotation grace', function () {
       1n,
       buildSingleSignerHanko(entityId, towerHash, deriveHardhatPrivateKey(2)),
     )).to.emit(depository, 'CounterDisputeRegistered')
-      .withArgs(entityId, counterentity, finalNonce, finalProposerIsLeft, finalProofbodyHash);
+      .withArgs(entityId, counterentity, finalNonce, finalProposerIsLeft, finalProofbodyHash, '0x');
 
     const timeout = (await depository._accounts(accountKey)).disputeTimeout;
     await time.increaseTo(Number(timeout));

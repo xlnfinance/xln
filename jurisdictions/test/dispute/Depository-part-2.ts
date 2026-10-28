@@ -659,7 +659,8 @@ describe('Depository', () => {
       ),
     )
       .to.emit(depository, 'CounterDisputeRegistered')
-      .withArgs(left.entityId, right.entityId, finalNonce, false, finalProofbodyHash);
+      .withArgs(left.entityId, right.entityId, finalNonce, false, finalProofbodyHash,
+        abi.encode([PROOF_BODY_ABI], [finalProofbody]));
   });
 
   it('waits the signed window for a newer Pull proof and settles only registry evidence', async function () {
