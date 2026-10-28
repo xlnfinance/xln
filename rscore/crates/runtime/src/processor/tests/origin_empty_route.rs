@@ -100,6 +100,7 @@ fn real_two_runtime_empty_route_htlc_commits_and_replays() {
 }
 
 fn run_empty_route_payments(reject_between: Option<&str>) {
+    let chain = crate::j_watcher::tests::FakeRpcServer::idle();
     let directory = path();
     let peer_seed = hex(&[0x7b; 32]);
     let (a_seed, b_seed) = ("rrs-origin-a", "rrs-origin-b");
@@ -114,6 +115,39 @@ fn run_empty_route_payments(reject_between: Option<&str>) {
         (&mut a_replica, &a_key, [3; 32]),
         (&mut b_replica, &b_key, [4; 32]),
     ] {
+        // Origin planning requires the owning Entity's committed cadence. Reuse
+        // the watcher RPC fixture; the sockets, signatures, money and WAL stay real.
+        replica
+            .e_replicas
+            .get_mut(key)
+            .unwrap()
+            .entity_consensus
+            .state
+            .authority
+            .config
+            .jurisdiction = Some(
+            crate::canonical_value_from_tagged_json(&json!({
+                "chainId":31337, "blockTimeMs":10000,
+                "depositoryAddress":format!("0x{}", "88".repeat(20)),
+                "entityProviderAddress":format!("0x{}", "77".repeat(20)),
+            }))
+            .unwrap(),
+        );
+        replica.durable = RuntimeDurableEnvelope::decode(
+            &json!({
+                "runtimeId":replica.durable.runtime_id(),
+                "runtimeConfig":{"minFrameDelayMs":5}, "infrastructure":{},
+                "jReplicas":[["test", {"chainId":31337, "rpcs":[chain.endpoint],
+                    "name":"test", "blockDelayMs":1000, "lastBlockTimestamp":0,
+                    "mempool":[], "position":{"x":0,"y":0,"z":0}, "stateRoot":null,
+                    "contracts":{"depository":format!("0x{}", "88".repeat(20)),
+                        "entityProvider":format!("0x{}", "77".repeat(20))},
+                    "blockNumber":{"__xlnType":"BigInt", "value":"0"},
+                    "watcherConfirmationDepth":0}]],
+            }),
+            [0; 32],
+        )
+        .unwrap();
         replica
             .state
             .e_replicas

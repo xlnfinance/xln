@@ -39,4 +39,4 @@ pub(crate) use watcher::{
 pub use xln_rscore_entity_kernel::{FinalizedJEventBatch, JClaimIngress, JReserveUpdate};
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

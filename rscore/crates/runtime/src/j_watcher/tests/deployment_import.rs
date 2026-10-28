@@ -10,6 +10,7 @@ use crate::transport::{DirectRuntimeIngress, DirectRuntimeIngressConfig, derive_
 fn deployment_minus_one_import_first_poll_recovers_and_rechecks_uncertified_anchor() {
     for changed_anchor in [false, true] {
         let server = FakeRpcServer::start(FakeChain {
+            depository: hex_repeat(0x11, 20),
             chain_id: 31337,
             head: 2,
             blocks: BTreeMap::from([(
@@ -39,8 +40,10 @@ fn deployment_minus_one_import_first_poll_recovers_and_rechecks_uncertified_anch
             .unwrap(),
         );
         replica.durable = RuntimeDurableEnvelope::decode(
-            &json!({"runtimeId":runtime_id, "runtimeConfig":{}, "infrastructure":{},
+            &json!({"runtimeId":runtime_id, "runtimeConfig":{"minFrameDelayMs":5}, "infrastructure":{},
                 "jReplicas":[["test", {"chainId":31337, "rpcs":[server.endpoint],
+                    "name":"test", "blockDelayMs":1000, "lastBlockTimestamp":0,
+                    "mempool":[], "position":{"x":0,"y":0,"z":0}, "stateRoot":null,
                     "contracts":{"depository":hex_repeat(0x11, 20),
                         "entityProvider":hex_repeat(0x12, 20)},
                     "entityProviderDeploymentBlock":3,

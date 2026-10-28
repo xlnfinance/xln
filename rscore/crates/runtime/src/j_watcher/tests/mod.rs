@@ -149,8 +149,8 @@ struct WireVector {
     bytes: String,
 }
 
-struct FakeRpcServer {
-    endpoint: String,
+pub(crate) struct FakeRpcServer {
+    pub(crate) endpoint: String,
     state: Arc<Mutex<FakeChain>>,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
@@ -158,6 +158,7 @@ struct FakeRpcServer {
 
 #[derive(Clone)]
 struct FakeChain {
+    depository: String,
     chain_id: u64,
     head: u64,
     blocks: BTreeMap<u64, Value>,
@@ -166,6 +167,23 @@ struct FakeChain {
 }
 
 impl FakeRpcServer {
+    pub(crate) fn idle() -> Self {
+        Self::start(FakeChain {
+            depository: hex_repeat(0x88, 20),
+            chain_id: 31337,
+            head: 0,
+            blocks: BTreeMap::from([(
+                0,
+                json!({
+                    "number":"0x0", "hash":hex_repeat(1, 32),
+                    "parentHash":hex_repeat(0, 32), "transactions":[],
+                }),
+            )]),
+            receipts: BTreeMap::new(),
+            token_registry: vec![token_count_abi(0.into())],
+        })
+    }
+
     fn start(chain: FakeChain) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake rpc");
         listener
@@ -279,7 +297,7 @@ fn rpc_result(chain: &FakeChain, request: &Value) -> Value {
         "eth_chainId" => Value::String(format!("0x{:x}", chain.chain_id)),
         "eth_blockNumber" => Value::String(format!("0x{:x}", chain.head)),
         "eth_call" => {
-            assert_eq!(request["params"][0]["to"], hex_repeat(0x11, 20));
+            assert_eq!(request["params"][0]["to"], chain.depository);
             assert_eq!(request["params"][1], "latest");
             let data = request["params"][0]["data"].as_str().expect("call data");
             let count_selector = hex::encode(ethabi::short_signature("getTokensLength", &[]));
@@ -351,6 +369,7 @@ fn fixture_chain() -> FakeChain {
         "logs":[first_log,settled_log],
     });
     FakeChain {
+        depository: hex_repeat(0x11, 20),
         chain_id: 31_337,
         head: 43,
         blocks: BTreeMap::from([
