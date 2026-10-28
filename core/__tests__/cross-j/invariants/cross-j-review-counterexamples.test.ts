@@ -12,6 +12,7 @@ import { addr, entity, makeJurisdiction, jref, makeState, installJurisdictions, 
 import { clearEntityFrameEvents, readEntityFrameEvents } from '../../../entity/frame-events';
 import { createEmptyBatch, initJBatch } from '../../../jurisdiction/machine/batch';
 import { computeEntityConsensusSectionDigestsCold } from '../../../entity/consensus/state-root';
+import { safeStringify } from '../../../protocol/serialization';
 
 const sourceJ = makeJurisdiction('source', 1, '11', '12');
 const targetJ = makeJurisdiction('target', 2, '21', '22');
@@ -274,7 +275,7 @@ for (const fillRatio of [0, 65535]) {
 }
 
 for (const prefix of ['001g', '0x01', '+001', '  01']) {
-  test(`q50 salvage: partial ratio prefix ${JSON.stringify(prefix)} follows TS parseInt`, async () => {
+  test(`q50 salvage: partial ratio prefix ${safeStringify(prefix)} follows TS parseInt`, async () => {
     const { state } = context('targetUser');
     const route = resting();
     state.crossJurisdictionSwaps!.set(route.orderId, route);
