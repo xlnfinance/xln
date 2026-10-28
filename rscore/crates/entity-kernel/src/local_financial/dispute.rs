@@ -1436,6 +1436,7 @@ mod tests {
                     dispute_prepare: prepare,
                     active_dispute: active,
                     local_dispute: None,
+                    pending_dispute: None,
                     counterparty_dispute: counterparty,
                     proof_body: Ok(proof_body()),
                     j_nonce: 0,

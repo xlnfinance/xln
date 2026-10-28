@@ -186,6 +186,7 @@ fn account_view(case: &Value) -> LocalAccountFinancialView {
                     .then(|| canonical(&view["disputePrepare"])),
                 active_dispute: None,
                 local_dispute: None,
+                pending_dispute: None,
                 counterparty_dispute: Some(CounterpartyDispute {
                     hanko: Some(bytes(&counterparty["hanko"])),
                     hash: [0; 32],

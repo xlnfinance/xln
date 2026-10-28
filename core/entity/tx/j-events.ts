@@ -27,11 +27,12 @@ import {
   getJEventJurisdictionRef,
 } from '../../jurisdiction/machine/event-observation';
 import { verifyAccountSignature } from '../../account/crypto';
-import { hashProofBodyStruct } from '../../protocol/dispute/proof-builder';
+import { createDisputeProofHashWithNonce, hashProofBodyStruct } from '../../protocol/dispute/proof-builder';
 import { requireAccountDeltaTransformerAddress } from '../../account/consensus/helpers';
 import {
   assertDisputeProofBodyWithinContractLimits,
   batchAddCounterDispute,
+  encodeJBatch,
   cloneJBatch,
   hasJBatchWork,
   initJBatch,
@@ -759,6 +760,54 @@ const applyStartedDisputeAccountInput = async (
   });
 };
 
+// The certified event supplies the exact body selected by the chain. Match the
+// pending proposal's nonce/role/body tuple in this Account's fixed domain before
+// freeze clears it. Bob can withhold the ACK and then disappear: Alice must keep
+// the exit bytes in Entity J-batch consensus, never Account state or a watcher
+// cache. Do not pair the committed N7 state's positional arguments with N8.
+const matchesPendingDispute = (account: AccountReplica, data: DisputeStartedEventData): boolean => {
+  const pending = account.pendingAccountInput?.proposal.disputeHanko;
+  return pending !== undefined
+    && pending.proofNonce === Number(data.nonce)
+    && pending.proposerIsLeft === data.proposerIsLeft
+    && pending.proofBodyHash.toLowerCase() === data.proofbodyHash.toLowerCase()
+    && pending.hash.toLowerCase() === createDisputeProofHashWithNonce(
+      account.state, data.proofbodyHash, account.state.domain, Number(data.nonce), data.proposerIsLeft,
+    ).toLowerCase();
+};
+
+const queueStartedProposalExit = (
+  context: FinalizedJEventContext,
+  account: AccountReplica,
+  counterpartyId: string,
+  initialProofbody: ProofBodyStruct,
+): void => {
+  const active = account.activeDispute;
+  if (!active) throw new Error(`DISPUTE_EXIT_ACTIVE_MISSING:${counterpartyId}`);
+  const state = context.newState;
+  state.jBatchState ??= initJBatch();
+  const hasPulls = proofBodyHasPulls(
+    initialProofbody, requireAccountDeltaTransformerAddress(context.env.state, account.state),
+  );
+  const callerIsStarter = (account.state.leftEntity === state.entityId) === active.startedByLeft;
+  state.jBatchState.batch.disputeFinalizations.push({
+    counterentity: counterpartyId,
+    initialNonce: active.initialNonce,
+    finalNonce: active.initialNonce,
+    proposerIsLeft: active.initialProposerIsLeft,
+    initialProofbodyHash: active.initialProofbodyHash,
+    finalProofbody: initialProofbody,
+    starterArguments: active.starterInitialArguments,
+    otherArguments: '0x',
+    sig: '0x',
+    startedByLeft: active.startedByLeft,
+    cooperative: false,
+    ...(hasPulls || callerIsStarter ? { submitNotBeforeTimestamp: active.disputeTimeout } : {}),
+  });
+  encodeJBatch(state.jBatchState.batch);
+  // The existing deadline hook drains this draft; no pending candidate survives.
+};
+
 const initializeStartedDispute = async (
   context: FinalizedJEventContext,
   data: DisputeStartedEventData,
@@ -792,6 +841,7 @@ const initializeStartedDispute = async (
     'jEvent.disputeStarted',
   ).proofbody;
 
+  const ownPendingSelected = matchesPendingDispute(account, data);
   const weAreStarter = senderStr === entityIdNorm;
   const disputeTimeout = toUnixS(Number(data.disputeTimeout));
   await applyStartedDisputeAccountInput(
@@ -816,6 +866,9 @@ const initializeStartedDispute = async (
     context.outputs,
   );
   const counterProofQueued = queueSelectedPullCounterProof(context, account, counterpartyId);
+  if (ownPendingSelected && !counterProofQueued) {
+    queueStartedProposalExit(context, account, counterpartyId, initialProofbody);
+  }
   const flushedReveals = flushDeferredHashLadderReveals(newState);
   if (
     (flushedReveals > 0 || counterProofQueued)

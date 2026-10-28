@@ -1628,6 +1628,68 @@ fn apply_dispute_started(
         outputs,
         frame_events,
     )?;
+    let owner_word = hex_word(&state.entity_id, "J_EVENT_DISPUTE_OWNER")?;
+    // In this Account's fixed domain, nonce/role/body identify the pending
+    // dispute hash. The certified event supplies N8's exact body before freeze
+    // discards the pending frame. Bob withholding its ACK must not strand Alice:
+    // retain only queued Entity exit calldata, never Account state/watcher data.
+    if !counter_proof_queued
+        && view
+            .pending_dispute
+            .as_ref()
+            .is_some_and(|(pending, domain)| {
+                pending.nonce == initial_nonce
+                    && pending.proposer_is_left == event.proposer_is_left
+                    && pending.proof_body_hash == initial_hash
+                    && pending.hash
+                        == xln_rscore_engine::dispute_proof_hash(
+                            domain.chain_id(),
+                            domain.depository_address().as_bytes(),
+                            if view.owner_is_left {
+                                &owner_word
+                            } else {
+                                &counterparty_word
+                            },
+                            if view.owner_is_left {
+                                &counterparty_word
+                            } else {
+                                &owner_word
+                            },
+                            initial_nonce,
+                            event.proposer_is_left,
+                            &initial_hash,
+                            &body.watch_seed,
+                        )
+            })
+    {
+        let has_pulls = crate::cross_j::proof_body_has_signed_pulls(
+            &body,
+            view.delta_transformer
+                .ok_or_else(|| invalid("J_DISPUTE_DELTA_TRANSFORMER_MISSING"))?,
+        )?;
+        let j_state = state.j_batch_state.get_or_insert_with(Default::default);
+        j_state
+            .batch
+            .dispute_finalizations
+            .push(crate::j_batch::FinalDisputeProof {
+                counterentity: counterparty_word,
+                initial_nonce: U256::from(initial_nonce),
+                final_nonce: U256::from(initial_nonce),
+                proposer_is_left: event.proposer_is_left,
+                initial_proofbody_hash: initial_hash,
+                final_proofbody: body.clone(),
+                starter_arguments: event.starter_initial_arguments.clone(),
+                // N7's positional evidence must never be applied to N8.
+                other_arguments: Vec::new(),
+                sig: Vec::new(),
+                started_by_left: we_are_starter == view.owner_is_left,
+                cooperative: false,
+                submit_not_before_timestamp: (has_pulls || we_are_starter)
+                    .then_some(event.dispute_timeout),
+            });
+        crate::encode_j_batch(&j_state.batch)
+            .map_err(|error| invalid(format!("J_DISPUTE_EXIT_BATCH:{error}")))?;
+    }
     if !counter_proof_queued {
         crate::cross_j::queue_source_hub_claim_registrations(
             state,
@@ -2741,6 +2803,7 @@ mod tests {
             dispute_prepare: None,
             active_dispute,
             local_dispute: None,
+            pending_dispute: None,
             counterparty_dispute: None,
             proof_body: Ok(xln_rscore_engine::DisputeProofBody {
                 watch_seed: [0x33; 32],
@@ -3079,6 +3142,123 @@ mod tests {
                 .any(|(id, _)| id == &format!("dispute-deadline:{}", counterparty.as_hex()))
         );
         assert!(outputs.is_empty());
+    }
+
+    #[test]
+    fn review_2_pending_proposal_exit_uses_exact_certified_body() {
+        let owner = entity(0x11);
+        let peer = entity(0x22);
+        let mut state = EntityStateSlice::empty(owner.as_hex(), 120_000);
+        state.known_accounts.insert(peer.as_hex());
+        let mut event = dispute_started_event(&peer, &owner);
+        event.nonce = BigInt::from(8);
+        event.proposer_is_left = true;
+        event.starter_initial_arguments.clear();
+        let mut view = dispute_view(None);
+        // Committed N7 is different; only the certified event supplies N8 bytes.
+        view.proof_body.as_mut().unwrap().offdeltas = vec![BigInt::from(8)];
+        let domain = xln_rscore_engine::AccountDomain::new(
+            31337,
+            xln_rscore_engine::DepositoryAddress::parse(&prefixed_hex(&[0x44; 20])).unwrap(),
+        )
+        .unwrap();
+        view.pending_dispute = Some((
+            xln_rscore_engine::DisputeDraft {
+                hanko: None,
+                hash: xln_rscore_engine::dispute_proof_hash(
+                    31337,
+                    &[0x44; 20],
+                    &[0x11; 32],
+                    &[0x22; 32],
+                    8,
+                    true,
+                    &event_proof_hash(),
+                    &[0x33; 32],
+                ),
+                proof_body_hash: event_proof_hash(),
+                nonce: 8,
+                proposer_is_left: true,
+            },
+            domain,
+        ));
+        let views = BTreeMap::from([(peer.as_hex(), view)]);
+        let mut mutations = Vec::new();
+        apply_dispute_started(
+            &mut state,
+            &event,
+            "runtime-seed",
+            &views,
+            &mut crate::paybook::PaybookChanges::default(),
+            &mut BTreeMap::new(),
+            &mut mutations,
+            &mut Vec::new(),
+            &mut Vec::new(),
+        )
+        .expect("certified start");
+        let mut expected = crate::JBatch::default();
+        expected
+            .dispute_finalizations
+            .push(crate::j_batch::FinalDisputeProof {
+                counterentity: [0x22; 32],
+                initial_nonce: U256::from(8),
+                final_nonce: U256::from(8),
+                proposer_is_left: true,
+                initial_proofbody_hash: event_proof_hash(),
+                final_proofbody: crate::proof_body_from_j_event(&event.initial_proofbody).unwrap(),
+                starter_arguments: Vec::new(),
+                other_arguments: Vec::new(),
+                sig: Vec::new(),
+                started_by_left: false,
+                cooperative: false,
+                submit_not_before_timestamp: None,
+            });
+        let encoded = crate::encode_j_batch(&state.j_batch_state.as_ref().unwrap().batch).unwrap();
+        assert_eq!(encoded, crate::encode_j_batch(&expected).unwrap());
+        // Same exact ABI vector as dispute-pending-exit.test.ts.
+        assert_eq!(
+            prefixed_hex(&Keccak256::digest(&encoded)),
+            "0xcfc1ff3f5dcbf3cdcb576ef1de18e32e18122c5e7cb19d997482dfc4b2b32fa1"
+        );
+        for mismatch in ["nonce", "role", "body", "hash"] {
+            let mut views = views.clone();
+            let pending = &mut views
+                .get_mut(&peer.as_hex())
+                .unwrap()
+                .pending_dispute
+                .as_mut()
+                .unwrap()
+                .0;
+            match mismatch {
+                "nonce" => pending.nonce = 9,
+                "role" => pending.proposer_is_left = false,
+                "body" => pending.proof_body_hash = [0; 32],
+                "hash" => pending.hash = [0; 32],
+                _ => unreachable!(),
+            }
+            let mut other = EntityStateSlice::empty(owner.as_hex(), 120_000);
+            other.known_accounts.insert(peer.as_hex());
+            apply_dispute_started(
+                &mut other,
+                &event,
+                "runtime-seed",
+                &views,
+                &mut crate::paybook::PaybookChanges::default(),
+                &mut BTreeMap::new(),
+                &mut Vec::new(),
+                &mut Vec::new(),
+                &mut Vec::new(),
+            )
+            .expect("certified start with a different pending proposal");
+            assert!(
+                other
+                    .j_batch_state
+                    .is_none_or(|batch| batch.batch.dispute_finalizations.is_empty())
+            );
+        }
+        assert!(matches!(
+            mutations.as_slice(),
+            [(_, AccountEnvelopeMutation::ApplyDisputeStarted(_))]
+        ));
     }
 
     #[test]

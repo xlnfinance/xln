@@ -301,6 +301,10 @@ pub struct ResidentAccountDisputeView {
     pub dispute_prepare: Option<CanonicalValue>,
     pub active_dispute: Option<CanonicalValue>,
     pub local_dispute: Option<xln_rscore_engine::DisputeDraft>,
+    pub pending_dispute: Option<(
+        xln_rscore_engine::DisputeDraft,
+        xln_rscore_engine::AccountDomain,
+    )>,
     pub counterparty_dispute: Option<xln_rscore_engine::CounterpartyDispute>,
     pub proof_body: Result<xln_rscore_engine::DisputeProofBody, String>,
     pub j_nonce: u64,
@@ -1329,6 +1333,10 @@ impl ResidentConsensusEngine {
                             dispute_prepare: replica.envelope().field("disputePrepare").cloned(),
                             active_dispute: replica.envelope().field("activeDispute").cloned(),
                             local_dispute: account.dispute().cloned(),
+                            pending_dispute: account
+                                .pending()
+                                .and_then(|pending| pending.proposal_dispute())
+                                .map(|proof| (proof.clone(), state.identity().domain().clone())),
                             counterparty_dispute: account.counterparty_dispute().cloned(),
                             proof_body: delta_transformer
                                 .ok_or_else(|| "DELTA_TRANSFORMER_MISSING".to_string())

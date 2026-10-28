@@ -1387,10 +1387,28 @@ pub(crate) fn batch_empty(batch: &JBatch) -> bool {
 /// Exact TS `takeBroadcastBatch`: public hash-ladder evidence must land before
 /// a finalization that reads it, and adversarial finalizers are sent FIFO one
 /// at a time so one processBatch stays below the L1 block gas limit.
-fn take_broadcast_batch(source: &JBatch) -> (JBatch, JBatch) {
-    let dispute_priority = has_dispute_priority(source);
+fn take_broadcast_batch(source: &JBatch, now_sec: u64) -> (JBatch, JBatch) {
+    // A timed queued exit cannot occupy sentBatch while reveals may still arrive.
+    let mut ready = source.clone();
+    ready.dispute_finalizations.retain(|proof| {
+        proof
+            .submit_not_before_timestamp
+            .is_none_or(|at| at <= now_sec)
+    });
+    let dispute_priority = has_dispute_priority(&ready);
     if !dispute_priority {
-        return (source.clone(), JBatch::default());
+        let mut remainder = JBatch::default();
+        remainder.dispute_finalizations = source
+            .dispute_finalizations
+            .iter()
+            .filter(|proof| {
+                proof
+                    .submit_not_before_timestamp
+                    .is_some_and(|at| at > now_sec)
+            })
+            .cloned()
+            .collect();
+        return (ready, remainder);
     }
     let mut selected = JBatch::default();
     let mut remainder = source.clone();
@@ -1400,10 +1418,14 @@ fn take_broadcast_batch(source: &JBatch) -> (JBatch, JBatch) {
     if !source.hash_ladder_registrations.is_empty() {
         selected.hash_ladder_registrations =
             std::mem::take(&mut remainder.hash_ladder_registrations);
-    } else if !remainder.dispute_finalizations.is_empty() {
+    } else if let Some(index) = remainder.dispute_finalizations.iter().position(|proof| {
+        proof
+            .submit_not_before_timestamp
+            .is_none_or(|at| at <= now_sec)
+    }) {
         selected
             .dispute_finalizations
-            .push(remainder.dispute_finalizations.remove(0));
+            .push(remainder.dispute_finalizations.remove(index));
     }
     (selected, remainder)
 }
@@ -1533,8 +1555,8 @@ fn broadcast(
         if batch_empty(&source) {
             return Ok(LocalEntityControlResult::default());
         }
-        let dispute_priority = has_dispute_priority(&source);
-        let (selected, remainder) = take_broadcast_batch(&source);
+        let (selected, remainder) = take_broadcast_batch(&source, state.timestamp / 1000);
+        let dispute_priority = has_dispute_priority(&selected);
         (
             selected,
             remainder,
@@ -2871,7 +2893,7 @@ mod tests {
             dispute_finalizations: vec![final_dispute(0x33, 1), final_dispute(0x44, 3)],
             ..JBatch::default()
         };
-        let (selected, remainder) = take_broadcast_batch(&source);
+        let (selected, remainder) = take_broadcast_batch(&source, 1_000_000);
         assert_eq!(
             selected.dispute_finalizations,
             source.dispute_finalizations[..1]
@@ -2882,6 +2904,28 @@ mod tests {
             source.dispute_finalizations[1..]
         );
         assert_eq!(remainder.reserve_to_reserve, source.reserve_to_reserve);
+    }
+
+    #[test]
+    fn timed_exit_stays_mutable_until_deadline_without_blocking_other_work() {
+        let mut exit = final_dispute(0x22, 8);
+        exit.submit_not_before_timestamp = Some(130);
+        let source = JBatch {
+            reserve_to_reserve: vec![ReserveToReserve {
+                receiving_entity: [0x44; 32],
+                token_id: U256::one(),
+                amount: U256::one(),
+            }],
+            dispute_finalizations: vec![exit.clone()],
+            ..JBatch::default()
+        };
+        let (early, waiting) = take_broadcast_batch(&source, 129);
+        assert!(early.dispute_finalizations.is_empty());
+        assert_eq!(early.reserve_to_reserve, source.reserve_to_reserve);
+        assert_eq!(waiting.dispute_finalizations, vec![exit.clone()]);
+        let (ready, remainder) = take_broadcast_batch(&waiting, 130);
+        assert_eq!(ready.dispute_finalizations, vec![exit]);
+        assert!(batch_empty(&remainder));
     }
 
     #[test]
@@ -2906,7 +2950,7 @@ mod tests {
             }],
             ..JBatch::default()
         };
-        let (selected, remainder) = take_broadcast_batch(&source);
+        let (selected, remainder) = take_broadcast_batch(&source, 1_000_000);
         assert_eq!(selected.hash_ladder_registrations.len(), 1);
         assert!(selected.reserve_to_external_token.is_empty());
         assert!(remainder.hash_ladder_registrations.is_empty());

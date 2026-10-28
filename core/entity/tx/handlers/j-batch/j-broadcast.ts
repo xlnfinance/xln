@@ -82,17 +82,25 @@ const hasTimeCriticalJBatchOps = (batch: JBatch): boolean =>
  * transaction with a counter-dispute, reveal, hash-ladder registration or
  * finalization. Time-critical ops take this broadcast; withdrawals wait.
  */
-export const takeBroadcastBatch = (current: JBatch): {
+export const takeBroadcastBatch = (current: JBatch, nowSec: number): {
   selected: JBatch;
   remainder: JBatch;
   disputePriority: boolean;
 } => {
   const selected = cloneJBatch(current);
+  // Queued exits must not occupy sentBatch before T and block new reveal work.
+  selected.disputeFinalizations = selected.disputeFinalizations.filter(
+    proof => proof.submitNotBeforeTimestamp === undefined || proof.submitNotBeforeTimestamp <= nowSec,
+  );
   const disputePriority = hasTimeCriticalJBatchOps(selected);
   if (!disputePriority) {
-    return { selected, remainder: createEmptyBatch(), disputePriority: false };
+    const remainder = createEmptyBatch();
+    remainder.disputeFinalizations = cloneJBatch(current).disputeFinalizations.filter(
+      proof => proof.submitNotBeforeTimestamp !== undefined && proof.submitNotBeforeTimestamp > nowSec,
+    );
+    return { selected, remainder, disputePriority: false };
   }
-  const remainder = cloneJBatch(selected);
+  const remainder = cloneJBatch(current);
   const priority = createEmptyBatch();
   if (selected.hashLadderRegistrations.length > 0) {
     // Registry writes are independent public evidence, but an accepted reveal
@@ -119,7 +127,10 @@ export const takeBroadcastBatch = (current: JBatch): {
   priority.revealSecrets = selected.revealSecrets;
   remainder.disputeStarts = [];
   remainder.counterDisputes = [];
-  remainder.disputeFinalizations = selected.disputeFinalizations.slice(1);
+  const readyIndex = current.disputeFinalizations.findIndex(
+    proof => proof.submitNotBeforeTimestamp === undefined || proof.submitNotBeforeTimestamp <= nowSec,
+  );
+  remainder.disputeFinalizations = remainder.disputeFinalizations.filter((_, index) => index !== readyIndex);
   remainder.revealSecrets = [];
   return { selected: priority, remainder, disputePriority: true };
 };
@@ -274,7 +285,8 @@ export async function handleJBroadcast(
   const sourceBatch = fromRecovery
     ? newState.jBatchState.recoveryBatches![0]!
     : newState.jBatchState.batch;
-  const { selected, remainder, disputePriority } = takeBroadcastBatch(sourceBatch);
+  const { selected, remainder, disputePriority } = takeBroadcastBatch(sourceBatch, Math.floor(newState.timestamp / 1000));
+  if (isBatchEmpty(selected)) return { newState, outputs, jOutputs };
   const prepared = prepareBroadcast(
     newState,
     selected,

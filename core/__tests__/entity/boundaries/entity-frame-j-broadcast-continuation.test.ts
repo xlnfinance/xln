@@ -98,7 +98,7 @@ describe('Entity-frame j_broadcast continuation ownership', () => {
       amount: 5n,
     });
 
-    const { selected, remainder } = takeBroadcastBatch(batchState.batch);
+    const { selected, remainder } = takeBroadcastBatch(batchState.batch, 1_000_000);
     expect(selected.hashLadderRegistrations).toHaveLength(1);
     expect(selected.reserveToReserve).toEqual([]);
     expect(remainder.reserveToReserve).toHaveLength(1);
@@ -117,7 +117,7 @@ describe('Entity-frame j_broadcast continuation ownership', () => {
       amount: 7n,
     });
 
-    const { selected, remainder, disputePriority } = takeBroadcastBatch(batchState.batch);
+    const { selected, remainder, disputePriority } = takeBroadcastBatch(batchState.batch, 1_000_000);
     expect(disputePriority).toBe(true);
     expect(selected.counterDisputes).toHaveLength(1);
     expect(selected.reserveToExternalToken).toEqual([]);
@@ -148,7 +148,7 @@ describe('Entity-frame j_broadcast continuation ownership', () => {
       amount: 7n,
     });
 
-    const { selected, remainder, disputePriority } = takeBroadcastBatch(batchState.batch);
+    const { selected, remainder, disputePriority } = takeBroadcastBatch(batchState.batch, 1_000_000);
     expect(disputePriority).toBe(true);
     expect(selected.hashLadderRegistrations).toHaveLength(1);
     expect(selected.reserveToExternalToken).toEqual([]);
@@ -163,7 +163,7 @@ describe('Entity-frame j_broadcast continuation ownership', () => {
       tokenId: 1,
       amount: 7n,
     });
-    const { selected, remainder, disputePriority } = takeBroadcastBatch(batchState.batch);
+    const { selected, remainder, disputePriority } = takeBroadcastBatch(batchState.batch, 1_000_000);
     expect(disputePriority).toBe(false);
     expect(selected.reserveToExternalToken).toHaveLength(1);
     expect(remainder.reserveToExternalToken).toEqual([]);

@@ -127,7 +127,7 @@ describe('hash-ladder / dispute batch ordering', () => {
     batchAddHashLadderRegistration(state, registration(counterparty));
     state.batch.disputeFinalizations.push({ counterentity: counterparty } as never);
 
-    const { selected, remainder } = takeBroadcastBatch(state.batch);
+    const { selected, remainder } = takeBroadcastBatch(state.batch, 1_000_000);
     expect(selected.hashLadderRegistrations).toHaveLength(1);
     expect(selected.disputeFinalizations).toHaveLength(0);
     expect(remainder.hashLadderRegistrations).toHaveLength(0);

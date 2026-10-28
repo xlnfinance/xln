@@ -1,5 +1,6 @@
 import { readEntityFrameEventMessages } from '../../../entity/frame-events';
 import { safeStringify } from '../../../protocol/serialization';
+import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 import { expect, test } from 'bun:test';
 import { Wallet, ZeroHash } from 'ethers';
 import { createEmptyEnv } from '../../../runtime';
@@ -11,8 +12,8 @@ import { generateLazyEntityId } from '../../../entity/factory';
 import { handleDisputeFinalize, handleDisputeStart, handlePrepareDispute } from '../../../entity/tx/handlers/dispute';
 import { handleJBroadcast } from '../../../entity/tx/handlers/j-batch/j-broadcast';
 import { applyHankoBatchProcessedEvent } from '../../../entity/tx/j-events-batch';
-import { initJBatch } from '../../../jurisdiction/machine/batch';
-import { addr, entity, installJurisdictions, makeJurisdiction, makeState, openWritableEntityAccounts, putTestAccountPull } from '../../helpers/cross-j';
+import { createEmptyBatch, encodeJBatch, initJBatch } from '../../../jurisdiction/machine/batch';
+import { addReplica, registerTestSigner, addr, entity, installJurisdictions, makeJurisdiction, makeState, openWritableEntityAccounts, putTestAccountPull } from '../../helpers/cross-j';
 
 const peerSigner = new Wallet(`0x${'12'.repeat(32)}`);
 const peer = generateLazyEntityId([peerSigner.address.toLowerCase()], 1n);
@@ -180,4 +181,74 @@ test('review 4: TRON appointments are refused by builder and tower admission', a
   const tron = await buildDelayedLastResortAppointments(context, [{ ...watched, chainId: 728126428 }]);
   expect(tron.uploads).toHaveLength(0);
   expect(tron.failures[0]?.error).toContain('WATCHTOWER_TRON_SUBMISSION_UNSUPPORTED');
+});
+
+test.each(['exact', 'nonce', 'role', 'body', 'hash'] as const)(
+  'review 2: certified N8 queues only the exact pending identity (%s)', async mismatch => {
+  const { proposeAccountFrame } = await import('../../../account/consensus');
+  const { createAccountConsensusContext } = await import('../../../entity/account/account-consensus-context');
+  const { applyJEventRange } = await import('../../helpers/j-history');
+  const { encodeInt512, decodeInt512 } = await import('../../../protocol/crypto/abi-money');
+  const { env, state, account } = setup();
+  // N7 is still the committed head; N8 transfers one unit and has no peer ACK.
+  account.state.pulls = PersistentAccountStateMap.empty('pulls');
+  const committed = buildAccountProofBodyFromJurisdictions(env.state, account);
+  account.counterpartyDisputeProofNonce = 7;
+  account.counterpartyDisputeProofBodyHash = committed.proofBodyHash;
+  delete account.counterpartyDisputeHash;
+  account.proofHeader.nextProofNonce = 8;
+  account.mempool = [{ type: 'direct_payment', data: {
+    tokenId: 1, amount: 1n, route: [peer], fromEntityId: owner, toEntityId: peer, deliveryMode: 'direct',
+  } }];
+  await proposeAccountFrame(createAccountConsensusContext(env), account, state.timestamp);
+  expect(account.pendingFrame).toBeDefined();
+  const pending = { ...account.pendingAccountInput!.proposal.disputeHanko! };
+  expect(pending.proofNonce).toBe(8);
+  expect(pending.proofBodyHash).not.toBe(committed.proofBodyHash);
+  const signer = registerTestSigner(env, 'review-2');
+  state.config.validators = [signer];
+  state.config.shares = { [signer]: 1n };
+  addReplica(env, state, signer);
+  const body = { ...committed.proofBodyStruct,
+    offdeltas: committed.proofBodyStruct.offdeltas.map(value => encodeInt512(decodeInt512(value) - 1n)),
+  };
+  const { hashProofBodyStruct } = await import('../../../protocol/dispute/proof-builder');
+  expect(hashProofBodyStruct(body)).toBe(pending.proofBodyHash);
+  const event = { type: 'DisputeStarted' as const, data: {
+    sender: peer, counterentity: owner, nonce: '8', proposerIsLeft: true,
+    proofbodyHash: pending.proofBodyHash, initialProofbody: body,
+    watchSeed: body.watchSeed, starterInitialArguments: '0x', starterCounterArguments: '0x',
+    starterCounterProofCommitment: ZeroHash, disputeStartTimestamp: 100,
+    disputeTimeout: 100 + Number(body.leftResponseSeconds) + Number(body.rightResponseSeconds),
+    leftResponseSeconds: Number(body.leftResponseSeconds), rightResponseSeconds: Number(body.rightResponseSeconds),
+  } };
+  const candidate = account.pendingAccountInput!.proposal.disputeHanko!;
+  if (mismatch === 'nonce') candidate.proofNonce = 9;
+  if (mismatch === 'role') candidate.proposerIsLeft = false;
+  if (mismatch === 'body') candidate.proofBodyHash = committed.proofBodyHash;
+  if (mismatch === 'hash') candidate.hash = ZeroHash;
+  const result = await applyJEventRange(state, {
+    from: signer, jurisdictionRef: jurisdiction.name, event,
+    observedAt: 1, blockNumber: 1, blockHash: entity('ab'),
+  }, env);
+  const frozen = result.newState.accounts.get(peer)!;
+  expect(frozen.pendingFrame).toBeUndefined();
+  expect(frozen.pendingAccountInput).toBeUndefined();
+  expect(buildAccountProofBodyFromJurisdictions(env.state, frozen).proofBodyHash).toBe(committed.proofBodyHash);
+  if (mismatch !== 'exact') {
+    expect(result.newState.jBatchState?.batch.disputeFinalizations ?? []).toHaveLength(0);
+    return;
+  }
+  const replayed = await applyJEventRange(state, {
+    from: signer, jurisdictionRef: jurisdiction.name, event,
+    observedAt: 1, blockNumber: 1, blockHash: entity('ab'),
+  }, env);
+  expect(encodeJBatch(replayed.newState.jBatchState!.batch)).toBe(encodeJBatch(result.newState.jBatchState!.batch));
+  const expected = createEmptyBatch();
+  expected.disputeFinalizations.push({
+    counterentity: peer, initialNonce: 8, finalNonce: 8, proposerIsLeft: true,
+    initialProofbodyHash: pending.proofBodyHash, finalProofbody: body,
+    starterArguments: '0x', otherArguments: '0x', sig: '0x', startedByLeft: false, cooperative: false,
+  });
+  expect(encodeJBatch(result.newState.jBatchState!.batch)).toBe(encodeJBatch(expected));
 });

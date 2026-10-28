@@ -677,6 +677,7 @@ mod tests {
                 ),
             ])),
             local_dispute: None,
+            pending_dispute: None,
             counterparty_dispute: None,
             proof_body: Ok(xln_rscore_engine::DisputeProofBody {
                 watch_seed: [0; 32],

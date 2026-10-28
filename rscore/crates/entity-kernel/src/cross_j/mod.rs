@@ -6501,6 +6501,7 @@ mod tests {
                     )])),
                     active_dispute: None,
                     local_dispute: None,
+                    pending_dispute: None,
                     counterparty_dispute: None,
                     proof_body: Err("unused".into()),
                     j_nonce: 0,

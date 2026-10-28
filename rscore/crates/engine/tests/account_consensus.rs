@@ -5009,3 +5009,60 @@ fn mempool_overflow_names_only_rejected_admission_and_keeps_prior_queue() {
         .expect("the accepted sibling still fits after removing only index 1");
     assert_eq!(left.account.mempool().len(), ACCOUNT_MEMPOOL_SIZE);
 }
+
+#[test]
+fn review_2_chain_selected_unacked_proposal_is_not_retained_in_account() {
+    let (mut alice, bob) = parties_with_transformer(Some([0x77; 20]));
+    let mut snapshot = alice.account.consensus_snapshot();
+    snapshot.next_proof_nonce = 8;
+    alice.account = AccountConsensus::restore_from_checkpoint(
+        alice.account.replica().clone(),
+        snapshot,
+        &market(),
+    )
+    .unwrap();
+    let committed =
+        xln_rscore_engine::proof_body_hash(alice.account.replica(), &[0x77; 20]).unwrap();
+    let tx = payment(&alice.entity_id, &bob.entity_id, 1);
+    alice.account.admit_txs(vec![tx], "review-2").unwrap();
+    let ProposalOutcome::Proposed(proposal) = propose_account_frame(
+        &mut alice.account,
+        &alice.identity,
+        CLOCK.entity_timestamp,
+        7,
+        &market(),
+    )
+    .unwrap() else {
+        panic!("N8 proposal");
+    };
+    let proof = proposal.dispute.unwrap();
+    assert_eq!(proof.nonce, 8);
+    assert_ne!(proof.proof_body_hash, committed);
+    assert!(
+        proposal.dispute_hanko.is_some(),
+        "Bob holds Alice's proposal signature without ACKing"
+    );
+    alice
+        .account
+        .apply_entity_dispute_started(xln_rscore_engine::AccountDisputeStartedFinality {
+            j_nonce: proof.nonce,
+            active_dispute: CanonicalValue::Object(vec![
+                ("observedOnChain".into(), CanonicalValue::Bool(true)),
+                (
+                    "initialProofbodyHash".into(),
+                    CanonicalValue::String(entity_hex(&proof.proof_body_hash)),
+                ),
+                (
+                    "initialNonce".into(),
+                    CanonicalValue::Number(
+                        xln_rscore_engine::CanonicalNumber::try_from_u64(proof.nonce).unwrap(),
+                    ),
+                ),
+            ]),
+        })
+        .unwrap();
+    assert!(
+        alice.account.pending().is_none(),
+        "Entity queues the authenticated exit; Account must discard the uncommitted proposal"
+    );
+}
