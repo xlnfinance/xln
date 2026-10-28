@@ -175,7 +175,7 @@ fn has_queued_finalize(state: &JBatchState, counterparty: [u8; 32]) -> bool {
         || state.recovery_batches.iter().any(contains)
 }
 
-fn argument_tuple(fill_ratios: Vec<u32>, secrets: Vec<[u8; 32]>) -> Vec<u8> {
+pub(super) fn argument_tuple(fill_ratios: Vec<u32>, secrets: Vec<[u8; 32]>) -> Vec<u8> {
     ethabi::encode(&[Token::Tuple(vec![
         Token::Array(
             fill_ratios
@@ -198,9 +198,18 @@ fn known_secrets(
     dispute: &xln_rscore_batch::ResidentAccountDisputeView,
     counterparty: &str,
 ) -> Result<Vec<[u8; 32]>, EntityKernelError> {
+    known_secrets_for_hashlocks(state, paybook, &dispute.payment_hashlocks, counterparty)
+}
+
+pub(super) fn known_secrets_for_hashlocks(
+    state: &EntityStateSlice,
+    paybook: &PaybookChanges,
+    hashlocks: &[String],
+    counterparty: &str,
+) -> Result<Vec<[u8; 32]>, EntityKernelError> {
     let mut seen = BTreeSet::new();
     let mut output = Vec::new();
-    for hashlock in &dispute.payment_hashlocks {
+    for hashlock in hashlocks {
         let Some(entry) = paybook.entry(state, hashlock)? else {
             continue;
         };

@@ -13,6 +13,8 @@
  * 7. Runtime submits JTx via JAdapter
  */
 
+import { refreshDisputeSecretArguments } from '../../../dispute-secret-arguments';
+import { requireAccountDeltaTransformerAddress } from '../../../../account/consensus/helpers';
 import type { EntityState, EntityInput, HashType } from '../../../types';
 import type { EntityRuntimeContext } from '../../../runtime-context';
 import type { JInput } from '../../../../jurisdiction/machine/input';
@@ -287,6 +289,18 @@ export async function handleJBroadcast(
     : newState.jBatchState.batch;
   const { selected, remainder, disputePriority } = takeBroadcastBatch(sourceBatch, Math.floor(newState.timestamp / 1000));
   if (isBatchEmpty(selected)) return { newState, outputs, jOutputs };
+  // Refresh only the mutable selected draft, including recovery drafts. Sent
+  // bytes and starter commitments remain immutable under their original Hanko.
+  for (const proof of selected.disputeFinalizations) {
+    if (proof.finalProofbody.transformers.length === 0 || proof.cooperative
+      || (newState.entityId < String(proof.counterentity)) === proof.startedByLeft) continue;
+    const account = newState.accounts.get(String(proof.counterentity));
+    if (!account) throw new Error(`DISPUTE_ARGUMENT_ACCOUNT_MISSING:${proof.counterentity}`);
+    proof.otherArguments = refreshDisputeSecretArguments(
+      proof.finalProofbody, proof.otherArguments, newState, String(proof.counterentity),
+      requireAccountDeltaTransformerAddress(env.state, account.state),
+    );
+  }
   const prepared = prepareBroadcast(
     newState,
     selected,

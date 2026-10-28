@@ -983,6 +983,13 @@ pub(crate) fn apply_entity_transitions(
                 let authority = entity_authority.ok_or_else(|| {
                     EntityKernelError::local("proposal", "ENTITY_GOVERNANCE_AUTHORITY_REQUIRED")
                 })?;
+                if matches!(&tx, crate::LocalEntityControlTx::JBroadcast { .. }) {
+                    crate::local_financial::refresh_broadcast_dispute_arguments(
+                        &mut state,
+                        &paybook_changes,
+                        local_account_views,
+                    )?;
+                }
                 let applied = apply_local_entity_control_tx(
                     &mut state,
                     tx,

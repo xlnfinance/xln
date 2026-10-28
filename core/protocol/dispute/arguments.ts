@@ -31,7 +31,7 @@ const clampFillRatio = (value: number): number => {
 // the Depository hash-ladder reveal registry, so no dispute calldata may assert
 // a cross-j fill ratio. Keep this tuple in byte parity with
 // DeltaTransformer.Arguments — the dispute ABI gate rejects drift.
-const encodeDeltaTransformerArgs = (fillRatios: number[], secrets: string[]): string => {
+export const encodeDeltaTransformerArgs = (fillRatios: number[], secrets: string[]): string => {
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
   return abiCoder.encode(
     ['tuple(uint16[] fillRatios, bytes32[] secrets)'],
@@ -44,7 +44,7 @@ const encodeDeltaTransformerArgs = (fillRatios: number[], secrets: string[]): st
   );
 };
 
-const wrapTransformerArgs = (args: string[]): string => {
+export const wrapTransformerArgs = (args: string[]): string => {
   if (args.length < 1 || args.length > J_BATCH_CONTRACT_LIMITS.maxDisputeTransformers) {
     throw new Error(`DISPUTE_ARGUMENT_CANONICAL_CLAUSE_COUNT_INVALID:${args.length}`);
   }

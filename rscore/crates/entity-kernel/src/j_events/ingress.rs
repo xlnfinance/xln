@@ -1667,6 +1667,19 @@ fn apply_dispute_started(
             view.delta_transformer
                 .ok_or_else(|| invalid("J_DISPUTE_DELTA_TRANSFORMER_MISSING"))?,
         )?;
+        let other_arguments = if we_are_starter {
+            Vec::new()
+        } else {
+            crate::local_financial::refresh_dispute_secret_arguments(
+                &body,
+                &[],
+                state,
+                paybook_changes,
+                &counterparty,
+                view.delta_transformer
+                    .ok_or_else(|| invalid("J_DISPUTE_DELTA_TRANSFORMER_MISSING"))?,
+            )?
+        };
         let j_state = state.j_batch_state.get_or_insert_with(Default::default);
         j_state
             .batch
@@ -1679,8 +1692,7 @@ fn apply_dispute_started(
                 initial_proofbody_hash: initial_hash,
                 final_proofbody: body.clone(),
                 starter_arguments: event.starter_initial_arguments.clone(),
-                // N7's positional evidence must never be applied to N8.
-                other_arguments: Vec::new(),
+                other_arguments,
                 sig: Vec::new(),
                 started_by_left: we_are_starter == view.owner_is_left,
                 cooperative: false,
@@ -3142,6 +3154,120 @@ mod tests {
                 .any(|(id, _)| id == &format!("dispute-deadline:{}", counterparty.as_hex()))
         );
         assert!(outputs.is_empty());
+    }
+
+    #[test]
+    fn review_2_pending_proposal_exit_includes_unpublished_payment_secret() {
+        let owner = entity(0x11);
+        let peer = entity(0x22);
+        let mut state = EntityStateSlice::empty(owner.as_hex(), 120_000);
+        state.known_accounts.insert(peer.as_hex());
+        let mut event = dispute_started_event(&peer, &owner);
+        event.nonce = BigInt::from(8);
+        event.proposer_is_left = true;
+        event.starter_initial_arguments.clear();
+        let secret = [0x61; 32];
+        let hashlock: [u8; 32] = Keccak256::digest(secret).into();
+        state.paybook = crate::PaybookState::from_entries(
+            [crate::PaybookEntry {
+                hashlock: prefixed_hex(&hashlock),
+                secret: Some(prefixed_hex(&secret)),
+                inbound_entity: Some(peer.as_hex()),
+                outbound_entity: None,
+                description: None,
+                token_id: Some(1),
+                amount: Some(BigInt::from(10)),
+                started_at_ms: Some(1),
+                originated: false,
+                inbound_settled: false,
+                outbound_settled: false,
+                secret_ack_pending: false,
+                secret_ack_started_at: None,
+                secret_ack_deadline_at: None,
+                pending_fee: None,
+                created_timestamp: 1,
+            }],
+            BigInt::from(0),
+        )
+        .unwrap();
+        let encoded_batch = ethabi::encode(&[Token::Tuple(vec![
+            Token::Array(vec![Token::Tuple(vec![
+                Token::Uint(U256::zero()),
+                Token::Tuple(vec![Token::Bool(false), Token::Uint(U256::from(10))]),
+                Token::Uint(U256::from(1000)),
+                Token::FixedBytes(hashlock.to_vec()),
+            ])]),
+            Token::Array(Vec::new()),
+            Token::Array(Vec::new()),
+            Token::Array(Vec::new()),
+        ])]);
+        event
+            .initial_proofbody
+            .transformers
+            .push(xln_rscore_engine::ProofTransformerClause {
+                transformer_address: prefixed_hex(&[0x44; 20]),
+                encoded_batch: prefixed_hex(&encoded_batch),
+                allowances: Vec::new(),
+            });
+        let body = crate::proof_body_from_j_event(&event.initial_proofbody).unwrap();
+        let body_hash = crate::proof_body_hash(&body).unwrap();
+        event.proofbody_hash = prefixed_hex(&body_hash);
+        let mut view = dispute_view(None);
+        // Committed N7 is different; only the certified event supplies N8 bytes.
+        view.proof_body.as_mut().unwrap().offdeltas = vec![BigInt::from(8)];
+        let domain = xln_rscore_engine::AccountDomain::new(
+            31337,
+            xln_rscore_engine::DepositoryAddress::parse(&prefixed_hex(&[0x44; 20])).unwrap(),
+        )
+        .unwrap();
+        view.pending_dispute = Some((
+            xln_rscore_engine::DisputeDraft {
+                hanko: None,
+                hash: xln_rscore_engine::dispute_proof_hash(
+                    31337,
+                    &[0x44; 20],
+                    &[0x11; 32],
+                    &[0x22; 32],
+                    8,
+                    true,
+                    &body_hash,
+                    &[0x33; 32],
+                ),
+                proof_body_hash: body_hash,
+                nonce: 8,
+                proposer_is_left: true,
+            },
+            domain,
+        ));
+        let views = BTreeMap::from([(peer.as_hex(), view)]);
+        let mut mutations = Vec::new();
+        apply_dispute_started(
+            &mut state,
+            &event,
+            "runtime-seed",
+            &views,
+            &mut crate::paybook::PaybookChanges::default(),
+            &mut BTreeMap::new(),
+            &mut mutations,
+            &mut Vec::new(),
+            &mut Vec::new(),
+        )
+        .expect("certified start");
+        let queued = &state
+            .j_batch_state
+            .as_ref()
+            .unwrap()
+            .batch
+            .dispute_finalizations[0];
+        let expected = ethabi::encode(&[Token::Array(vec![Token::Bytes(ethabi::encode(&[
+            Token::Tuple(vec![
+                Token::Array(Vec::new()),
+                Token::Array(vec![Token::FixedBytes(secret.to_vec())]),
+            ]),
+        ]))])]);
+        assert_eq!(queued.other_arguments, expected);
+        assert!(queued.starter_arguments.is_empty());
+        assert_eq!(queued.final_proofbody, body);
     }
 
     #[test]

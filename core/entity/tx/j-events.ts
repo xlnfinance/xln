@@ -1,3 +1,4 @@
+import { refreshDisputeSecretArguments } from '../dispute-secret-arguments';
 import type { EntityCandidateEffect, EntityInput, EntityState, HashToSign } from '../types';
 import type { EntityRuntimeContext } from '../runtime-context';
 import type { AccountReplica } from '../../types/account';
@@ -798,7 +799,10 @@ const queueStartedProposalExit = (
     initialProofbodyHash: active.initialProofbodyHash,
     finalProofbody: initialProofbody,
     starterArguments: active.starterInitialArguments,
-    otherArguments: '0x',
+    otherArguments: callerIsStarter ? '0x' : refreshDisputeSecretArguments(
+      initialProofbody, '0x', state, counterpartyId,
+      requireAccountDeltaTransformerAddress(context.env.state, account.state),
+    ),
     sig: '0x',
     startedByLeft: active.startedByLeft,
     cooperative: false,

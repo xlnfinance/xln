@@ -1387,7 +1387,7 @@ pub(crate) fn batch_empty(batch: &JBatch) -> bool {
 /// Exact TS `takeBroadcastBatch`: public hash-ladder evidence must land before
 /// a finalization that reads it, and adversarial finalizers are sent FIFO one
 /// at a time so one processBatch stays below the L1 block gas limit.
-fn take_broadcast_batch(source: &JBatch, now_sec: u64) -> (JBatch, JBatch) {
+pub(crate) fn take_broadcast_batch(source: &JBatch, now_sec: u64) -> (JBatch, JBatch) {
     // A timed queued exit cannot occupy sentBatch while reveals may still arrive.
     let mut ready = source.clone();
     ready.dispute_finalizations.retain(|proof| {

@@ -3920,7 +3920,7 @@ fn signed_amount(token: Token, kind: EntityTxKind) -> Result<BigInt, EntityKerne
     Ok(if *negative { -amount } else { amount })
 }
 
-fn delta_batch_param() -> ParamType {
+pub(crate) fn delta_batch_param() -> ParamType {
     ParamType::Tuple(vec![
         ParamType::Array(Box::new(ParamType::Tuple(vec![
             ParamType::Uint(256),

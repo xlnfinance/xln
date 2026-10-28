@@ -1,5 +1,6 @@
 use super::*;
 use ethabi::ethereum_types::U256;
+use sha3::Digest;
 use xln_rscore_entity_kernel::j_batch::{FinalDisputeProof, proof_body_from_engine};
 use xln_rscore_entity_kernel::{JBatchState, ScheduledHookKind, schedule_hook};
 
@@ -12,6 +13,7 @@ fn run_due_dispute(
     queued: bool,
     manual: bool,
     abort_sent: bool,
+    with_secret: bool,
 ) -> (xln_rscore_entity_kernel::ResidentEntityResult, [u8; 32]) {
     let owner = entity(&identity("hub"));
     let peer = entity(&identity("dispute-peer"));
@@ -19,11 +21,35 @@ fn run_due_dispute(
     let mut replica = AccountReplica::new(owner.clone(), account_state(&owner, &peer)).unwrap();
     replica.set_delta_transformer([0x77; 20]);
     let owner_left = owner < peer;
-    let proof_hash = xln_rscore_engine::proof_body_hash(&replica, &[0x77; 20]).unwrap();
-    let body = proof_body_from_engine(
+    let mut proof_hash = xln_rscore_engine::proof_body_hash(&replica, &[0x77; 20]).unwrap();
+    let mut body = proof_body_from_engine(
         xln_rscore_engine::build_dispute_proof_body(&replica, &[0x77; 20]).unwrap(),
     )
     .unwrap();
+    let secret = [0x61; 32];
+    let hashlock: [u8; 32] = sha3::Keccak256::digest(secret).into();
+    if with_secret {
+        body.transformers
+            .push(xln_rscore_entity_kernel::j_batch::TransformerClause {
+                transformer_address: [0x77; 20],
+                allowances: Vec::new(),
+                encoded_batch: ethabi::encode(&[ethabi::Token::Tuple(vec![
+                    ethabi::Token::Array(vec![ethabi::Token::Tuple(vec![
+                        ethabi::Token::Uint(U256::zero()),
+                        ethabi::Token::Tuple(vec![
+                            ethabi::Token::Bool(false),
+                            ethabi::Token::Uint(U256::from(10)),
+                        ]),
+                        ethabi::Token::Uint(U256::from(now / 1000 + 100)),
+                        ethabi::Token::FixedBytes(hashlock.to_vec()),
+                    ])]),
+                    ethabi::Token::Array(Vec::new()),
+                    ethabi::Token::Array(Vec::new()),
+                    ethabi::Token::Array(Vec::new()),
+                ])]),
+            });
+        proof_hash = xln_rscore_entity_kernel::proof_body_hash(&body).unwrap();
+    }
     let mut consensus = AccountConsensus::new(replica);
     // Observed on-chain proof binds the actual canonical Account state; no
     // fabricated signature or opaque body is accepted by the finalize path.
@@ -32,7 +58,10 @@ fn run_due_dispute(
             "disputed",
             None,
             Some(CanonicalValue::Object(vec![
-                ("startedByLeft".into(), CanonicalValue::Bool(owner_left)),
+                (
+                    "startedByLeft".into(),
+                    CanonicalValue::Bool(owner_left != with_secret),
+                ),
                 (
                     "initialProofbodyHash".into(),
                     CanonicalValue::String(format!("0x{}", hex::encode(proof_hash))),
@@ -78,6 +107,31 @@ fn run_due_dispute(
     .unwrap();
     let mut state = EntityStateSlice::empty(owner.to_string(), now);
     state.known_accounts.insert(peer.to_string());
+    if with_secret {
+        state.paybook = xln_rscore_entity_kernel::PaybookState::from_entries(
+            [xln_rscore_entity_kernel::PaybookEntry {
+                hashlock: format!("0x{}", hex::encode(hashlock)),
+                secret: Some(format!("0x{}", hex::encode(secret))),
+                inbound_entity: Some(peer.to_string()),
+                outbound_entity: None,
+                description: None,
+                token_id: Some(1),
+                amount: Some(BigInt::from(10)),
+                started_at_ms: Some(now),
+                originated: false,
+                inbound_settled: false,
+                outbound_settled: false,
+                secret_ack_pending: false,
+                secret_ack_started_at: None,
+                secret_ack_deadline_at: None,
+                pending_fee: None,
+                created_timestamp: now,
+            }],
+            BigInt::from(0),
+        )
+        .unwrap();
+    }
+
     let mut crontab = CrontabState::default();
     crontab.tasks.clear();
     schedule_hook(
@@ -111,7 +165,7 @@ fn run_due_dispute(
                 starter_arguments: vec![],
                 other_arguments: vec![],
                 sig: vec![],
-                started_by_left: owner_left,
+                started_by_left: owner_left != with_secret,
                 cooperative: false,
                 submit_not_before_timestamp: Some(now / 1_000),
             });
@@ -260,7 +314,7 @@ fn assert_same_frame(
     queued: bool,
     manual: bool,
 ) -> (EntityKernelCommitments, [u8; 32]) {
-    let (result, root) = run_due_dispute(workers, queued, manual, false);
+    let (result, root) = run_due_dispute(workers, queued, manual, false, false);
     assert!(
         result.routed_entity_outputs.is_empty(),
         "due finalization must never escape as a self-output"
@@ -319,7 +373,7 @@ fn manual_broadcast_with_due_dispute_does_not_broadcast_twice() {
 #[test]
 fn scheduled_dispute_deadline_precedes_abort_without_manual_broadcast() {
     let run = |workers| {
-        let (result, root) = run_due_dispute(workers, false, false, true);
+        let (result, root) = run_due_dispute(workers, false, false, true, false);
         let batch = result.state.j_batch_state.as_ref().unwrap();
         assert!(
             batch.sent_batch.is_none(),
@@ -341,4 +395,31 @@ fn scheduled_dispute_deadline_precedes_abort_without_manual_broadcast() {
         (result.commitments, root)
     };
     assert_eq!(run(1), run(4));
+}
+
+#[test]
+fn queued_responder_payment_secret_is_refreshed_by_resident_broadcast_w1_w4() {
+    let run = |workers, manual| {
+        let (result, root) = run_due_dispute(workers, true, manual, false, true);
+        let sent = result
+            .state
+            .j_batch_state
+            .as_ref()
+            .unwrap()
+            .sent_batch
+            .as_ref()
+            .unwrap();
+        let proof = &sent.batch.dispute_finalizations[0];
+        let expected = ethabi::encode(&[ethabi::Token::Array(vec![ethabi::Token::Bytes(
+            ethabi::encode(&[ethabi::Token::Tuple(vec![
+                ethabi::Token::Array(Vec::new()),
+                ethabi::Token::Array(vec![ethabi::Token::FixedBytes(vec![0x61; 32])]),
+            ])]),
+        )])]);
+        assert_eq!(proof.other_arguments, expected);
+        assert!(proof.starter_arguments.is_empty());
+        (result.commitments, root)
+    };
+    assert_eq!(run(1, false), run(4, false));
+    assert_eq!(run(1, true), run(4, true));
 }

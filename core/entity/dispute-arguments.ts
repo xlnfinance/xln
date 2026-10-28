@@ -30,15 +30,22 @@ export const collectKnownDisputeSecretsForState = (
   entityState: EntityState,
   counterpartyEntityId: string,
 ): string[] => {
-  const plan = buildCurrentDisputeArgumentPlan(account);
-  if (entityState.paybook.entries.size === 0 || plan.paymentHashlocks.length === 0) return [];
+  return collectKnownDisputeSecretsForHashlocks(
+    buildCurrentDisputeArgumentPlan(account).paymentHashlocks, entityState, counterpartyEntityId,
+  );
+};
+
+export const collectKnownDisputeSecretsForHashlocks = (
+  paymentHashlocks: readonly string[], entityState: EntityState, counterpartyEntityId: string,
+): string[] => {
+  if (entityState.paybook.entries.size === 0 || paymentHashlocks.length === 0) return [];
   const seen = new Set<string>();
   const secrets: string[] = [];
-  // AccountState already names the exact hashlocks required by the frozen
-  // proof. Point-read those paybook entries in transformer order; scanning the
-  // whole Entity paybook made one disputed Account O(all active payments) and
+  // The caller supplies exact proof hashlocks. Point-read their paybook
+  // entries in transformer order; scanning the whole Entity paybook made
+  // one disputed Account O(all active payments) and
   // could also return secrets in unrelated insertion order.
-  for (const rawHashlock of plan.paymentHashlocks) {
+  for (const rawHashlock of paymentHashlocks) {
     const hashlock = rawHashlock.toLowerCase();
     const route = entityState.paybook.entries.get(hashlock);
     if (!route || route.hashlock.toLowerCase() !== hashlock) continue;

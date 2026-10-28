@@ -1,3 +1,4 @@
+import { hashHtlcSecret } from '../../../protocol/htlc/utils';
 import { initCrontab } from '../../../entity/scheduler';
 import { handleScheduledWakeEntityTx } from '../../../entity/tx/handlers/system/scheduled-wake';
 import { expect, test } from 'bun:test';
@@ -20,7 +21,7 @@ import { addReplica, installJurisdictions, makeJurisdiction, makeState, openWrit
 
 // Real Depository bytecode, Alice's real Account proposal, Bob's signed start,
 // certified event ingress, then only Alice's queued batch. Bob never finalizes.
-test('review 2: Alice exits all collateral from certified N8 while Bob never ACKs or finalizes', async () => {
+test.each(['none', 'ingress', 'seal', 'recovery'] as const)('review 2: Alice exits certified N8 with unpublished HTLC secret learned at %s', async secretAt => {
   const adapter = await createJAdapter({ mode: 'browservm', chainId: 31337 });
   try {
     await adapter.deployStack();
@@ -42,6 +43,19 @@ test('review 2: Alice exits all collateral from certified N8 while Bob never ACK
     state.timestamp = 120_000;
     state.crontabState = initCrontab();
     const account = openWritableEntityAccounts(state).getForWrite(bob.id)!;
+    env.state.jReplicas.get(jurisdiction.name)!.contracts.deltaTransformer = adapter.addresses.deltaTransformer;
+    const secret = `0x${'61'.repeat(32)}`;
+    const hashlock = hashHtlcSecret(secret);
+    const lockId = `0x${'71'.repeat(32)}`;
+    if (secretAt !== 'none') account.state.locks = account.state.locks.updated(lockId, {
+      lockId, hashlock, timelock: 10_000_000n, revealBeforeHeight: 10_000,
+      amount: 10n, tokenId: 1, senderIsLeft: false, createdHeight: 1, createdTimestamp: 1000,
+    });
+    const learnSecret = (target: typeof state) => target.paybook.entries.set(hashlock, {
+      hashlock, secret, tokenId: 1, amount: 10n, inboundEntity: bob.id, inboundLockId: lockId,
+      createdTimestamp: target.timestamp,
+    });
+    if (secretAt === 'ingress') learnSecret(state);
     const committed = buildAccountProofBodyFromJurisdictions(env.state, account);
     account.counterpartyDisputeProofNonce = 7;
     account.counterpartyDisputeProofBodyHash = committed.proofBodyHash;
@@ -65,6 +79,13 @@ test('review 2: Alice exits all collateral from certified N8 while Bob never ACK
     await adapter.processBatch(funded.encodedBatch, funded.hankoData, funded.nextNonce);
     expect(await adapter.getCollateral(alice.id, bob.id, 1)).toBe(100n);
 
+    if (secretAt !== 'none') {
+      await adapter.debugFundReserves(bob.id, 1, 100n);
+      const bobFund = createEmptyBatch();
+      bobFund.reserveToCollateral.push({ tokenId: 1, receivingEntity: bob.id, pairs: [{ entity: alice.id, amount: 100n }] });
+      const signed = prepareSignedBatch(bobFund, bob.id, bob.wallet.privateKey, 31337n, adapter.addresses.depository, 0n);
+      await adapter.processBatch(signed.encodedBatch, signed.hankoData, signed.nextNonce);
+    }
     const start = createEmptyBatch();
     start.disputeStarts.push({
       counterentity: alice.id, nonce: 8, proposerIsLeft: true,
@@ -72,7 +93,7 @@ test('review 2: Alice exits all collateral from certified N8 while Bob never ACK
       sig: buildSingleSignerHanko(alice.id, pending.hash, alice.wallet.privateKey),
       starterInitialArguments: '0x', starterCounterArguments: '0x', starterCounterProofCommitment: ZeroHash,
     });
-    const signedStart = prepareSignedBatch(start, bob.id, bob.wallet.privateKey, 31337n, adapter.addresses.depository, 0n);
+    const signedStart = prepareSignedBatch(start, bob.id, bob.wallet.privateKey, 31337n, adapter.addresses.depository, secretAt === 'none' ? 0n : 1n);
     const vm = adapter.getBrowserVM()!;
     vm.beginJurisdictionBlock(100_000);
     const receipt = await adapter.processBatch(signedStart.encodedBatch, signedStart.hankoData, signedStart.nextNonce);
@@ -91,7 +112,14 @@ test('review 2: Alice exits all collateral from certified N8 while Bob never ACK
       initialProofbodyHash: pending.proofBodyHash, finalProofbody: body,
       starterArguments: '0x', otherArguments: '0x', sig: '0x', startedByLeft: false, cooperative: false,
     });
-    expect(encodeJBatch(queued.batch)).toBe(encodeJBatch(expected));
+    if (secretAt === 'none') expect(encodeJBatch(queued.batch)).toBe(encodeJBatch(expected));
+    if (secretAt === 'ingress') expect(queued.batch.disputeFinalizations[0]!.otherArguments).not.toBe('0x');
+    else expect(queued.batch.disputeFinalizations[0]!.otherArguments).toBe('0x');
+    if (secretAt === 'seal' || secretAt === 'recovery') learnSecret(result.newState);
+    if (secretAt === 'recovery') {
+      queued.recoveryBatches = [queued.batch];
+      queued.batch = createEmptyBatch();
+    }
     queued.entityNonce = Number(funded.nextNonce);
     const hook = result.newState.crontabState!.hooks.get(`dispute-deadline:${bob.id}`)!;
     result.newState.timestamp = hook.triggerAt;
@@ -104,14 +132,19 @@ test('review 2: Alice exits all collateral from certified N8 while Bob never ACK
     const broadcast = await handleJBroadcast(wake.newState, broadcastTx, env);
     expect(broadcast.jOutputs).toHaveLength(1);
     const sent = broadcast.newState.jBatchState!.sentBatch!;
+    expect(sent.batch.revealSecrets).toHaveLength(0);
+    expect(sent.batch.disputeFinalizations[0]!.starterArguments).toBe('0x');
     const signedExit = prepareSignedBatch(sent.batch, alice.id, alice.wallet.privateKey, 31337n,
       adapter.addresses.depository, funded.nextNonce);
-    expect(signedExit.encodedBatch).toBe(encodeJBatch(expected));
+    if (secretAt === 'none') expect(signedExit.encodedBatch).toBe(encodeJBatch(expected));
+    expect(hook.triggerAt).toBeLessThan(10_000_000);
+    vm.beginJurisdictionBlock(hook.triggerAt);
     const exit = await adapter.processBatch(signedExit.encodedBatch, signedExit.hankoData, signedExit.nextNonce);
+    vm.endJurisdictionBlock();
     expect(exit.events.some(event => event.name === 'DisputeFinalized')).toBe(true);
     expect(await adapter.getCollateral(alice.id, bob.id, 1)).toBe(0n);
-    expect(await adapter.getReserves(alice.id, 1)).toBe(99n);
-    expect(await adapter.getReserves(bob.id, 1)).toBe(1n);
+    expect(await adapter.getReserves(alice.id, 1)).toBe(secretAt === 'none' ? 99n : 109n);
+    expect(await adapter.getReserves(bob.id, 1)).toBe(secretAt === 'none' ? 1n : 91n);
   } finally { await adapter.close(); }
 });
 

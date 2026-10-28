@@ -1886,6 +1886,36 @@ fn local_account_views(
         view.htlc_lock_ids.dedup();
         view.dispute = true;
     }
+    // Queued/recovered exits can broadcast without a disputeFinalize tx. Their
+    // bounded J-batch references still need the canonical transformer identity;
+    // the frozen N7 body itself is never used to construct N8 arguments.
+    if let Some(batch) = &state.j_batch_state {
+        for proof in std::iter::once(&batch.batch)
+            .chain(batch.recovery_batches.iter())
+            .chain(batch.sent_batch.iter().map(|sent| &sent.batch))
+            .flat_map(|batch| &batch.dispute_finalizations)
+        {
+            if proof.cooperative || proof.final_proofbody.transformers.is_empty() {
+                continue;
+            }
+            let account = AccountId::from_bytes(proof.counterentity);
+            if (state.entity_id < account_text(account)) == proof.started_by_left {
+                continue;
+            }
+            if let Some(index) = positions.get(&account).copied() {
+                requests[index].1.dispute = true;
+            } else {
+                positions.insert(account, requests.len());
+                requests.push((
+                    account,
+                    xln_rscore_batch::ResidentAccountFinancialViewRequest {
+                        dispute: true,
+                        ..Default::default()
+                    },
+                ));
+            }
+        }
+    }
     for request in
         crate::cross_j::cross_jurisdiction_account_view_requests(state, &cross_jurisdiction)?
     {
