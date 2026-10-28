@@ -38,6 +38,7 @@ pub(crate) fn dispute_view() -> xln_rscore_batch::ResidentAccountDisputeView {
         payment_hashlocks: Vec::new(),
         pull_ids: Vec::new(),
         pull_count: 0,
+        lending_claim_ids: Vec::new(),
         swap_offers: Vec::new(),
         pending_swap_fill_ratios: BTreeMap::new(),
     }
