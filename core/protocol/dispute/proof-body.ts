@@ -99,9 +99,10 @@ export interface RuntimePull {
   deltaIndex: number;
   amount: bigint;
   claimedRatio: number;
+  deadline: number;
   fullHash: string;
   partialRoot: string;
-  /** Signed registry role; both roles use their own beneficiary-side window. */
+  /** Signed registry role. */
   targetRole: boolean;
 }
 
@@ -196,6 +197,7 @@ export const BATCH_ABI = {
         { name: 'deltaIndex', type: 'uint256' },
         { name: 'amount', type: 'tuple', components: SIGNED_AMOUNT_ABI_COMPONENTS },
         { name: 'claimedRatio', type: 'uint16' },
+        { name: 'deadline', type: 'uint256' },
         { name: 'fullHash', type: 'bytes32' },
         { name: 'partialRoot', type: 'bytes32' },
         { name: 'targetRole', type: 'bool' },

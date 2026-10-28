@@ -22,6 +22,8 @@ mod prepared_lifecycle;
 pub(crate) mod prepared_wire;
 pub(crate) mod provider_lifecycle;
 mod submission;
+#[path = "prepared/target_reveal.rs"]
+mod target_reveal;
 mod transaction;
 mod tron;
 
@@ -38,7 +40,7 @@ pub(crate) use financial_replacement::decode_replacement;
 pub use financial_replacement::{JPreparedReplacement, apply_j_prepared_replacement};
 pub(crate) use governance_lifecycle::decode_governance_result;
 pub use governance_lifecycle::{
-    DurableGovernanceAttempt, GovernanceResultData, GovernanceResultOutcome,
+    DurableGovernanceAttempt, GovernanceResultData, GovernanceResultOutcome, PublicationPayload,
     apply_governance_result, decode_pending_governance_attempts, encode_governance_result,
     prepare_governance_attempt, register_governance_attempt,
 };

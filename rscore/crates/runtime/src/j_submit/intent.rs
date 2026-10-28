@@ -302,6 +302,39 @@ pub fn prepare_certified_entity_j_intents(
     install_profile_witnesses(replica_metadata, witnesses, state.height, state.timestamp)?;
     for output in outputs {
         match output {
+            EntityJOutput::TargetReveal {
+                jurisdiction_name,
+                entity_id,
+                registration,
+                reveal_hash,
+                signer_id,
+                timestamp,
+            } => {
+                if hex(&entity_id) != state.entity_id.to_ascii_lowercase()
+                    || signer_id != local_signer_id
+                {
+                    return Err(error("TARGET_REVEAL_ENTITY_MISMATCH"));
+                }
+                let hash = hex(&reveal_hash);
+                let witness = witnesses
+                    .get(&hash)
+                    .ok_or_else(|| error("TARGET_REVEAL_WITNESS_MISSING"))?;
+                if witness.kind != HashType::HashLadderReveal {
+                    return Err(error("TARGET_REVEAL_WITNESS_TYPE"));
+                }
+                prepared.governance.push(
+                    super::target_reveal::prepare_target_reveal(
+                        jurisdiction_name,
+                        entity_id,
+                        registration,
+                        reveal_hash,
+                        signer_id,
+                        timestamp,
+                        witness.hanko.clone(),
+                    )
+                    .map_err(|e| error(e.to_string()))?,
+                );
+            }
             EntityJOutput::BatchIntent {
                 jurisdiction_name,
                 batch_hash,

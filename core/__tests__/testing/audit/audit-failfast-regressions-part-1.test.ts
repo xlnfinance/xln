@@ -1342,6 +1342,7 @@ describe('audit fail-fast regressions', () => {
 
     const route = buildPreparedCrossJurisdictionRoute(
       {
+      expiresAt: (env.state.timestamp) + 60_000,
         orderId: 'salvage-route-signer',
         sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
         targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
@@ -2151,7 +2152,7 @@ describe('audit fail-fast regressions', () => {
           tokenId: route.sourcePull!.tokenId,
           amount: route.sourcePull!.signedAmount,
           fullHash: route.sourcePull!.fullHash,
-          partialRoot: route.sourcePull!.partialRoot,
+          partialRoot: route.sourcePull!.partialRoot, deadline: route.sourcePull!.deadline,
           crossJurisdiction: buildCrossJurisdictionPullBinding(committedRoute, 'source'),
           crossJurisdictionRoute: committedRoute,
         },
@@ -2175,7 +2176,7 @@ describe('audit fail-fast regressions', () => {
     const targetHub = `0x${'44'.repeat(32)}`;
     const targetUser = `0x${'34'.repeat(32)}`;
     const sourcePull = {
-      pullId: 'same-token-source-pull',
+      pullId: 'same-token-source-pull', deadline: 60,
       tokenId: 1,
       amount: 2_000_000_000_000n,
       signedAmount: 2_000_000_000_000n,
@@ -2183,7 +2184,7 @@ describe('audit fail-fast regressions', () => {
       partialRoot: `0x${'bc'.repeat(32)}`,
     };
     const targetPull = {
-      pullId: 'same-token-target-pull',
+      pullId: 'same-token-target-pull', deadline: 293,
       tokenId: 1,
       amount: 1_000_000_000_000n,
       signedAmount: 1_000_000_000_000n,
@@ -2343,6 +2344,7 @@ describe('audit fail-fast regressions', () => {
             tokenId: route.sourcePull!.tokenId,
             amount: route.sourcePull!.signedAmount,
             claimedRatio: 0,
+            deadline: route.sourcePull!.deadline,
             claimedAmount: 0n,
             fullHash: route.sourcePull!.fullHash,
             partialRoot: route.sourcePull!.partialRoot,
@@ -2392,7 +2394,7 @@ describe('audit fail-fast regressions', () => {
     const targetHub = `0x${'46'.repeat(32)}`;
     const targetUser = `0x${'36'.repeat(32)}`;
     const sourcePull = {
-      pullId: 'remote-source-pull',
+      pullId: 'remote-source-pull', deadline: 60,
       tokenId: 1,
       amount: 75_000_000_000_000_000_000n,
       signedAmount: 75_000_000_000_000_000_000n,
@@ -2400,7 +2402,7 @@ describe('audit fail-fast regressions', () => {
       partialRoot: `0x${'be'.repeat(32)}`,
     };
     const targetPull = {
-      pullId: 'remote-target-pull',
+      pullId: 'remote-target-pull', deadline: 293,
       tokenId: 2,
       amount: 30_000_000_000_000_000n,
       signedAmount: 30_000_000_000_000_000n,

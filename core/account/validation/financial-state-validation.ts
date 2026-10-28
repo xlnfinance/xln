@@ -110,6 +110,7 @@ const validatePull = (key: unknown, value: unknown, context: string): void => {
   const amount = requireSignedAssetAmount(pull['amount'], `${context}.amount`);
   requireHash(pull['fullHash'], `${context}.fullHash`);
   requireHash(pull['partialRoot'], `${context}.partialRoot`);
+  requireBoundaryInteger(pull['deadline'], `${context}.deadline`, 1);
   requireBoundaryInteger(pull['createdHeight'], `${context}.createdHeight`);
   requireBoundaryInteger(pull['createdTimestamp'], `${context}.createdTimestamp`);
   if (pull['claimedRatio'] !== undefined) requireBoundaryInteger(pull['claimedRatio'], `${context}.claimedRatio`);

@@ -1,3 +1,4 @@
+import { toUnixMs, unixMsToUnixSFloor } from '../../../../protocol/units';
 import { accountDisputeGasCharge, disputeGasAdmissionError } from '../../../validation/dispute-gas-budget';
 import { UINT256_MAX } from '../../../../protocol/boundary/integer-ranges';
 import type { AccountState, AccountTx, PullCommitment } from '../../../../types/account';
@@ -102,9 +103,6 @@ const validateCrossPullCloseEvidence = (
   if (decodedRatio !== ratio) {
     return { ok: false, error: `Cross-j close ratio mismatch: binary ${decodedRatio} != proof ${ratio}` };
   }
-  // Settlement clocks are dispute-relative unix seconds on L1. Source and
-  // Target each use their beneficiary-side window from their own dispute S.
-  // No sealed route/pull reveal deadline gates cooperative close.
   return { ok: true, ratio };
 };
 
@@ -153,6 +151,7 @@ const validateCrossJurisdictionPullRoute = (account: AccountState, tx: PullLockT
     tx.data.pullId !== pull.pullId ||
     tx.data.tokenId !== pull.tokenId ||
     tx.data.amount !== pull.signedAmount ||
+    tx.data.deadline !== pull.deadline ||
     tx.data.fullHash.toLowerCase() !== pull.fullHash.toLowerCase() ||
     tx.data.partialRoot.toLowerCase() !== pull.partialRoot.toLowerCase()
   )
@@ -263,14 +262,14 @@ export async function handlePullLock(
   const holdError = addHold(delta, loserIsLeft ? 'left' : 'right', absAmount);
   if (holdError) return accountTxValidationRejected(holdError, events);
 
-  // No sealed pull reveal deadline. Settlement clock is dispute-relative
-  // seconds on L1; cooperative close is event-driven (hashladder reveal).
+  // Persist the same deadline signed in the route and next Account proof.
   commitDeltaDraft(account, delta);
   account.pulls.put(pullId, {
     pullId,
     tokenId,
     amount,
     claimedRatio: 0,
+    deadline: accountTx.data.deadline,
     claimedAmount: 0n,
     fullHash,
     partialRoot,
@@ -287,7 +286,7 @@ export async function handleCrossPullClose(
   account: AccountDraftState,
   accountTx: CrossPullCloseTx,
   byLeft: boolean,
-  _currentTimestamp: number,
+  currentTimestamp: number,
 ): Promise<ApplyAccountTxResult> {
   const { pullId, proof } = accountTx.data;
   const events: string[] = [];
@@ -297,6 +296,11 @@ export async function handleCrossPullClose(
   }
   const binding = pull.crossJurisdiction;
   if (!binding) return accountTxValidationRejected(`Cross-j close requires pull binding`, events);
+  // A late Source signature pays the Hub after the Target port can no longer settle.
+  // Target closes pay the user and retain their cooperative late-close authority.
+  if (binding.leg === 'source' && unixMsToUnixSFloor(toUnixMs(currentTimestamp)) > pull.deadline) {
+    return accountTxValidationRejected('Cross-j source close deadline exceeded', events);
+  }
   const evidence = validateCrossPullCloseEvidence(pull, binding, accountTx);
   if (!evidence.ok) return accountTxValidationRejected(evidence.error, events);
   const ratio = evidence.ratio;

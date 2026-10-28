@@ -17,7 +17,7 @@ import { shortId } from '../../../../support/logger';
 import { haltRuntimeFailure } from '../../../../protocol/errors/failure-taxonomy';
 import { disputeLog, warnDisputeUnlessQuiet } from './shared';
 import { admitDisputeFinalize } from './finalize-admission';
-import { proofBodyHasPulls } from './start-admission';
+import { proofBodyPullDeadline } from './start-admission';
 import { scheduleHook } from '../../../scheduler';
 import {
   countDeferredHashLadderReveals,
@@ -70,7 +70,7 @@ const collectRegistryPublication = (
  * - no pulls: the non-starter may immediately accept the state selected and
  *   signed by the starter; its fresh outer Hanko makes that mutual consent
  * - the starter has no fresh response from its peer and therefore waits T
- * - pulls present: both wait full T (applyPull reverts PullRevealWindowActive)
+ * - pulls present: both wait strictly after max(T, every signed Pull deadline)
  * Role is security authority, not presentation metadata. Never collapse these
  * branches into a generic pull-free fast path.
  */
@@ -85,10 +85,21 @@ const resolveFinalizeSubmitNotBefore = (
   const timeoutSec = toUnixS(Number(activeDispute.disputeTimeout || 0));
   const nowSec = unixMsToUnixSFloor(toUnixMs(Number(state.timestamp || 0)));
 
-  const hasPulls = proofBodyHasPulls(
+  const pullDeadline = proofBodyPullDeadline(
     selection.finalProofbody,
     requireAccountDeltaTransformerAddress(env.state, account.state),
   );
+  const hasPulls = pullDeadline !== undefined;
+  const submitAt = hasPulls ? Math.max(timeoutSec, pullDeadline) + 1 : timeoutSec;
+  if (hasPulls && nowSec < submitAt) {
+    if (state.crontabState) scheduleHook(state.crontabState, {
+      id: `dispute-deadline:${counterpartyId.toLowerCase()}`,
+      triggerAt: unixSToUnixMs(toUnixS(submitAt)),
+      type: 'dispute_deadline', data: { accountId: counterpartyId },
+    });
+    addMessage(state, `⏳ Pull finalization waits until ${submitAt}`);
+    return undefined;
+  }
   if (
     hasPulls
     && selection.shouldUseCounterProof
@@ -101,7 +112,7 @@ const resolveFinalizeSubmitNotBefore = (
   const callerIsStarter = callerIsLeft === activeDispute.startedByLeft;
   const hasSelectedCounterProof = activeDispute.selectedCounterNonce !== undefined;
   if (timeoutSec > 0 && nowSec >= timeoutSec) {
-    return hasPulls || callerIsStarter || hasSelectedCounterProof ? timeoutSec : null;
+    return hasPulls || callerIsStarter || hasSelectedCounterProof ? toUnixS(submitAt) : null;
   }
   // Once Solidity has selected a registered counter-proof, neither side may
   // execute it before T—even when its ProofBody has no Pulls. The immediate

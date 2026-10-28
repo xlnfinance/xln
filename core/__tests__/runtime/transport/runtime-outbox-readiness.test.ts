@@ -167,8 +167,10 @@ describe('committed Runtime outbox recipient readiness', () => {
 
 test('ready authenticated socket wakes only after the retained cross-J cohort is complete', async () => {
   const env = createEmptyEnv(SERVER_SEED, 1);
-  env.state.height = 79;
-  env.state.timestamp = 1792308503576;
+  const [completeFrame, retryFrame] = retryVector.rows;
+  if (!completeFrame || !retryFrame) throw new Error('CROSS_J_RETRY_VECTOR_MISSING');
+  env.state.height = retryFrame.height;
+  env.state.timestamp = retryFrame.timestamp;
   const transport = createTransport();
   const peer = await transport.connect('runtime-outbox-cross-j-ready-peer');
   transport.route.setReady(true);
@@ -177,8 +179,6 @@ test('ready authenticated socket wakes only after the retained cross-J cohort is
   const infrastructure = ensureRuntimeInfrastructure(env);
   infrastructure.directEntityInputsDispatch = transport.route.sendEntityInputsDelivery;
   infrastructure.canDeliverEntityInputs = transport.route.canDeliver;
-  const [completeFrame, retryFrame] = retryVector.rows;
-  if (!completeFrame || !retryFrame) throw new Error('CROSS_J_RETRY_VECTOR_MISSING');
   const decode = (row: string) => ({
     ...validateDeliverableEntityInput(decodeBuffer(Buffer.from(row, 'base64'))),
     runtimeId: peer.runtimeId,

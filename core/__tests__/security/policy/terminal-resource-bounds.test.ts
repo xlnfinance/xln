@@ -240,6 +240,7 @@ test('decode validation accepts signed pull amounts and rejects zero', () => {
     tokenId: 1,
     amount,
     claimedRatio: 0,
+    deadline: 120,
     claimedAmount: 0n,
     fullHash: `0x${'ab'.repeat(32)}`,
     partialRoot: `0x${'cd'.repeat(32)}`,

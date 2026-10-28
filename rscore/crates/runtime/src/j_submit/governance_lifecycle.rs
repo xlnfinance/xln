@@ -20,15 +20,26 @@ pub struct GovernanceSupporterVote {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PublicationPayload {
+    ControlBoard {
+        target_entity_id: [u8; 32],
+        new_board_hash: [u8; 32],
+        target_board_epoch: u64,
+        action_nonce: U256,
+        supporter_votes: Vec<GovernanceSupporterVote>,
+    },
+    TargetReveal {
+        registration: xln_rscore_entity_kernel::j_batch::HashLadderRegistration,
+        hanko: Vec<u8>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DurableGovernanceAttempt {
     pub jurisdiction_name: String,
     pub shareholder_entity_id: [u8; 32],
-    pub target_entity_id: [u8; 32],
-    pub new_board_hash: [u8; 32],
-    pub target_board_epoch: u64,
-    pub action_nonce: U256,
+    pub payload: PublicationPayload,
     pub proposal_hash: [u8; 32],
-    pub supporter_votes: Vec<GovernanceSupporterVote>,
     pub signer_id: [u8; 20],
     pub timestamp: u64,
     pub payload_hash: [u8; 32],
@@ -130,27 +141,43 @@ fn supporter_values(votes: &[GovernanceSupporterVote]) -> Value {
 }
 
 fn unsigned_payload(attempt: &DurableGovernanceAttempt) -> Value {
-    json!({
-        "type":"entityProviderProposeControlBoard",
-        "entityId":hex(&attempt.shareholder_entity_id),
-        "data":{
-            "targetEntityId":hex(&attempt.target_entity_id),
-            "newBoardHash":hex(&attempt.new_board_hash),
-            "boardEpoch":bigint(U256::from(attempt.target_board_epoch)),
-            "actionNonce":bigint(attempt.action_nonce),
-            "proposalHash":hex(&attempt.proposal_hash),
-            "supporterVotes":supporter_values(&attempt.supporter_votes),
-            "signerId":hex(&attempt.signer_id),
-        },
-        "timestamp":attempt.timestamp,
-    })
+    let (kind, data) = match &attempt.payload {
+        PublicationPayload::ControlBoard {
+            target_entity_id,
+            new_board_hash,
+            target_board_epoch,
+            action_nonce,
+            supporter_votes,
+        } => (
+            "entityProviderProposeControlBoard",
+            json!({
+                "targetEntityId":hex(target_entity_id), "newBoardHash":hex(new_board_hash),
+                "boardEpoch":bigint(U256::from(*target_board_epoch)), "actionNonce":bigint(*action_nonce),
+                "proposalHash":hex(&attempt.proposal_hash), "supporterVotes":supporter_values(supporter_votes),
+                "signerId":hex(&attempt.signer_id),
+            }),
+        ),
+        PublicationPayload::TargetReveal {
+            registration,
+            hanko,
+        } => (
+            "hashLadderReveal",
+            json!({
+                "registration":super::target_reveal::registration_value(registration),
+                "revealHash":hex(&attempt.proposal_hash), "hankoSignature":hex(hanko), "signerId":hex(&attempt.signer_id),
+            }),
+        ),
+    };
+    json!({"type":kind, "entityId":hex(&attempt.shareholder_entity_id), "data":data, "timestamp":attempt.timestamp})
 }
 
-fn payload_hash(attempt: &DurableGovernanceAttempt) -> Result<[u8; 32], JSubmitLifecycleError> {
+pub(super) fn payload_hash(
+    attempt: &DurableGovernanceAttempt,
+) -> Result<[u8; 32], JSubmitLifecycleError> {
     Ok(Keccak256::digest(stable_json(&unsigned_payload(attempt))?.as_bytes()).into())
 }
 
-fn attempt_id(
+pub(super) fn attempt_id(
     attempt: &DurableGovernanceAttempt,
     attempt_number: u64,
 ) -> Result<String, JSubmitLifecycleError> {
@@ -225,12 +252,14 @@ pub fn prepare_governance_attempt(
     let mut attempt = DurableGovernanceAttempt {
         jurisdiction_name,
         shareholder_entity_id,
-        target_entity_id,
-        new_board_hash,
-        target_board_epoch,
-        action_nonce,
+        payload: PublicationPayload::ControlBoard {
+            target_entity_id,
+            new_board_hash,
+            target_board_epoch,
+            action_nonce,
+            supporter_votes,
+        },
         proposal_hash,
-        supporter_votes,
         signer_id,
         timestamp,
         payload_hash: [0; 32],
@@ -306,33 +335,75 @@ fn parse_pending(value: &Value) -> Result<DurableGovernanceAttempt, JSubmitLifec
         .get("data")
         .and_then(Value::as_object)
         .ok_or_else(|| error("GOVERNANCE_DATA"))?;
-    let votes = data
-        .get("supporterVotes")
-        .and_then(Value::as_array)
-        .ok_or_else(|| error("GOVERNANCE_VOTES"))?
-        .iter()
-        .map(|row| {
-            let row = row.as_object().ok_or_else(|| error("GOVERNANCE_VOTE"))?;
-            Ok(GovernanceSupporterVote {
-                entity_id: fixed_hex(
-                    row.get("entityId")
-                        .and_then(Value::as_str)
-                        .ok_or_else(|| error("GOVERNANCE_VOTE_ENTITY"))?,
-                    "GOVERNANCE_VOTE_ENTITY",
-                )?,
-                hanko: hex::decode(
-                    normalize(
-                        row.get("hankoSignature")
+    let payload = if tx.get("type").and_then(Value::as_str) == Some("hashLadderReveal") {
+        PublicationPayload::TargetReveal {
+            registration: super::target_reveal::parse_registration(
+                data.get("registration")
+                    .ok_or_else(|| error("REVEAL_REGISTRATION"))?,
+            )?,
+            hanko: hex::decode(
+                data.get("hankoSignature")
+                    .and_then(Value::as_str)
+                    .and_then(|v| v.strip_prefix("0x"))
+                    .ok_or_else(|| error("REVEAL_HANKO"))?,
+            )
+            .map_err(|_| error("REVEAL_HANKO"))?,
+        }
+    } else {
+        let votes = data
+            .get("supporterVotes")
+            .and_then(Value::as_array)
+            .ok_or_else(|| error("GOVERNANCE_VOTES"))?
+            .iter()
+            .map(|row| {
+                let row = row.as_object().ok_or_else(|| error("GOVERNANCE_VOTE"))?;
+                Ok(GovernanceSupporterVote {
+                    entity_id: fixed_hex(
+                        row.get("entityId")
                             .and_then(Value::as_str)
-                            .ok_or_else(|| error("GOVERNANCE_VOTE_HANKO"))?,
+                            .ok_or_else(|| error("GOVERNANCE_VOTE_ENTITY"))?,
+                        "GOVERNANCE_VOTE_ENTITY",
+                    )?,
+                    hanko: hex::decode(
+                        normalize(
+                            row.get("hankoSignature")
+                                .and_then(Value::as_str)
+                                .ok_or_else(|| error("GOVERNANCE_VOTE_HANKO"))?,
+                        )
+                        .strip_prefix("0x")
+                        .ok_or_else(|| error("GOVERNANCE_VOTE_HANKO"))?,
                     )
-                    .strip_prefix("0x")
-                    .ok_or_else(|| error("GOVERNANCE_VOTE_HANKO"))?,
-                )
-                .map_err(|_| error("GOVERNANCE_VOTE_HANKO"))?,
+                    .map_err(|_| error("GOVERNANCE_VOTE_HANKO"))?,
+                })
             })
-        })
-        .collect::<Result<Vec<_>, JSubmitLifecycleError>>()?;
+            .collect::<Result<Vec<_>, JSubmitLifecycleError>>()?;
+        PublicationPayload::ControlBoard {
+            target_entity_id: fixed_hex(
+                data.get("targetEntityId")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| error("GOVERNANCE_TARGET"))?,
+                "GOVERNANCE_TARGET",
+            )?,
+            new_board_hash: fixed_hex(
+                data.get("newBoardHash")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| error("GOVERNANCE_BOARD"))?,
+                "GOVERNANCE_BOARD",
+            )?,
+            target_board_epoch: decode_bigint(
+                data.get("boardEpoch")
+                    .ok_or_else(|| error("GOVERNANCE_EPOCH"))?,
+                "GOVERNANCE_EPOCH",
+            )?
+            .low_u64(),
+            action_nonce: decode_bigint(
+                data.get("actionNonce")
+                    .ok_or_else(|| error("GOVERNANCE_NONCE"))?,
+                "GOVERNANCE_NONCE",
+            )?,
+            supporter_votes: votes,
+        }
+    };
     let metadata = data
         .get("runtimeSubmitAttempt")
         .and_then(Value::as_object)
@@ -340,36 +411,19 @@ fn parse_pending(value: &Value) -> Result<DurableGovernanceAttempt, JSubmitLifec
     let mut attempt = DurableGovernanceAttempt {
         jurisdiction_name,
         shareholder_entity_id: entity_id,
-        target_entity_id: fixed_hex(
-            data.get("targetEntityId")
-                .and_then(Value::as_str)
-                .ok_or_else(|| error("GOVERNANCE_TARGET"))?,
-            "GOVERNANCE_TARGET",
-        )?,
-        new_board_hash: fixed_hex(
-            data.get("newBoardHash")
-                .and_then(Value::as_str)
-                .ok_or_else(|| error("GOVERNANCE_BOARD"))?,
-            "GOVERNANCE_BOARD",
-        )?,
-        target_board_epoch: decode_bigint(
-            data.get("boardEpoch")
-                .ok_or_else(|| error("GOVERNANCE_EPOCH"))?,
-            "GOVERNANCE_EPOCH",
-        )?
-        .low_u64(),
-        action_nonce: decode_bigint(
-            data.get("actionNonce")
-                .ok_or_else(|| error("GOVERNANCE_NONCE"))?,
-            "GOVERNANCE_NONCE",
-        )?,
         proposal_hash: fixed_hex(
-            data.get("proposalHash")
-                .and_then(Value::as_str)
-                .ok_or_else(|| error("GOVERNANCE_PROPOSAL"))?,
-            "GOVERNANCE_PROPOSAL",
+            data.get(
+                if matches!(&payload, PublicationPayload::TargetReveal { .. }) {
+                    "revealHash"
+                } else {
+                    "proposalHash"
+                },
+            )
+            .and_then(Value::as_str)
+            .ok_or_else(|| error("PUBLICATION_HASH"))?,
+            "PUBLICATION_HASH",
         )?,
-        supporter_votes: votes,
+        payload,
         signer_id: fixed_hex(
             data.get("signerId")
                 .and_then(Value::as_str)
@@ -418,7 +472,9 @@ pub fn decode_pending_governance_attempts(
         .ok_or_else(|| error("PENDING_ARRAY"))?
         .iter()
         .filter_map(|value| match pending_tx_type(value) {
-            Ok("entityProviderProposeControlBoard") => Some(parse_pending(value)),
+            Ok("entityProviderProposeControlBoard" | "hashLadderReveal") => {
+                Some(parse_pending(value))
+            }
             Ok(_) => None,
             Err(reason) => Some(Err(reason)),
         })
@@ -603,4 +659,58 @@ pub fn apply_governance_result(
     }
     replica.durable.invalidate_infrastructure_digest();
     Ok(())
+}
+
+#[cfg(test)]
+mod target_publication_tests {
+    use super::*;
+    use xln_rscore_entity_kernel::j_batch::{
+        HashLadderRegistration, HashLadderWitness, hash_target_reveal,
+    };
+
+    #[test]
+    fn target_publication_matches_ts_hash_and_recovers_exact_immutable_outbox() {
+        let registration = HashLadderRegistration {
+            counterparty_entity: [0x33; 32],
+            target_role: true,
+            full_hash: Keccak256::digest([0x22; 32]).into(),
+            partial_root: [0; 32],
+            witness: HashLadderWitness {
+                fill_ratio: 65535,
+                full_secret: [0x22; 32],
+                reveals: [[0; 32]; 4],
+            },
+        };
+        let digest = hash_target_reveal(2, [0x11; 20], [0x44; 32], &registration);
+        assert_eq!(
+            hex(&digest),
+            "0x308ddc17f20601e25e786d51461ac3531fc61ffd018470aba1e8a0dcf892aa29"
+        );
+        // Signature bytes are opaque in this serialization vector; chain verification owns authentication.
+        let attempt = super::super::target_reveal::prepare_target_reveal(
+            "Target".into(),
+            [0x44; 32],
+            registration,
+            digest,
+            hex(&[0x55; 20]),
+            1_149_000,
+            vec![0x12, 0x34],
+        )
+        .unwrap();
+        assert_eq!(
+            hex(&attempt.payload_hash),
+            "0xe8ce4fea7bde518087cd57e2b8255ccc3e884943156681c50923502a40f4199f"
+        );
+        assert_eq!(
+            attempt.attempt_id,
+            "0x46c16654ebcee7b78393eb90d4ca1d6ee6a6dcf7353dace6805f293c40282e3e"
+        );
+        let saved = pending_value(&attempt).unwrap();
+        let restored: Value = serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
+        assert_eq!(parse_pending(&restored).unwrap(), attempt);
+        let mut tampered = restored;
+        tampered["jTxs"][0]["data"]["registration"]["counterpartyEntity"] =
+            Value::String(hex(&[0x66; 32]));
+        assert!(parse_pending(&tampered).is_err());
+    }
 }

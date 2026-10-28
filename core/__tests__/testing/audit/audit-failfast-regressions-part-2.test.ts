@@ -1132,6 +1132,7 @@ describe('audit fail-fast regressions', () => {
           tokenId: 1,
           amount: -100n,
           claimedRatio: 0,
+          deadline: 120,
           claimedAmount: 0n,
           fullHash: proof.fullHash,
           partialRoot: proof.partialRoot,
@@ -1446,7 +1447,7 @@ describe('audit fail-fast regressions', () => {
         amount: 100n,
       },
       sourcePull: {
-        pullId: 'timestamp-parity-pull',
+        pullId: 'timestamp-parity-pull', deadline: 60,
         tokenId: 1,
         amount: 100n,
         signedAmount: -100n,
@@ -1454,7 +1455,7 @@ describe('audit fail-fast regressions', () => {
         partialRoot: `0x${'b2'.repeat(32)}`,
       },
       targetPull: {
-        pullId: 'timestamp-parity-target-pull',
+        pullId: 'timestamp-parity-target-pull', deadline: 293,
         tokenId: 2,
         amount: 100n,
         signedAmount: 100n,
@@ -1464,6 +1465,7 @@ describe('audit fail-fast regressions', () => {
       status: 'resting',
       createdAt: 1,
       updatedAt: 1,
+      expiresAt: 60_000,
     });
     if (!route.sourcePull || !route.targetPull) throw new Error('TIMESTAMP_PARITY_PULLS_MISSING');
     route.sourcePull.pullId = deriveCrossJurisdictionPullId(route, 'source');
@@ -1472,6 +1474,7 @@ describe('audit fail-fast regressions', () => {
       type: 'cross_pull_lock',
       data: {
         pullId: route.sourcePull.pullId,
+        deadline: 60,
         tokenId: 1,
         amount: -100n,
         fullHash: `0x${'a1'.repeat(32)}`,
@@ -1703,6 +1706,7 @@ describe('audit fail-fast regressions', () => {
           tokenId: 1,
           amount: 1_000n,
           claimedRatio: 0,
+          deadline: 120,
           claimedAmount: 0n,
           fullHash: `0x${'aa'.repeat(32)}`,
           partialRoot: `0x${'bb'.repeat(32)}`,
@@ -1758,7 +1762,7 @@ describe('audit fail-fast regressions', () => {
         amount,
       },
       sourcePull: {
-        pullId: 'missing-source-pull',
+        pullId: 'missing-source-pull', deadline: 60,
         tokenId: 1,
         amount: -amount,
         signedAmount: -amount,
@@ -1766,7 +1770,7 @@ describe('audit fail-fast regressions', () => {
         partialRoot: `0x${'bb'.repeat(32)}`,
       },
       targetPull: {
-        pullId: 'target-pull',
+        pullId: 'target-pull', deadline: 293,
         tokenId: 2,
         amount,
         signedAmount: amount,

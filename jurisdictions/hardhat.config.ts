@@ -31,6 +31,8 @@ const config = defineConfig({
   },
   solidity: {
     version: '0.8.37',
+    // Use the exact repository-pinned compiler; generation must not depend on a user cache.
+    path: new URL('../node_modules/solc/soljson.js', import.meta.url).pathname,
     settings: {
       evmVersion: 'osaka',
       optimizer: {

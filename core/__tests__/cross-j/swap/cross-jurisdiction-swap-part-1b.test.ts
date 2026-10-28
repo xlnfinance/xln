@@ -724,7 +724,7 @@ describe('cross-jurisdiction hashledger swap', () => {
           claimedRatio: 0,
           claimedAmount: 0n,
           fullHash: clearingRoute.sourcePull.fullHash,
-          partialRoot: clearingRoute.sourcePull.partialRoot,
+          partialRoot: clearingRoute.sourcePull.partialRoot, deadline: clearingRoute.sourcePull.deadline,
           crossJurisdiction: buildCrossJurisdictionPullBinding(clearingRoute, 'source'),
           createdHeight: 0,
           createdTimestamp: env.state.timestamp,

@@ -1022,6 +1022,8 @@ pub(crate) fn apply_entity_transitions(
                     authority,
                 )
                 .map_err(|error| log_local_reject(&state.entity_id, &signer_id, error))?;
+                j_outputs.extend(applied.j_outputs);
+                local_hashes_to_sign.extend(applied.hashes_to_sign);
                 deltas.extend(applied.orderbook_deltas);
                 for work in applied.proposal_work {
                     for tx in work.txs {

@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
 import { computeFrameHash } from '../../../account/consensus/frame/hash';
-import { computeAccountStateRoot } from '../../../account/commitment/state-root';
+import { computeAccountStateRoot, computeAccountStateRootCold } from '../../../account/commitment/state-root';
 import { createSettlementWorkspaceHash } from '../../../account/tx/handlers/settlement/transition';
 import { deriveDelta } from '../../../account/utils';
 import { validateDelta } from '../../../account/validation/delta-validation';
-import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
+import { PersistentAccountStateMap, requirePersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 import { LIMITS, TOKENS } from '../../../config/constants';
 import { UINT256_MAX } from '../../../protocol/boundary/integer-ranges';
 import { decodeValidatedBuffer, encodeBuffer } from '../../../storage/codec/codec';
@@ -88,6 +88,7 @@ const makeFixture = async (): Promise<ValidationContext> => {
         amount: 5n,
         fullHash: digest('32'),
         partialRoot: digest('33'),
+        deadline: 2_000,
         createdHeight: 1,
         createdTimestamp: 1_000,
         crossJurisdiction: {
@@ -487,7 +488,37 @@ const mutations: Mutation[] = [
 describe('persisted AccountReplica semantic boundary', () => {
   test('accepts a canonical baseline through codec, binding, and hydration', async () => {
     const fixture = await makeFixture();
-    expect(admit(fixture).currentHeight).toBe(1);
+    const restored = admit(fixture);
+    expect(restored.currentHeight).toBe(1);
+    expect(restored.state.pulls?.get('pull-1')?.deadline).toBe(2_000);
+    expect(computeAccountStateRoot(restored.state)).toBe(restored.currentFrame.accountStateRoot);
+    expect(computeAccountStateRootCold(restored.state)).toBe(restored.currentFrame.accountStateRoot);
+  });
+
+  test('binds a changed Pull deadline identically in hot, cold, and hydrated roots', async () => {
+    const fixture = await makeFixture();
+    const live = admit(fixture);
+    const pulls = live.state.pulls;
+    const pull = pulls?.get('pull-1');
+    if (!pull || !pulls) throw new Error('TEST_PULL_MISSING');
+    const before = computeAccountStateRoot(live.state);
+    live.state.pulls = requirePersistentAccountStateMap(pulls, 'pulls')
+      .updated('pull-1', { ...pull, deadline: 2_001 });
+    const hot = computeAccountStateRoot(live.state);
+    expect(hot).not.toBe(before);
+    expect(hot).toBe(computeAccountStateRootCold(live.state));
+    object(fixture.doc.state.pulls?.get('pull-1'))['deadline'] = 2_001;
+    const restored = admit(fixture);
+    const after = computeAccountStateRoot(restored.state);
+    expect(restored.state.pulls?.get('pull-1')?.deadline).toBe(2_001);
+    expect(after).toBe(hot);
+    expect(after).toBe(computeAccountStateRootCold(restored.state));
+  });
+
+  test('rejects an obsolete Pull without its signed deadline', async () => {
+    const fixture = await makeFixture();
+    delete object(fixture.doc.state.pulls?.get('pull-1'))['deadline'];
+    expect(() => admit(fixture)).toThrow('missing=deadline');
   });
 
   test('accepts the signed 24-hour user clock after authoritative serialization', async () => {

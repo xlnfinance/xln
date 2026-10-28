@@ -143,6 +143,44 @@ export type ExternalTokenToReserveStructOutput = [
   amount: bigint;
 };
 
+export type HashLadderWitnessStruct = {
+  fillRatio: BigNumberish;
+  fullSecret: BytesLike;
+  reveals: [BytesLike, BytesLike, BytesLike, BytesLike];
+};
+
+export type HashLadderWitnessStructOutput = [
+  fillRatio: bigint,
+  fullSecret: string,
+  reveals: [string, string, string, string]
+] & {
+  fillRatio: bigint;
+  fullSecret: string;
+  reveals: [string, string, string, string];
+};
+
+export type HashLadderRegistrationStruct = {
+  counterpartyEntity: BytesLike;
+  targetRole: boolean;
+  fullHash: BytesLike;
+  partialRoot: BytesLike;
+  witness: HashLadderWitnessStruct;
+};
+
+export type HashLadderRegistrationStructOutput = [
+  counterpartyEntity: string,
+  targetRole: boolean,
+  fullHash: string,
+  partialRoot: string,
+  witness: HashLadderWitnessStructOutput
+] & {
+  counterpartyEntity: string;
+  targetRole: boolean;
+  fullHash: string;
+  partialRoot: string;
+  witness: HashLadderWitnessStructOutput;
+};
+
 export type AllowanceStruct = {
   deltaIndex: BigNumberish;
   rightAllowance: BigNumberish;
@@ -264,6 +302,7 @@ export interface DepositoryInterface extends Interface {
       | "onERC1155Received"
       | "processBatch"
       | "registerExternalToken"
+      | "registerTargetHashLadderReveal"
       | "watchtowerCounterDispute"
   ): FunctionFragment;
 
@@ -389,6 +428,10 @@ export interface DepositoryInterface extends Interface {
     values: [BigNumberish, AddressLike, BigNumberish]
   ): string;
   encodeFunctionData(
+    functionFragment: "registerTargetHashLadderReveal",
+    values: [BytesLike, HashLadderRegistrationStruct, BytesLike]
+  ): string;
+  encodeFunctionData(
     functionFragment: "watchtowerCounterDispute",
     values: [
       BytesLike,
@@ -476,6 +519,10 @@ export interface DepositoryInterface extends Interface {
   ): Result;
   decodeFunctionResult(
     functionFragment: "registerExternalToken",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "registerTargetHashLadderReveal",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -1147,6 +1194,16 @@ export interface Depository extends BaseContract {
     "nonpayable"
   >;
 
+  registerTargetHashLadderReveal: TypedContractMethod<
+    [
+      beneficiary: BytesLike,
+      registration: HashLadderRegistrationStruct,
+      hankoData: BytesLike
+    ],
+    [void],
+    "nonpayable"
+  >;
+
   watchtowerCounterDispute: TypedContractMethod<
     [
       entityId: BytesLike,
@@ -1371,6 +1428,17 @@ export interface Depository extends BaseContract {
       externalTokenId: BigNumberish
     ],
     [bigint],
+    "nonpayable"
+  >;
+  getFunction(
+    nameOrSignature: "registerTargetHashLadderReveal"
+  ): TypedContractMethod<
+    [
+      beneficiary: BytesLike,
+      registration: HashLadderRegistrationStruct,
+      hankoData: BytesLike
+    ],
+    [void],
     "nonpayable"
   >;
   getFunction(

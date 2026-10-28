@@ -398,6 +398,7 @@ describe('frozen AccountState dispute arguments', () => {
       amount: 1n,
       fullHash: `0x${'cd'.repeat(32)}`,
       partialRoot: `0x${'ef'.repeat(32)}`,
+      deadline: 100,
       crossJurisdiction: {
         orderId: 'order',
         routeHash: `0x${'12'.repeat(32)}`,

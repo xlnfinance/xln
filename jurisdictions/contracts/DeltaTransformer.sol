@@ -108,12 +108,12 @@ contract DeltaTransformer {
     uint deltaIndex;
     SignedAmount amount;
     uint16 claimedRatio;
-    // Settlement clock is dispute-relative, not a sealed route deadline.
-    // Market/route expiry is not settlement authority — deleted.
+    // Absolute Unix-second reveal deadline, authenticated by the Account proof.
+    uint256 deadline;
     bytes32 fullHash;
     bytes32 partialRoot;
     // Signed semantic role. Source is cryptographically single-shot; Target
-    // ports the public Source witness and may monotonically replace its record.
+    // ports the same immutable public Source witness.
     bool targetRole;
   }
 
@@ -391,25 +391,13 @@ contract DeltaTransformer {
     if (pull.deltaIndex >= deltas.length) revert InvalidDeltaIndex();
     if (pull.amount.magnitude == 0) revert InvalidPullAmount();
 
-    // Canon (owner 2026-08): dispute period T is jurisdiction SECONDS from the
-    // start of THIS dispute. Finalizing before T lets a hub settle one leg at 0
-    // then reveal on the other — asymmetric theft.
-    //
-    // Each role uses its own dispute start plus its beneficiary-side window.
-    // The left+right sum is exclusively the finalization barrier.
-    // Why not a sealed route deadline: kills honest late disputes or lets the
-    // hub pick open time vs a frozen clock. Why seconds not blocks: chains have
-    // different/changing blockTimes.
-    if (
-      disputeStartTimestamp == 0 ||
-      disputeTimeout < disputeStartTimestamp ||
-      disputeTimeout != disputeStartTimestamp + uint256(leftResponseSeconds) + uint256(rightResponseSeconds)
-    ) {
-      revert PullRevealWindowActive(disputeTimeout);
-    }
-    if (block.timestamp < disputeTimeout) {
-      revert PullRevealWindowActive(disputeTimeout);
-    }
+    // A payer may open either dispute arbitrarily early or late. Only the
+    // bilaterally signed absolute deadline bounds reveal validity. Waiting past
+    // max(T,D) prevents finalizing at D before another transaction reveals at D.
+    uint256 finalizeAfter = pull.deadline > disputeTimeout ? pull.deadline : disputeTimeout;
+    if (pull.deadline == 0 || disputeStartTimestamp == 0 ||
+        disputeTimeout != disputeStartTimestamp + uint256(leftResponseSeconds) + uint256(rightResponseSeconds) ||
+        block.timestamp <= finalizeAfter) revert PullRevealWindowActive(finalizeAfter);
 
     // Pulls settle exclusively from independent public registry evidence,
     // never dispute calldata. Signed left/right entities derive the exact
@@ -431,21 +419,8 @@ contract DeltaTransformer {
       revert PullRevealRegistryUnavailable(msg.sender);
     }
     (uint16 ratio, uint256 revealedAt) = abi.decode(registryData, (uint16, uint256));
-    uint32 beneficiaryWindow = beneficiary == leftEntity
-      ? leftResponseSeconds
-      : rightResponseSeconds;
-    // Source and Target are independent Account clocks on different chains.
-    // Each role opens immediately with its own dispute and receives exactly
-    // the beneficiary's bilaterally signed response window. Finalization still
-    // waits the full left+right sum above so neither side can settle early.
-    uint256 revealStart = disputeStartTimestamp;
-    uint256 revealDeadline = disputeStartTimestamp + uint256(beneficiaryWindow);
-    // Both bounds are consensus-critical. The lower bound prevents a record
-    // from an older dispute (after accidental ladder reuse) from becoming
-    // active in this dispute without a fresh observable registry event.
-    uint16 fillRatio = (
-      revealedAt >= revealStart && revealedAt <= revealDeadline
-    ) ? ratio : 0;
+    // Pre-dispute publication is valid; retries cannot move its first-seen time.
+    uint16 fillRatio = revealedAt != 0 && revealedAt <= pull.deadline ? ratio : 0;
 
     if (fillRatio == 0 || fillRatio <= pull.claimedRatio) return;
 

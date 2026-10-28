@@ -1,3 +1,4 @@
+import { hashTargetReveal } from '../../../core/protocol/htlc/target-reveal.ts';
 import { encodeInt512, encodeSignedAmount } from '../../../core/protocol/crypto/abi-money.ts';
 import { PROOF_BODY_ABI } from '../../../core/protocol/dispute/proof-body.ts';
 import { expect } from 'chai';
@@ -167,6 +168,38 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     return { depository, transformer };
   }
 
+  it('ports a beneficiary-signed Target witness independently of the batch nonce', async () => {
+    const { depository } = await loadFixture(deployFixture);
+    const actor = lazyActor(user0, 0);
+    const peer = lazyActor(user1, 1);
+    const proof = buildHashLadderProof('standalone-port', 65535);
+    const registration = { counterpartyEntity: peer.entityId, targetRole: true,
+      fullHash: proof.fullHash, partialRoot: proof.partialRoot,
+      witness: { fillRatio: 65535, fullSecret: proof.fullSecret, reveals: proof.reveals } };
+    const chainId = (await ethers.provider.getNetwork()).chainId;
+    const registrationType = 'tuple(bytes32 counterpartyEntity,bool targetRole,bytes32 fullHash,bytes32 partialRoot,tuple(uint16 fillRatio,bytes32 fullSecret,bytes32[4] reveals) witness)';
+    const digest = (chain = chainId, owner = actor.entityId, address = '') => ethers.keccak256(abi.encode(
+      ['bytes32', 'uint256', 'address', 'bytes32', registrationType],
+      [ethers.id('XLN_TARGET_HASH_LADDER_REVEAL'), chain, address || depository.target, owner, registration],
+    ));
+    const submit = depository.getFunction('registerTargetHashLadderReveal');
+    const nonce = await depository.entityNonces(actor.entityId);
+    for (const hash of [digest(chainId + 1n), digest(chainId, peer.entityId), digest(chainId, actor.entityId, user1.address)]) {
+      await expect(submit(actor.entityId, registration,
+        buildSingleSignerHanko(actor.entityId, hash, actor.privateKey))).to.revert(ethers);
+    }
+    const hanko = buildSingleSignerHanko(actor.entityId, digest(), actor.privateKey);
+    await submit(actor.entityId, registration, hanko);
+    const first = await depository.getHashLadderReveal(actor.entityId, peer.entityId, ladderHashOf(proof), true);
+    await time.increase(300);
+    await submit(actor.entityId, registration, hanko);
+    expect(await depository.getHashLadderReveal(actor.entityId, peer.entityId, ladderHashOf(proof), true)).to.deep.equal(first);
+    expect(await depository.entityNonces(actor.entityId)).to.equal(nonce);
+    await expect(submit(actor.entityId, { ...registration, targetRole: false }, hanko)).to.revert(ethers);
+    await expect(submit(actor.entityId, { ...registration, counterpartyEntity: actor.entityId }, hanko)).to.revert(ethers);
+    await expect(submit(actor.entityId, { ...registration, witness: { ...registration.witness, fillRatio: 1 } }, hanko)).to.revert(ethers);
+  });
+
   type PullDispute = Awaited<ReturnType<typeof openPullDispute>>;
 
   // Opens a funded account and starts a dispute whose proofbody carries one
@@ -174,6 +207,11 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
   async function openPullDispute(options: {
     label: string;
     fillRatio: number;
+    deadline?: number;
+    startAt?: number;
+    deployment?: Awaited<ReturnType<typeof deployFixture>>;
+    responseSeconds?: number;
+    registerBeforeStart?: boolean;
     pullAmount?: bigint;
     /** Target role: opens at its own dispute start; beneficiary window counts. */
     targetRole?: boolean;
@@ -182,20 +220,23 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     starter?: 'left' | 'right';
     proposerIsLeft?: boolean;
   }) {
-    const { depository, transformer } = await loadFixture(deployFixture);
+    const { depository, transformer } = options.deployment ?? await loadFixture(deployFixture);
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
     const tokenId = 1n;
-    await mintListedReserve(depository, left.entityId, tokenId, 100_000n);
+    const payer = (options.pullAmount ?? -1n) > 0n ? right : left;
+    const payee = payer === left ? right : left;
+    await mintListedReserve(depository, payer.entityId, tokenId, 100_000n);
     const fund = emptyBatch({
       reserveToCollateral: [
-        { tokenId, receivingEntity: left.entityId, pairs: [{ entity: right.entityId, amount: 100_000n }] },
+        { tokenId, receivingEntity: payer.entityId, pairs: [{ entity: payee.entityId, amount: 100_000n }] },
       ],
     });
-    const signed = await signDepositoryBatch(depository, left.entityId, left.privateKey, fund);
-    await depository.connect(left.signer).processBatch(signed.encodedBatch, signed.hankoData, signed.nonce);
+    const signed = await signDepositoryBatch(depository, payer.entityId, payer.privateKey, fund);
+    await depository.connect(payer.signer).processBatch(signed.encodedBatch, signed.hankoData, signed.nonce);
 
     const pullProof = buildHashLadderProof(options.label, options.fillRatio);
     const pullAmount = options.pullAmount ?? -MAX_FILL_RATIO;
+    const deadline = options.deadline ?? (await time.latest()) + 50;
     const encodedPullBatch = await transformer.encodeBatch({
       payment: [],
       swap: [],
@@ -204,6 +245,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
           deltaIndex: 0,
           amount: encodeSignedAmount(pullAmount),
           claimedRatio: 0,
+          deadline,
           fullHash: pullProof.fullHash,
           partialRoot: pullProof.partialRoot,
           targetRole: options.targetRole === true,
@@ -218,10 +260,14 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
         {
           transformerAddress: await transformer.getAddress(),
           encodedBatch: encodedPullBatch,
-          allowances: [{ deltaIndex: 0n, rightAllowance: maxApplied, leftAllowance: 0n }],
+          allowances: [{ deltaIndex: 0n, rightAllowance: pullAmount < 0n ? maxApplied : 0n, leftAllowance: pullAmount > 0n ? maxApplied : 0n }],
         },
       ],
     );
+    if (options.responseSeconds !== undefined) {
+      body.leftResponseSeconds = options.responseSeconds;
+      body.rightResponseSeconds = options.responseSeconds;
+    }
     const bodyHash = proofBodyHash(body);
     const acctKey = canonicalAccountKey(left.entityId, right.entityId);
     const nonce = 1n;
@@ -271,12 +317,27 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
         }],
       } : {}),
     });
+    if (options.registerBeforeStart || (options.registerWithStart && options.targetRole)) {
+      if (options.targetRole) {
+        const registration = startBatch.hashLadderRegistrations[0]!;
+        const hash = hashTargetReveal(Number((await ethers.provider.getNetwork()).chainId),
+          await depository.getAddress(), starter.entityId, registration);
+        await depository.registerTargetHashLadderReveal(starter.entityId, registration,
+          buildSingleSignerHanko(starter.entityId, hash, starter.privateKey));
+      } else {
+        const registration = await signDepositoryBatch(depository, starter.entityId, starter.privateKey,
+          emptyBatch({ hashLadderRegistrations: startBatch.hashLadderRegistrations }));
+        await depository.connect(starter.signer).processBatch(registration.encodedBatch, registration.hankoData, registration.nonce);
+      }
+      startBatch.hashLadderRegistrations = [];
+    }
     const start = await signDepositoryBatch(
       depository,
       starter.entityId,
       starter.privateKey,
       startBatch,
     );
+    if (options.startAt) await time.setNextBlockTimestamp(options.startAt);
     await depository.connect(starter.signer).processBatch(start.encodedBatch, start.hankoData, start.nonce);
     return {
       depository,
@@ -290,6 +351,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
       pullProof,
       fillRatio: options.fillRatio,
       pullAmount,
+      deadline,
       targetRole: options.targetRole === true,
       startedByLeft: starter === left,
       initialProposerIsLeft: proposerIsLeft,
@@ -325,6 +387,13 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
         },
       ],
     });
+    if (dispute.targetRole) {
+      const registration = revealBatch.hashLadderRegistrations[0]!;
+      const hash = hashTargetReveal(Number((await ethers.provider.getNetwork()).chainId),
+        await dispute.depository.getAddress(), signer.entityId, registration);
+      return dispute.depository.registerTargetHashLadderReveal(signer.entityId, registration,
+        buildSingleSignerHanko(signer.entityId, hash, signer.privateKey));
+    }
     const signed = await signDepositoryBatch(dispute.depository, signer.entityId, signer.privateKey, revealBatch);
     return dispute.depository.connect(signer.signer).processBatch(signed.encodedBatch, signed.hankoData, signed.nonce);
   }
@@ -352,6 +421,89 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     const account = await depository._accounts(acctKey);
     await time.increaseTo(Number(account.disputeTimeout) + 1);
   }
+
+  it('absolute deadline: asymmetric starts cannot refund Target before Source witness arrives', async function () {
+    const sourceStack = await deployFixture();
+    const targetStack = await deployFixture();
+    const base = (await time.latest()) + 100;
+    // Hub is Source beneficiary and Target payer. Target starts at 100, its
+    // old W=10 lapses, Source starts at 110 and the hub reveals at 120.
+    const target = await openPullDispute({ label: 'absolute-attack', fillRatio: 65535,
+      pullAmount: 1000n, targetRole: true, deployment: targetStack,
+      responseSeconds: 10, startAt: base + 100, deadline: base + 353 });
+    const source = await openPullDispute({ label: 'absolute-attack', fillRatio: 65535,
+      pullAmount: -1000n, deployment: sourceStack,
+      responseSeconds: 20, startAt: base + 110, deadline: base + 120 });
+    await time.setNextBlockTimestamp(base + 120);
+    await registerReveal(source, source.right, { fullSecret: source.pullProof.fullSecret });
+    await time.setNextBlockTimestamp(base + 121);
+    await expect(finalizeDispute(target, target.right)).to.revert(ethers);
+    await registerReveal(target, target.left, { fullSecret: source.pullProof.fullSecret });
+    await time.increaseTo(base + 354);
+    await finalizeDispute(source, source.right);
+    await finalizeDispute(target, target.right);
+    expect(await source.depository._reserves(source.right.entityId, 1n)).to.equal(1000n);
+    expect(await target.depository._reserves(target.left.entityId, 1n)).to.equal(1000n);
+  });
+
+  it('pending Target batch ACK at 1297 cannot delay the port past D_target=1233', async () => {
+    const sourceStack = await deployFixture();
+    const targetStack = await deployFixture();
+    const base = (await time.latest()) + 100;
+    const target = await openPullDispute({ label: 'pending-batch-timeline', fillRatio: 65535,
+      pullAmount: 1000n, targetRole: true, deployment: targetStack,
+      responseSeconds: 10, startAt: base + 100, deadline: base + 1233 });
+    const source = await openPullDispute({ label: 'pending-batch-timeline', fillRatio: 65535,
+      pullAmount: -1000n, deployment: sourceStack,
+      responseSeconds: 10, startAt: base + 110, deadline: base + 1000 });
+    await time.setNextBlockTimestamp(base + 1000);
+    await registerReveal(source, source.right, { fullSecret: source.pullProof.fullSecret });
+    const unrelated = await signDepositoryBatch(target.depository, target.left.entityId, target.left.privateKey, emptyBatch());
+    await time.setNextBlockTimestamp(base + 1148);
+    await target.depository.processBatch(unrelated.encodedBatch, unrelated.hankoData, unrelated.nonce);
+    // The watcher will ACK at 1148+144+5=1297. Port observed at 1149 includes
+    // at 1173 under the 24s inclusion bound, independently of that ACK.
+    await time.setNextBlockTimestamp(base + 1173);
+    await registerReveal(target, target.left, { fullSecret: source.pullProof.fullSecret });
+    expect(await target.depository.entityNonces(target.left.entityId)).to.equal(unrelated.nonce);
+    await time.increaseTo(base + 1234);
+    await finalizeDispute(source, source.right);
+    await finalizeDispute(target, target.right);
+    expect(await source.depository._reserves(source.right.entityId, 1n)).to.equal(1000n);
+    expect(await target.depository._reserves(target.left.entityId, 1n)).to.equal(1000n);
+  });
+
+  it('absolute deadline: finalization waits strictly beyond D when T expired', async function () {
+    const deadline = (await time.latest()) + 200;
+    const dispute = await openPullDispute({ label: 'absolute-finalize', fillRatio: 291, deadline });
+    await time.setNextBlockTimestamp(deadline);
+    await expect(finalizeDispute(dispute, dispute.right)).to.be.revertedWithCustomError(dispute.transformer, 'PullRevealWindowActive');
+    await time.setNextBlockTimestamp(deadline + 1);
+    await finalizeDispute(dispute, dispute.right);
+    expect(await dispute.depository._reserves(dispute.right.entityId, 1n)).to.equal(0n);
+  });
+
+  for (const offset of [0, 1]) it(`absolute deadline: D+${offset} settlement boundary`, async function () {
+    const deadline = (await time.latest()) + 200;
+    const dispute = await openPullDispute({ label: `absolute-boundary-${offset}`, fillRatio: 291,
+      targetRole: true, deadline });
+    await time.setNextBlockTimestamp(deadline + offset);
+    await registerReveal(dispute, dispute.right, {});
+    await time.increaseTo(deadline + 2);
+    await finalizeDispute(dispute, dispute.right);
+    expect(await dispute.depository._reserves(dispute.right.entityId, 1n)).to.equal(offset === 0 ? 291n : 0n);
+  });
+
+  it('absolute deadline: Target retry preserves timely evidence after D', async function () {
+    const deadline = (await time.latest()) + 200;
+    const dispute = await openPullDispute({ label: 'absolute-retry', fillRatio: 291, targetRole: true, deadline });
+    await time.setNextBlockTimestamp(deadline);
+    await registerReveal(dispute, dispute.right, {});
+    await time.increaseTo(deadline + 1);
+    await registerReveal(dispute, dispute.right, {});
+    await finalizeDispute(dispute, dispute.right);
+    expect(await dispute.depository._reserves(dispute.right.entityId, 1n)).to.equal(291n);
+  });
 
   it('settles a partial fill from a verified registry record and emits the portable material', async function () {
     const dispute = await openPullDispute({ label: 'registry-partial', fillRatio: 0x0123 });
@@ -412,11 +564,10 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     expect(await dispute.depository._reserves(dispute.right.entityId, 1n)).to.equal(0n);
   });
 
-  it('rejects a first Source write for a declared pair without an active dispute', async function () {
+  it('a pre-dispute Source write in a different pair cannot authorize this Pull', async function () {
     const dispute = await openPullDispute({ label: 'registry-account-scope', fillRatio: 0x0123 });
     const falseCounterparty = ethers.zeroPadValue('0xbeef', 32);
-    await expect(registerReveal(dispute, dispute.right, { counterpartyEntity: falseCounterparty }))
-      .to.be.revertedWithCustomError(dispute.depository, 'E12');
+    await registerReveal(dispute, dispute.right, { counterpartyEntity: falseCounterparty });
 
     const ladder = ladderHashOf(dispute.pullProof);
     expect((await dispute.depository.getHashLadderReveal(
@@ -424,7 +575,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     ))[0]).to.equal(0n);
     expect((await dispute.depository.getHashLadderReveal(
       dispute.right.entityId, falseCounterparty, ladder, false,
-    ))[0]).to.equal(0n);
+    ))[0]).to.equal(0x0123n);
 
     await minePastTimeout(dispute.depository, dispute.acctKey);
     await finalizeDispute(dispute, dispute.right);
@@ -457,31 +608,28 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     expect(raisedAt).to.equal(firstAt);
   });
 
-  it('target: a higher ratio replaces even after timeout and the late timestamp settles zero', async function () {
-    const dispute = await openPullDispute({
-      label: 'registry-target-overwrite',
-      fillRatio: 0x0123,
-      targetRole: true,
-    });
+  it('target conflicting retry after D cannot erase timely evidence', async function () {
+    const dispute = await openPullDispute({ label: 'registry-target-overwrite', fillRatio: 0x0123, targetRole: true });
     await registerReveal(dispute, dispute.right, {});
     await minePastTimeout(dispute.depository, dispute.acctKey);
-
     const higherProof = buildHashLadderProof('registry-target-overwrite', 0x0234);
-    await registerReveal(dispute, dispute.right, {
-      fillRatio: 0x0234,
-      reveals: higherProof.reveals,
-    });
-    const ladder = ladderHashOf(dispute.pullProof);
-    const [ratio, revealedAt] = await dispute.depository.getHashLadderReveal(
-      dispute.right.entityId, dispute.left.entityId, ladder, true,
-    );
-    const account = await dispute.depository._accounts(dispute.acctKey);
-    expect(ratio).to.equal(0x0234);
-    expect(revealedAt).to.be.gt(account.disputeTimeout);
-
+    await expect(registerReveal(dispute, dispute.right, { fillRatio: 0x0234, reveals: higherProof.reveals }))
+      .to.be.revertedWithCustomError(dispute.depository, 'E12');
     await finalizeDispute(dispute, dispute.right);
-    expect(await dispute.depository._reserves(dispute.right.entityId, 1n)).to.equal(0n);
-    expect(await dispute.depository._reserves(dispute.left.entityId, 1n)).to.equal(100_000n);
+    expect(await dispute.depository._reserves(dispute.right.entityId, 1n)).to.equal(0x0123n);
+  });
+
+  for (const targetRole of [false, true]) it(`absolute deadline: accepts pre-dispute evidence, target=${targetRole}`, async function () {
+    const startAt = (await time.latest()) + 100;
+    const dispute = await openPullDispute({ label: 'pre-dispute', fillRatio: 291, targetRole,
+      startAt, deadline: startAt + 20, registerWithStart: true, registerBeforeStart: true });
+    const [, revealedAt] = await dispute.depository.getHashLadderReveal(
+      dispute.right.entityId, dispute.left.entityId, ladderHashOf(dispute.pullProof), targetRole);
+    const account = await dispute.depository._accounts(dispute.acctKey);
+    expect(revealedAt).to.be.lt(account.disputeStartTimestamp);
+    await minePastTimeout(dispute.depository, dispute.acctKey);
+    await finalizeDispute(dispute, dispute.right);
+    expect(await dispute.depository._reserves(dispute.right.entityId, 1n)).to.equal(291n);
   });
 
   it('source exact retry preserves its timely record after the response window', async function () {
@@ -552,30 +700,19 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     expect(await target.depository._reserves(target.left.entityId, 1n)).to.equal(100_000n);
   });
 
-  it('rejects a late first Source registration without consuming its immutable slot', async function () {
+  it('a late first Source record is inert at settlement', async function () {
     const dispute = await openPullDispute({ label: 'registry-late', fillRatio: 0x0123 });
-    // Right is the Pull beneficiary, so its signed 50-second side window is the
-    // Source deadline. A late first write must not poison the single-shot slot.
-    await time.increase(51);
-    await expect(registerReveal(dispute, dispute.right, {}))
-      .to.be.revertedWithCustomError(dispute.depository, 'E12');
-    const [ratio, revealedAt] = await dispute.depository.getHashLadderReveal(
-      dispute.right.entityId,
-      dispute.left.entityId,
-      ladderHashOf(dispute.pullProof),
-      false,
-    );
-    expect(ratio).to.equal(0n);
-    expect(revealedAt).to.equal(0n);
-    await time.increase(51);
+    await time.setNextBlockTimestamp(dispute.deadline + 1);
+    await registerReveal(dispute, dispute.right, {});
+    await minePastTimeout(dispute.depository, dispute.acctKey);
     await finalizeDispute(dispute, dispute.right);
     expect(await dispute.depository._reserves(dispute.right.entityId, 1n)).to.equal(0n);
   });
 
-  it('accepts a first Source registration at the inclusive owner deadline', async function () {
+  it('accepts a first Source registration at the inclusive absolute deadline', async function () {
     const dispute = await openPullDispute({ label: 'registry-source-deadline', fillRatio: 0x0123 });
     const account = await dispute.depository._accounts(dispute.acctKey);
-    await time.setNextBlockTimestamp(Number(account.disputeStartTimestamp) + 50);
+    await time.setNextBlockTimestamp(dispute.deadline);
     await expect(registerReveal(dispute, dispute.right, {}))
       .to.emit(dispute.depository, 'HashLadderRevealRegistered');
     const [, revealedAt] = await dispute.depository.getHashLadderReveal(
@@ -584,7 +721,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
       ladderHashOf(dispute.pullProof),
       false,
     );
-    expect(revealedAt).to.equal(account.disputeStartTimestamp + 50n);
+    expect(revealedAt).to.equal(BigInt(dispute.deadline));
   });
 
   it('accepts Source registration in the exact batch and block that starts its dispute', async function () {
@@ -622,7 +759,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
     expect(await dispute.depository._reserves(dispute.right.entityId, 1n)).to.equal(BigInt(dispute.fillRatio));
   });
 
-  it('accepts target registration in the exact batch and block that starts its dispute', async function () {
+  it('publishes target evidence independently before its dispute starts', async function () {
     const dispute = await openPullDispute({
       label: 'registry-target-same-block',
       fillRatio: 0x0123,
@@ -637,7 +774,7 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
       true,
     );
     expect(ratio).to.equal(0x0123n);
-    expect(revealedAt).to.equal(account.disputeStartTimestamp);
+    expect(revealedAt).to.be.lt(account.disputeStartTimestamp);
   });
 
   it('blocks early finalization on both the timeout path and the counterparty-signed path', async function () {
@@ -854,8 +991,8 @@ describe('HashLadderRegistry (cross-j pull settlement authority)', function () {
       payment: [],
       swap: [],
       loans: [], pull: [
-        { deltaIndex: 0, amount: encodeSignedAmount(-MAX_FILL_RATIO), claimedRatio: 0, fullHash: proofA.fullHash, partialRoot: proofA.partialRoot, targetRole: false },
-        { deltaIndex: 0, amount: encodeSignedAmount(-MAX_FILL_RATIO), claimedRatio: 0, fullHash: proofB.fullHash, partialRoot: proofB.partialRoot, targetRole: false },
+        { deltaIndex: 0, amount: encodeSignedAmount(-MAX_FILL_RATIO), claimedRatio: 0, deadline: (await time.latest()) + 50, fullHash: proofA.fullHash, partialRoot: proofA.partialRoot, targetRole: false },
+        { deltaIndex: 0, amount: encodeSignedAmount(-MAX_FILL_RATIO), claimedRatio: 0, deadline: (await time.latest()) + 50, fullHash: proofB.fullHash, partialRoot: proofB.partialRoot, targetRole: false },
       ],
     });
     const body = proofBody(

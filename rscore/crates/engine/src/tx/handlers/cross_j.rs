@@ -238,6 +238,7 @@ pub(crate) fn validate_swap_offer_route(
         || uint(paired, "tokenId")? != u64::from(give_token_id)
         || bigint(paired, "amount")? != bigint(source_pull, "signedAmount")?
         || !string(paired, "fullHash")?.eq_ignore_ascii_case(&string(source_pull, "fullHash")?)
+        || uint(paired, "deadline")? != uint(source_pull, "deadline")?
         || !string(paired, "partialRoot")?
             .eq_ignore_ascii_case(&string(source_pull, "partialRoot")?)
     {
@@ -397,6 +398,7 @@ pub(crate) fn apply_pull_lock(
         if string(route_pull, "pullId")? != pull_id
             || uint(route_pull, "tokenId")? != token_raw
             || bigint(route_pull, "signedAmount")? != amount
+            || uint(route_pull, "deadline")? != uint(data, "deadline")?
             || normalized_hex(&string(route_pull, "fullHash")?, 32, "route fullHash")? != full_hash
             || normalized_hex(&string(route_pull, "partialRoot")?, 32, "route partialRoot")?
                 != partial_root
@@ -486,6 +488,7 @@ pub(crate) fn apply_pull_lock(
             ("tokenId".into(), number(token_raw)?),
             ("amount".into(), CanonicalValue::BigInt(amount)),
             ("claimedRatio".into(), number(0)?),
+            ("deadline".into(), number(uint(data, "deadline")?)?),
             (
                 "claimedAmount".into(),
                 CanonicalValue::BigInt(BigInt::from(0)),
@@ -580,6 +583,7 @@ pub(crate) fn apply_pull_close(
     account: &mut AccountReplica,
     data: &CanonicalValue,
     proposer: Side,
+    current_timestamp: u64,
 ) -> Result<MutationDecision, TransitionError> {
     let data = match fields(data) {
         Ok(value) => value,
@@ -600,6 +604,10 @@ pub(crate) fn apply_pull_close(
         let binding = object(pull, "crossJurisdiction")?;
         let proof = object(data, "proof")?;
         let leg = string(binding, "leg")?;
+        // Source pays the Hub; a late secret cannot be ported before the Target deadline.
+        if leg == "source" && current_timestamp / 1_000 > uint(pull, "deadline")? {
+            return Err("Cross-j source close deadline exceeded".into());
+        }
         let order_id = string(binding, "orderId")?;
         let ratio = uint(proof, "fillRatio")?;
         if ratio > MAX_FILL_RATIO {
@@ -867,6 +875,7 @@ mod tests {
         ]);
         let source_pull = object(vec![
             ("pullId", text("pull-1")),
+            ("deadline", number(120).expect("deadline")),
             ("tokenId", number(1).expect("number")),
             ("amount", CanonicalValue::BigInt(abs(&amount))),
             ("signedAmount", CanonicalValue::BigInt(amount)),
@@ -875,6 +884,7 @@ mod tests {
         ]);
         let target_pull = object(vec![
             ("pullId", text("pull-2")),
+            ("deadline", number(353).expect("deadline")),
             ("tokenId", number(2).expect("number")),
             ("amount", CanonicalValue::BigInt(20.into())),
             ("signedAmount", CanonicalValue::BigInt(20.into())),
@@ -890,6 +900,7 @@ mod tests {
         // The Account layer admits only the canonical route (TS parity).
         let mut route = crate::cross_j_route::canonical_route(&object(vec![
             ("orderId", text("order-1")),
+            ("expiresAt", number(120000).expect("expiry")),
             ("source", source),
             ("target", target),
             ("sourcePull", source_pull),
@@ -1055,6 +1066,7 @@ mod tests {
         AccountTx::CrossPullLock {
             data: object(vec![
                 ("pullId", text(test_pull_id(&route_hash, "source"))),
+                ("deadline", number(120).expect("deadline")),
                 ("tokenId", number(1).expect("number")),
                 ("amount", CanonicalValue::BigInt(amount)),
                 ("fullHash", text(full_hash)),
@@ -1074,6 +1086,7 @@ mod tests {
             string(fields(&lock_route()).expect("route"), "routeHash").expect("route hash");
         let source_pull = object(vec![
             ("pullId", text("pull-1")),
+            ("deadline", number(120).expect("deadline")),
             ("tokenId", number(1).expect("number")),
             ("amount", CanonicalValue::BigInt(100.into())),
             ("signedAmount", CanonicalValue::BigInt(100.into())),
@@ -1121,6 +1134,7 @@ mod tests {
         ]);
         let pull = object(vec![
             ("pullId", text("pull-1")),
+            ("deadline", number(120).expect("deadline")),
             ("tokenId", number(1).expect("number")),
             ("amount", CanonicalValue::BigInt(100.into())),
             ("claimedRatio", number(0).expect("number")),
@@ -1368,6 +1382,7 @@ mod tests {
         let close = AccountTx::CrossPullClose {
             data: object(vec![
                 ("pullId", text(test_pull_id(&lock_route_hash(), "source"))),
+                ("deadline", number(120).expect("deadline")),
                 ("binary", text("0x")),
                 (
                     "proof",
@@ -1396,7 +1411,15 @@ mod tests {
                 ),
             ]),
         };
-        let closed = SequentialAccountEngine::apply(&locked, Side::Left, &close).expect("close");
+        let late = AccountExecutionContext::new(121_000, 121_000, 11, 8, 11);
+        let rejected =
+            SequentialAccountEngine::apply_with_context(&locked, Side::Left, &close, &late)
+                .expect("late close");
+        assert!(matches!(rejected.verdict(), AccountVerdict::Rejected(_)));
+        let boundary = AccountExecutionContext::new(120_999, 120_999, 11, 8, 11);
+        let closed =
+            SequentialAccountEngine::apply_with_context(&locked, Side::Left, &close, &boundary)
+                .expect("close");
         assert_eq!(closed.verdict(), &AccountVerdict::Applied);
         let closed = closed.committed().expect("close candidate");
         assert_eq!(closed.state().pull_count(), 0);
@@ -1448,6 +1471,7 @@ mod tests {
         let close = AccountTx::CrossPullClose {
             data: object(vec![
                 ("pullId", text("pull-1")),
+                ("deadline", number(120).expect("deadline")),
                 ("binary", text("0x")),
                 (
                     "proof",
@@ -1470,8 +1494,13 @@ mod tests {
                 ),
             ]),
         };
-        let applied = SequentialAccountEngine::apply(&bound_offer_replica(), Side::Left, &close)
-            .expect("source close");
+        let applied = SequentialAccountEngine::apply_with_context(
+            &bound_offer_replica(),
+            Side::Left,
+            &close,
+            &AccountExecutionContext::new(1_000, 1_000, 10, 7, 10),
+        )
+        .expect("source close");
         assert_eq!(applied.verdict(), &AccountVerdict::Applied);
         assert!(applied.outputs().is_empty());
         let closed = applied.committed().expect("close candidate");
@@ -1492,6 +1521,7 @@ mod tests {
         let close = AccountTx::CrossPullClose {
             data: object(vec![
                 ("pullId", text("pull-1")),
+                ("deadline", number(120).expect("deadline")),
                 ("binary", text("0x")),
                 (
                     "proof",
@@ -1514,8 +1544,13 @@ mod tests {
                 ),
             ]),
         };
-        let applied = SequentialAccountEngine::apply(&bound_offer_replica(), Side::Left, &close)
-            .expect("source close");
+        let applied = SequentialAccountEngine::apply_with_context(
+            &bound_offer_replica(),
+            Side::Left,
+            &close,
+            &AccountExecutionContext::new(1_000, 1_000, 10, 7, 10),
+        )
+        .expect("source close");
         assert!(matches!(
             applied.verdict(),
             AccountVerdict::Rejected(AccountRejection::Validation(

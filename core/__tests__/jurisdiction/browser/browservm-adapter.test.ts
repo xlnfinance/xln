@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { ethers } from 'ethers';
+import { buildSingleSignerHanko } from '../../../hanko/batch';
+import { lazySingleSignerEntityId } from '../../../hanko/short';
+import { hashTargetReveal } from '../../../protocol/htlc/target-reveal';
+import type { HashLadderRegistration } from '../../../jurisdiction/machine/batch';
 import { ERC20Mock__factory } from '../../../../jurisdictions/typechain-types';
 
 import { encodeSingleSignerBoard } from '../../../entity/factory';
@@ -51,6 +55,40 @@ const makeReplica = (entityId: string, signerId: string): EntityReplica =>
   }) as EntityReplica;
 
 describe('BrowserVM JAdapter boundary', () => {
+  test('publishes a beneficiary-signed Target witness without consuming a batch nonce', async () => {
+    const adapter = await createJAdapter({ mode: 'browservm', chainId: 31337 });
+    try {
+      const signer = new ethers.Wallet(`0x${'51'.repeat(32)}`);
+      const entityId = lazySingleSignerEntityId(signer.address);
+      const fullSecret = `0x${'22'.repeat(32)}`;
+      const registration: HashLadderRegistration = {
+        counterpartyEntity: `0x${'33'.repeat(32)}`, targetRole: true,
+        fullHash: ethers.keccak256(fullSecret), partialRoot: ethers.ZeroHash,
+        witness: { fillRatio: 65535, fullSecret,
+          reveals: [ethers.ZeroHash, ethers.ZeroHash, ethers.ZeroHash, ethers.ZeroHash] },
+      };
+      const revealHash = hashTargetReveal(31337, adapter.addresses.depository, entityId, registration);
+      const tx = { type: 'hashLadderReveal' as const, entityId, timestamp: 1149000,
+        data: { registration, revealHash, signerId: signer.address.toLowerCase(),
+          hankoSignature: buildSingleSignerHanko(entityId, revealHash, signer.privateKey) } };
+      const env = createEmptyEnv('browservm-target-reveal');
+      const nonce = await adapter.depository.entityNonces(entityId);
+      const result = await adapter.submitTx(tx, { env });
+      expect(result.success, result.error).toBe(true);
+      expect(result.events?.some(event => event.name === 'HashLadderRevealRegistered')).toBe(true);
+      const read = () => adapter.depository.getHashLadderReveal(entityId, registration.counterpartyEntity,
+        ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(['bytes32', 'bytes32'],
+          [registration.fullHash, registration.partialRoot])), true);
+      const record = await read();
+      expect(record[0]).toBe(65535n);
+      expect((await adapter.submitTx(tx, { env })).success).toBe(true);
+      expect(await read()).toEqual(record);
+      expect(await adapter.depository.entityNonces(entityId)).toBe(nonce);
+      const forged = { ...tx, data: { ...tx.data, registration: { ...registration, counterpartyEntity: `0x${'44'.repeat(32)}` } } };
+      expect((await adapter.submitTx(forged, { env })).success).toBe(false);
+    } finally { await adapter.close(); }
+  }, 30_000);
+
   test('reads a newly registered ERC20 from its contract without changing EVM state', async () => {
     const adapter = await createJAdapter({ mode: 'browservm', chainId: 31337 });
     try {

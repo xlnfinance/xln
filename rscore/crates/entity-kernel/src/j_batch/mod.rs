@@ -1,3 +1,5 @@
+mod target_reveal;
+pub use target_reveal::{hash_target_reveal, target_reveal_calldata};
 mod decode;
 mod encode;
 mod reserve;

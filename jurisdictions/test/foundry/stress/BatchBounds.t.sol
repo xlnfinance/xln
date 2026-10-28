@@ -288,6 +288,7 @@ contract BatchBoundsTest is XlnFixture {
         deltaIndex: i + 96,
         amount: SignedAmount(false, 1),
         claimedRatio: 0,
+        deadline: block.timestamp + DISPUTE_WINDOW_SECONDS,
         fullHash: keccak256(abi.encode("full", i)),
         partialRoot: keccak256(abi.encode("partial", i)),
         targetRole: true
@@ -340,7 +341,7 @@ contract BatchBoundsTest is XlnFixture {
     console.log("disputeStart 128 tokens ok:", startedOk);
     console.log("disputeStart 128 tokens gas:", startGas);
 
-    vm.warp(block.timestamp + DISPUTE_WINDOW_SECONDS);
+    vm.warp(block.timestamp + DISPUTE_WINDOW_SECONDS + 1);
 
     Batch memory fin = XlnHanko.emptyBatch();
     fin.disputeFinalizations = new FinalDisputeProof[](1);

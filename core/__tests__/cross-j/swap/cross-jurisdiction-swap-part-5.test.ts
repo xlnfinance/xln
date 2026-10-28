@@ -72,6 +72,7 @@ describe('cross-jurisdiction target dispute route selection', () => {
       const route = {
         ...buildPreparedCrossJurisdictionRoute(
           {
+      expiresAt: (env.state.timestamp) + 60_000,
             orderId,
             makerEntityId: routeSourceUser,
             hubEntityId: routeSourceHub,
@@ -121,7 +122,7 @@ describe('cross-jurisdiction target dispute route selection', () => {
           tokenId: route.targetPull.tokenId,
           amount: route.targetPull.signedAmount,
           fullHash: route.targetPull.fullHash,
-          partialRoot: route.targetPull.partialRoot,
+          partialRoot: route.targetPull.partialRoot, deadline: route.targetPull.deadline,
           crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'target'),
           createdHeight: 1,
           createdTimestamp: state.timestamp,
@@ -179,7 +180,7 @@ describe('cross-jurisdiction target dispute route selection', () => {
           tokenId: selected.targetPull!.tokenId,
           amount: selected.targetPull!.signedAmount,
           fullHash: selected.targetPull!.fullHash,
-          partialRoot: selected.targetPull!.partialRoot,
+          partialRoot: selected.targetPull!.partialRoot, deadline: selected.targetPull!.deadline,
           crossJurisdiction: buildCrossJurisdictionPullBinding(selected, 'target'),
           createdHeight: 1,
           createdTimestamp: fixture.state.timestamp,

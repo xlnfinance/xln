@@ -397,6 +397,7 @@ fn hash_type(value: &HashType) -> &'static str {
         HashType::Settlement => "settlement",
         HashType::Profile => "profile",
         HashType::JBatch => "jBatch",
+        HashType::HashLadderReveal => "hashLadderReveal",
         HashType::EntityProviderAction => "entityProviderAction",
     }
 }

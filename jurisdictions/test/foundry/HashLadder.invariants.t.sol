@@ -47,21 +47,14 @@ contract HashLadderInvariants is XlnFixture {
     assertEq(handler.sourceConflictingRetryAccepted(), 0, "conflicting Source retry accepted");
   }
 
-  /// @notice INVARIANT 5c (Target monotone). No lower Target replay was ever
-  ///         accepted; equal/higher publications refresh the timestamp
-  ///         (ghost equality in 5a proves the stored ratio/timestamp pair).
-  function invariant_targetRevealsNeverDecrease() public view {
-    assertEq(handler.targetLowerRetryAccepted(), 0, "lower Target replay accepted");
+  /// @notice Target preserves the same immutable ratio/time policy as Source.
+  function invariant_targetRevealsAreSticky() public view {
+    assertEq(handler.targetConflictingRetryAccepted(), 0, "conflicting Target retry accepted");
   }
 
-  /// @notice INVARIANT 5d (Source window, ASYMMETRIC windows). A FIRST Source
-  ///         write was never accepted outside its signed account window
-  ///         [disputeStart, disputeStart + ownerResponseSeconds] with a live
-  ///         dispute — inside the model where LEFT owns 50s and RIGHT owns
-  ///         70s, so a window side-selection swap (reading the
-  ///         counterparty's window) is observable, not neutered (audit A5).
-  function invariant_sourceFirstWriteNeedsWindow() public view {
-    assertEq(handler.sourceOutsideWindowAccepted(), 0, "first Source write outside its window");
+  /// @notice First valid evidence is publishable independently of disputes.
+  function invariant_firstWriteDoesNotNeedDispute() public view {
+    assertEq(handler.validFirstWriteRejected(), 0, "valid first evidence rejected");
   }
 
   /// @notice INVARIANT 5e (C4-hardening A5): the signed response windows sit
@@ -97,17 +90,14 @@ contract HashLadderInvariants is XlnFixture {
     assertEq(reversed2, 0x7fff, "reverse participant cannot write its own slot");
   }
 
-  /// @notice CONTROL (Source window + stickiness, concrete): a Source write
-  ///         without a live dispute is rejected; with a live dispute it lands;
-  ///         an exact retry is a sticky no-op; a conflicting retry is rejected.
+  /// @notice Pre-dispute Source evidence and all retries preserve first-seen time.
   function test_control_sourceSingleShotSemantics() public {
-    // No dispute: first Source write must be rejected (E12). Odd warpSeed so
-    // the handler's in-action dispute self-open stays disabled here.
+    // Publish before any dispute; later starts must not invalidate evidence.
     handler.registerReveal(0, 1, 1 /*source*/, 0x1234, 1, 3);
     (uint16 ratio, uint256 ts) =
       dep.getHashLadderReveal(handler.entityOf(0), handler.entityOf(1), _ladderOf(1, 0x1234), false);
-    assertEq(ratio, 0, "Source wrote without a live dispute window");
-    assertEq(ts, 0, "Source wrote without a live dispute window");
+    assertEq(ratio, 0x1234, "pre-dispute Source evidence rejected");
+    assertGt(ts, 0, "missing first-seen timestamp");
 
     // Open the dispute (starts the 50s owner window), then write inside it.
     handler.openDispute(0, 1, 7);
@@ -129,14 +119,8 @@ contract HashLadderInvariants is XlnFixture {
     assertEq(ratio3, 0x1234, "conflicting Source retry replaced the record");
   }
 
-  /// @notice CONTROL (C4-hardening A5, asymmetric window sides + close→E12):
-  ///         at t = S+60 (inside RIGHT's 70s owner window, past LEFT's 50s),
-  ///         the RIGHT-side writer's first Source write is accepted while the
-  ///         LEFT-side writer's is not — then closing the dispute makes any
-  ///         further first Source write E12-rejected. A registry reading the
-  ///         counterparty's window, or storing the windows on swapped sides,
-  ///         fails this control.
-  function test_control_asymmetricWindowsSelectTheWriterSide() public {
+  /// @notice Asymmetric starts and finality never gate registry publication.
+  function test_control_asymmetricWindowsDoNotGatePublication() public {
     uint256 left = entity[0] < entity[1] ? 0 : 1;
     uint256 right = entity[0] < entity[1] ? 1 : 0;
     handler.openDispute(0, 1, 7);
@@ -156,17 +140,16 @@ contract HashLadderInvariants is XlnFixture {
     handler.registerReveal(left, right, 1 /*source*/, 0x2222, 1 /*bucket*/, 1 /*no warp*/);
     (uint16 leftRatio, ) =
       dep.getHashLadderReveal(handler.entityOf(left), handler.entityOf(right), _ladderOf(1, 0x2222), false);
-    assertEq(leftRatio, 0, "LEFT-side out-of-window write was accepted");
+    assertEq(leftRatio, 0x2222, "relative window blocked absolute evidence");
 
-    // Close the dispute (non-starter, immediate), then a first Source write
-    // on a fresh slot must hit the E12 branch.
+    // Closing a dispute does not consume a fresh registry slot.
     handler.closeDispute(0, 1);
     assertEq(handler.disputesClosed(), 1, "control: dispute did not close");
     handler.registerReveal(right, left, 2 /*source*/, 0x3333, 2 /*bucket*/, 1 /*no warp*/);
     (uint16 afterClose, ) =
       dep.getHashLadderReveal(handler.entityOf(right), handler.entityOf(left), _ladderOf(2, 0x3333), false);
-    assertEq(afterClose, 0, "first Source write accepted after the dispute closed (E12)");
-    assertEq(handler.sourceOutsideWindowAccepted(), 0, "oracle flagged the correct control");
+    assertEq(afterClose, 0x3333, "closed dispute blocked publication");
+    assertEq(handler.validFirstWriteRejected(), 0, "oracle flagged the correct control");
   }
 
   /// @dev ladderHash for a handler bucket/ratio pair (same derivation as the

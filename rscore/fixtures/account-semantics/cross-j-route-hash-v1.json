@@ -2,35 +2,35 @@
   "canonicalSource": "TypeScript applyAccountTxToMutableReplica",
   "cases": [
     {
-      "accountStateRoot": "0xe0e8c80db5ed675d219d48ff313debf9e54f47533757797c9c67c9cb6a77fa72",
+      "accountStateRoot": "0x398490409430b923a614fe8f0a1d69bcdf792fee376df1cfad843923b04f39d2",
       "input": "claimedHashChanged",
       "name": "claimedHashChanged",
       "rejection": "CROSS_J_SWAP_OFFER_ROUTE_INVALID:CROSS_J_ROUTE_HASH_MISMATCH:order-1",
       "rejectionCode": "ACCOUNT_TX_VALIDATION"
     },
     {
-      "accountStateRoot": "0xe0e8c80db5ed675d219d48ff313debf9e54f47533757797c9c67c9cb6a77fa72",
+      "accountStateRoot": "0x398490409430b923a614fe8f0a1d69bcdf792fee376df1cfad843923b04f39d2",
       "input": "hashedFieldChanged",
       "name": "hashedFieldChanged",
       "rejection": "CROSS_J_SWAP_OFFER_ROUTE_INVALID:CROSS_J_ROUTE_HASH_MISMATCH:order-1",
       "rejectionCode": "ACCOUNT_TX_VALIDATION"
     },
     {
-      "accountStateRoot": "0xe0e8c80db5ed675d219d48ff313debf9e54f47533757797c9c67c9cb6a77fa72",
+      "accountStateRoot": "0x398490409430b923a614fe8f0a1d69bcdf792fee376df1cfad843923b04f39d2",
       "input": "missingUpdatedAt",
       "name": "missingUpdatedAt",
       "rejection": "CROSS_J_SWAP_OFFER_ROUTE_INVALID:CROSS_J_SWAP_OFFER_ROUTE_FIELDS:missing=updatedAt:extra=none",
       "rejectionCode": "ACCOUNT_TX_VALIDATION"
     },
     {
-      "accountStateRoot": "0xe0e8c80db5ed675d219d48ff313debf9e54f47533757797c9c67c9cb6a77fa72",
+      "accountStateRoot": "0x398490409430b923a614fe8f0a1d69bcdf792fee376df1cfad843923b04f39d2",
       "input": "unknownField",
       "name": "unknownField",
       "rejection": "CROSS_J_SWAP_OFFER_ROUTE_INVALID:CROSS_J_SWAP_OFFER_ROUTE_FIELDS:missing=none:extra=unknownField",
       "rejectionCode": "ACCOUNT_TX_VALIDATION"
     },
     {
-      "accountStateRoot": "0xe0e8c80db5ed675d219d48ff313debf9e54f47533757797c9c67c9cb6a77fa72",
+      "accountStateRoot": "0x398490409430b923a614fe8f0a1d69bcdf792fee376df1cfad843923b04f39d2",
       "input": "malformedNestedField",
       "name": "malformedNestedField",
       "rejection": "CROSS_J_SWAP_OFFER_ROUTE_INVALID:CROSS_J_SWAP_OFFER_ROUTE_SOURCE_DISPUTE_LEFT:-1",
@@ -76,9 +76,10 @@
               "__xlnType": "BigInt",
               "value": "100"
             },
-            "fullHash": "0xb34cfe48e979298e63b001903366f613b7c77c2e3d7220a532a62e93fc4e9fc8",
-            "partialRoot": "0xde7ef2ea98ce19e33882382f363cdbd78f4ca63e84732a8476c5a8a1b14af10d",
-            "pullId": "0x59561198573ca4e781cb83f2da6533dfb27d6f3d283dbf026c4fc403ac8e4308",
+            "deadline": 61,
+            "fullHash": "0xa5917e35b78d15cce1551d0fa6c7494df4433ca3c6e9a549a3dc7ad632125ae8",
+            "partialRoot": "0xf6fd31b6d87deb3a754334cbab752923232e7cf307d8ca048f4736bde71583c4",
+            "pullId": "0x2481935139aa5754afb90a54bc099d045b4393006f14129e25790255deca635b",
             "signedAmount": {
               "__xlnType": "BigInt",
               "value": "-100"
@@ -105,9 +106,10 @@
               "__xlnType": "BigInt",
               "value": "200"
             },
-            "fullHash": "0xb34cfe48e979298e63b001903366f613b7c77c2e3d7220a532a62e93fc4e9fc8",
-            "partialRoot": "0xde7ef2ea98ce19e33882382f363cdbd78f4ca63e84732a8476c5a8a1b14af10d",
-            "pullId": "0x5179b216fe7e02510d42fb1f9001e9a5b026a2cd4b722b6f3644e09d8e34207a",
+            "deadline": 294,
+            "fullHash": "0xa5917e35b78d15cce1551d0fa6c7494df4433ca3c6e9a549a3dc7ad632125ae8",
+            "partialRoot": "0xf6fd31b6d87deb3a754334cbab752923232e7cf307d8ca048f4736bde71583c4",
+            "pullId": "0x8f0453c8080e4a733c822773627c7e28140b546ce07b757fdd22d277c2e18aae",
             "signedAmount": {
               "__xlnType": "BigInt",
               "value": "-200"
@@ -116,7 +118,7 @@
           },
           "timePolicy": {
             "deadlineConversion": "floor_ms_to_unix_seconds",
-            "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+            "finalityPolicy": "absolute_pull_deadlines",
             "runtimeClock": "unix_ms",
             "runtimeExpiresAtMs": 61000,
             "settlementClock": "unix_seconds"
@@ -170,7 +172,7 @@
           "makerEntityId": "0x1111111111111111111111111111111111111111111111111111111111111111",
           "orderId": "order-1",
           "riskMode": "fully_collateralized",
-          "routeHash": "0xf73d15297128cb7cdf523c08b6f6ecb002e23aa48041f5a0a7f0db72a0139319",
+          "routeHash": "0xf57dc1a28a49ac0c1f358fcca4274c4d61e0dfbcdd517c5fe0480207e89ad852",
           "source": {
             "amount": {
               "__xlnType": "BigInt",
@@ -190,9 +192,10 @@
               "__xlnType": "BigInt",
               "value": "100"
             },
-            "fullHash": "0xb34cfe48e979298e63b001903366f613b7c77c2e3d7220a532a62e93fc4e9fc8",
-            "partialRoot": "0xde7ef2ea98ce19e33882382f363cdbd78f4ca63e84732a8476c5a8a1b14af10d",
-            "pullId": "0x59561198573ca4e781cb83f2da6533dfb27d6f3d283dbf026c4fc403ac8e4308",
+            "deadline": 61,
+            "fullHash": "0xa5917e35b78d15cce1551d0fa6c7494df4433ca3c6e9a549a3dc7ad632125ae8",
+            "partialRoot": "0xf6fd31b6d87deb3a754334cbab752923232e7cf307d8ca048f4736bde71583c4",
+            "pullId": "0x2481935139aa5754afb90a54bc099d045b4393006f14129e25790255deca635b",
             "signedAmount": {
               "__xlnType": "BigInt",
               "value": "-100"
@@ -219,9 +222,10 @@
               "__xlnType": "BigInt",
               "value": "200"
             },
-            "fullHash": "0xb34cfe48e979298e63b001903366f613b7c77c2e3d7220a532a62e93fc4e9fc8",
-            "partialRoot": "0xde7ef2ea98ce19e33882382f363cdbd78f4ca63e84732a8476c5a8a1b14af10d",
-            "pullId": "0x5179b216fe7e02510d42fb1f9001e9a5b026a2cd4b722b6f3644e09d8e34207a",
+            "deadline": 294,
+            "fullHash": "0xa5917e35b78d15cce1551d0fa6c7494df4433ca3c6e9a549a3dc7ad632125ae8",
+            "partialRoot": "0xf6fd31b6d87deb3a754334cbab752923232e7cf307d8ca048f4736bde71583c4",
+            "pullId": "0x8f0453c8080e4a733c822773627c7e28140b546ce07b757fdd22d277c2e18aae",
             "signedAmount": {
               "__xlnType": "BigInt",
               "value": "-200"
@@ -231,7 +235,7 @@
           "targetSignerId": "0x5555555555555555555555555555555555555555555555555555555555555555",
           "timePolicy": {
             "deadlineConversion": "floor_ms_to_unix_seconds",
-            "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+            "finalityPolicy": "absolute_pull_deadlines",
             "runtimeClock": "unix_ms",
             "runtimeExpiresAtMs": 61000,
             "settlementClock": "unix_seconds"
@@ -285,7 +289,7 @@
           "makerEntityId": "0x1111111111111111111111111111111111111111111111111111111111111111",
           "orderId": "order-1",
           "riskMode": "fully_collateralized",
-          "routeHash": "0xf73d15297128cb7cdf523c08b6f6ecb002e23aa48041f5a0a7f0db72a0139319",
+          "routeHash": "0xf57dc1a28a49ac0c1f358fcca4274c4d61e0dfbcdd517c5fe0480207e89ad852",
           "source": {
             "amount": {
               "__xlnType": "BigInt",
@@ -305,9 +309,10 @@
               "__xlnType": "BigInt",
               "value": "100"
             },
-            "fullHash": "0xb34cfe48e979298e63b001903366f613b7c77c2e3d7220a532a62e93fc4e9fc8",
-            "partialRoot": "0xde7ef2ea98ce19e33882382f363cdbd78f4ca63e84732a8476c5a8a1b14af10d",
-            "pullId": "0x59561198573ca4e781cb83f2da6533dfb27d6f3d283dbf026c4fc403ac8e4308",
+            "deadline": 61,
+            "fullHash": "0xa5917e35b78d15cce1551d0fa6c7494df4433ca3c6e9a549a3dc7ad632125ae8",
+            "partialRoot": "0xf6fd31b6d87deb3a754334cbab752923232e7cf307d8ca048f4736bde71583c4",
+            "pullId": "0x2481935139aa5754afb90a54bc099d045b4393006f14129e25790255deca635b",
             "signedAmount": {
               "__xlnType": "BigInt",
               "value": "-100"
@@ -334,9 +339,10 @@
               "__xlnType": "BigInt",
               "value": "200"
             },
-            "fullHash": "0xb34cfe48e979298e63b001903366f613b7c77c2e3d7220a532a62e93fc4e9fc8",
-            "partialRoot": "0xde7ef2ea98ce19e33882382f363cdbd78f4ca63e84732a8476c5a8a1b14af10d",
-            "pullId": "0x5179b216fe7e02510d42fb1f9001e9a5b026a2cd4b722b6f3644e09d8e34207a",
+            "deadline": 294,
+            "fullHash": "0xa5917e35b78d15cce1551d0fa6c7494df4433ca3c6e9a549a3dc7ad632125ae8",
+            "partialRoot": "0xf6fd31b6d87deb3a754334cbab752923232e7cf307d8ca048f4736bde71583c4",
+            "pullId": "0x8f0453c8080e4a733c822773627c7e28140b546ce07b757fdd22d277c2e18aae",
             "signedAmount": {
               "__xlnType": "BigInt",
               "value": "-200"
@@ -345,7 +351,7 @@
           },
           "timePolicy": {
             "deadlineConversion": "floor_ms_to_unix_seconds",
-            "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+            "finalityPolicy": "absolute_pull_deadlines",
             "runtimeClock": "unix_ms",
             "runtimeExpiresAtMs": 61000,
             "settlementClock": "unix_seconds"
@@ -399,7 +405,7 @@
           "makerEntityId": "0x1111111111111111111111111111111111111111111111111111111111111111",
           "orderId": "order-1",
           "riskMode": "fully_collateralized",
-          "routeHash": "0xf73d15297128cb7cdf523c08b6f6ecb002e23aa48041f5a0a7f0db72a0139319",
+          "routeHash": "0xf57dc1a28a49ac0c1f358fcca4274c4d61e0dfbcdd517c5fe0480207e89ad852",
           "source": {
             "amount": {
               "__xlnType": "BigInt",
@@ -419,9 +425,10 @@
               "__xlnType": "BigInt",
               "value": "100"
             },
-            "fullHash": "0xb34cfe48e979298e63b001903366f613b7c77c2e3d7220a532a62e93fc4e9fc8",
-            "partialRoot": "0xde7ef2ea98ce19e33882382f363cdbd78f4ca63e84732a8476c5a8a1b14af10d",
-            "pullId": "0x59561198573ca4e781cb83f2da6533dfb27d6f3d283dbf026c4fc403ac8e4308",
+            "deadline": 61,
+            "fullHash": "0xa5917e35b78d15cce1551d0fa6c7494df4433ca3c6e9a549a3dc7ad632125ae8",
+            "partialRoot": "0xf6fd31b6d87deb3a754334cbab752923232e7cf307d8ca048f4736bde71583c4",
+            "pullId": "0x2481935139aa5754afb90a54bc099d045b4393006f14129e25790255deca635b",
             "signedAmount": {
               "__xlnType": "BigInt",
               "value": "-100"
@@ -448,9 +455,10 @@
               "__xlnType": "BigInt",
               "value": "200"
             },
-            "fullHash": "0xb34cfe48e979298e63b001903366f613b7c77c2e3d7220a532a62e93fc4e9fc8",
-            "partialRoot": "0xde7ef2ea98ce19e33882382f363cdbd78f4ca63e84732a8476c5a8a1b14af10d",
-            "pullId": "0x5179b216fe7e02510d42fb1f9001e9a5b026a2cd4b722b6f3644e09d8e34207a",
+            "deadline": 294,
+            "fullHash": "0xa5917e35b78d15cce1551d0fa6c7494df4433ca3c6e9a549a3dc7ad632125ae8",
+            "partialRoot": "0xf6fd31b6d87deb3a754334cbab752923232e7cf307d8ca048f4736bde71583c4",
+            "pullId": "0x8f0453c8080e4a733c822773627c7e28140b546ce07b757fdd22d277c2e18aae",
             "signedAmount": {
               "__xlnType": "BigInt",
               "value": "-200"
@@ -459,7 +467,7 @@
           },
           "timePolicy": {
             "deadlineConversion": "floor_ms_to_unix_seconds",
-            "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+            "finalityPolicy": "absolute_pull_deadlines",
             "runtimeClock": "unix_ms",
             "runtimeExpiresAtMs": 61000,
             "settlementClock": "unix_seconds"
@@ -503,7 +511,7 @@
         "crossJurisdiction": {
           "leg": "source",
           "orderId": "order-1",
-          "routeHash": "0xf73d15297128cb7cdf523c08b6f6ecb002e23aa48041f5a0a7f0db72a0139319",
+          "routeHash": "0xf57dc1a28a49ac0c1f358fcca4274c4d61e0dfbcdd517c5fe0480207e89ad852",
           "status": "resting"
         },
         "crossJurisdictionRoute": {
@@ -522,7 +530,7 @@
           "makerEntityId": "0x1111111111111111111111111111111111111111111111111111111111111111",
           "orderId": "order-1",
           "riskMode": "fully_collateralized",
-          "routeHash": "0xf73d15297128cb7cdf523c08b6f6ecb002e23aa48041f5a0a7f0db72a0139319",
+          "routeHash": "0xf57dc1a28a49ac0c1f358fcca4274c4d61e0dfbcdd517c5fe0480207e89ad852",
           "source": {
             "amount": {
               "__xlnType": "BigInt",
@@ -542,9 +550,10 @@
               "__xlnType": "BigInt",
               "value": "100"
             },
-            "fullHash": "0xb34cfe48e979298e63b001903366f613b7c77c2e3d7220a532a62e93fc4e9fc8",
-            "partialRoot": "0xde7ef2ea98ce19e33882382f363cdbd78f4ca63e84732a8476c5a8a1b14af10d",
-            "pullId": "0x59561198573ca4e781cb83f2da6533dfb27d6f3d283dbf026c4fc403ac8e4308",
+            "deadline": 61,
+            "fullHash": "0xa5917e35b78d15cce1551d0fa6c7494df4433ca3c6e9a549a3dc7ad632125ae8",
+            "partialRoot": "0xf6fd31b6d87deb3a754334cbab752923232e7cf307d8ca048f4736bde71583c4",
+            "pullId": "0x2481935139aa5754afb90a54bc099d045b4393006f14129e25790255deca635b",
             "signedAmount": {
               "__xlnType": "BigInt",
               "value": "-100"
@@ -571,9 +580,10 @@
               "__xlnType": "BigInt",
               "value": "200"
             },
-            "fullHash": "0xb34cfe48e979298e63b001903366f613b7c77c2e3d7220a532a62e93fc4e9fc8",
-            "partialRoot": "0xde7ef2ea98ce19e33882382f363cdbd78f4ca63e84732a8476c5a8a1b14af10d",
-            "pullId": "0x5179b216fe7e02510d42fb1f9001e9a5b026a2cd4b722b6f3644e09d8e34207a",
+            "deadline": 294,
+            "fullHash": "0xa5917e35b78d15cce1551d0fa6c7494df4433ca3c6e9a549a3dc7ad632125ae8",
+            "partialRoot": "0xf6fd31b6d87deb3a754334cbab752923232e7cf307d8ca048f4736bde71583c4",
+            "pullId": "0x8f0453c8080e4a733c822773627c7e28140b546ce07b757fdd22d277c2e18aae",
             "signedAmount": {
               "__xlnType": "BigInt",
               "value": "-200"
@@ -582,7 +592,7 @@
           },
           "timePolicy": {
             "deadlineConversion": "floor_ms_to_unix_seconds",
-            "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+            "finalityPolicy": "absolute_pull_deadlines",
             "runtimeClock": "unix_ms",
             "runtimeExpiresAtMs": 61000,
             "settlementClock": "unix_seconds"
@@ -590,9 +600,10 @@
           "updatedAt": 1000,
           "venueId": "cross:stack:31338:0x7777777777777777777777777777777777777777:2/stack:31337:0x8888888888888888888888888888888888888888:1"
         },
-        "fullHash": "0xb34cfe48e979298e63b001903366f613b7c77c2e3d7220a532a62e93fc4e9fc8",
-        "partialRoot": "0xde7ef2ea98ce19e33882382f363cdbd78f4ca63e84732a8476c5a8a1b14af10d",
-        "pullId": "0x59561198573ca4e781cb83f2da6533dfb27d6f3d283dbf026c4fc403ac8e4308",
+        "deadline": 61,
+        "fullHash": "0xa5917e35b78d15cce1551d0fa6c7494df4433ca3c6e9a549a3dc7ad632125ae8",
+        "partialRoot": "0xf6fd31b6d87deb3a754334cbab752923232e7cf307d8ca048f4736bde71583c4",
+        "pullId": "0x2481935139aa5754afb90a54bc099d045b4393006f14129e25790255deca635b",
         "signedAmount": {
           "__xlnType": "BigInt",
           "value": "-100"
@@ -619,7 +630,7 @@
           "makerEntityId": "0x1111111111111111111111111111111111111111111111111111111111111111",
           "orderId": "order-1",
           "riskMode": "fully_collateralized",
-          "routeHash": "0xf73d15297128cb7cdf523c08b6f6ecb002e23aa48041f5a0a7f0db72a0139319",
+          "routeHash": "0xf57dc1a28a49ac0c1f358fcca4274c4d61e0dfbcdd517c5fe0480207e89ad852",
           "source": {
             "amount": {
               "__xlnType": "BigInt",
@@ -639,9 +650,10 @@
               "__xlnType": "BigInt",
               "value": "100"
             },
-            "fullHash": "0xb34cfe48e979298e63b001903366f613b7c77c2e3d7220a532a62e93fc4e9fc8",
-            "partialRoot": "0xde7ef2ea98ce19e33882382f363cdbd78f4ca63e84732a8476c5a8a1b14af10d",
-            "pullId": "0x59561198573ca4e781cb83f2da6533dfb27d6f3d283dbf026c4fc403ac8e4308",
+            "deadline": 61,
+            "fullHash": "0xa5917e35b78d15cce1551d0fa6c7494df4433ca3c6e9a549a3dc7ad632125ae8",
+            "partialRoot": "0xf6fd31b6d87deb3a754334cbab752923232e7cf307d8ca048f4736bde71583c4",
+            "pullId": "0x2481935139aa5754afb90a54bc099d045b4393006f14129e25790255deca635b",
             "signedAmount": {
               "__xlnType": "BigInt",
               "value": "-100"
@@ -668,9 +680,10 @@
               "__xlnType": "BigInt",
               "value": "200"
             },
-            "fullHash": "0xb34cfe48e979298e63b001903366f613b7c77c2e3d7220a532a62e93fc4e9fc8",
-            "partialRoot": "0xde7ef2ea98ce19e33882382f363cdbd78f4ca63e84732a8476c5a8a1b14af10d",
-            "pullId": "0x5179b216fe7e02510d42fb1f9001e9a5b026a2cd4b722b6f3644e09d8e34207a",
+            "deadline": 294,
+            "fullHash": "0xa5917e35b78d15cce1551d0fa6c7494df4433ca3c6e9a549a3dc7ad632125ae8",
+            "partialRoot": "0xf6fd31b6d87deb3a754334cbab752923232e7cf307d8ca048f4736bde71583c4",
+            "pullId": "0x8f0453c8080e4a733c822773627c7e28140b546ce07b757fdd22d277c2e18aae",
             "signedAmount": {
               "__xlnType": "BigInt",
               "value": "-200"
@@ -679,7 +692,7 @@
           },
           "timePolicy": {
             "deadlineConversion": "floor_ms_to_unix_seconds",
-            "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+            "finalityPolicy": "absolute_pull_deadlines",
             "runtimeClock": "unix_ms",
             "runtimeExpiresAtMs": 61000,
             "settlementClock": "unix_seconds"

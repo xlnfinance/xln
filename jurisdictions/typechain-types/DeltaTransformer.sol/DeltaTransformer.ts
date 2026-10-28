@@ -98,6 +98,7 @@ export declare namespace DeltaTransformer {
     deltaIndex: BigNumberish;
     amount: SignedAmountStruct;
     claimedRatio: BigNumberish;
+    deadline: BigNumberish;
     fullHash: BytesLike;
     partialRoot: BytesLike;
     targetRole: boolean;
@@ -107,6 +108,7 @@ export declare namespace DeltaTransformer {
     deltaIndex: bigint,
     amount: SignedAmountStructOutput,
     claimedRatio: bigint,
+    deadline: bigint,
     fullHash: string,
     partialRoot: string,
     targetRole: boolean
@@ -114,6 +116,7 @@ export declare namespace DeltaTransformer {
     deltaIndex: bigint;
     amount: SignedAmountStructOutput;
     claimedRatio: bigint;
+    deadline: bigint;
     fullHash: string;
     partialRoot: string;
     targetRole: boolean;

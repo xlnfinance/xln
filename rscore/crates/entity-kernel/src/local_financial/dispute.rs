@@ -680,14 +680,6 @@ fn start(
             active_dispute: Some(active_dispute),
         },
     ));
-    if let Some(route_id) = cross_jurisdiction_route_id {
-        crate::cross_j::flush_pending_target_reveal_for_route(
-            state,
-            route_id,
-            counterparty,
-            routed_outputs,
-        )?;
-    }
     status(
         events,
         format!(
@@ -1213,7 +1205,36 @@ pub(super) fn apply_finalize(
         );
         return Ok(());
     }
-    let has_pulls = dispute.pull_count > 0;
+    let deadline = crate::cross_j::proof_body_pull_deadline(
+        &final_body,
+        dispute
+            .delta_transformer
+            .ok_or_else(|| invalid(KIND, "DELTA_TRANSFORMER_MISSING"))?,
+    )?;
+    let has_pulls = deadline.is_some();
+    let submit_at = deadline.map_or(timeout, |deadline| timeout.max(deadline) + 1);
+    if has_pulls && state.timestamp / 1000 < submit_at {
+        if let Some(crontab) = state.crontab.as_mut() {
+            crate::schedule_hook(
+                crontab,
+                crate::ScheduledHook {
+                    id: format!(
+                        "dispute-deadline:{}",
+                        tx.counterparty_entity_id.to_lowercase()
+                    ),
+                    trigger_at: submit_at * 1000,
+                    kind: crate::ScheduledHookKind::DisputeDeadline {
+                        account_id: tx.counterparty_entity_id.clone(),
+                    },
+                },
+            )?;
+        }
+        status(
+            events,
+            format!("⏳ Pull finalization waits until {submit_at}"),
+        );
+        return Ok(());
+    }
     let has_selected_counter = selected_nonce.is_some();
     // Pull counter-proofs require on-chain registration even after timeout.
     if has_pulls && use_counter && !has_selected_counter {
@@ -1224,8 +1245,8 @@ pub(super) fn apply_finalize(
         return Ok(());
     }
     let now_sec = state.timestamp / 1_000;
-    let submit_not_before_timestamp = if timeout > 0 && now_sec >= timeout {
-        (has_pulls || caller_is_starter || has_selected_counter).then_some(timeout)
+    let submit_not_before_timestamp = if timeout > 0 && now_sec >= submit_at {
+        (has_pulls || caller_is_starter || has_selected_counter).then_some(submit_at)
     } else if has_selected_counter || has_pulls || caller_is_starter {
         status(
             events,
@@ -1979,6 +2000,7 @@ mod tests {
                     Token::Uint(0.into()),
                     Token::Tuple(vec![Token::Bool(false), Token::Uint(1.into())]),
                     Token::Uint(0.into()),
+                    Token::Uint(99.into()),
                     Token::FixedBytes(vec![0x41; 32]),
                     Token::FixedBytes(vec![0x42; 32]),
                     Token::Bool(true),

@@ -6,15 +6,12 @@ import "./HashLadder.sol";
 
 /// @notice Proof-independent public hash-ladder reveal registry.
 /// @dev Linked library calls execute by DELEGATECALL, so writes and events stay
-///      in the owning Depository. The outer processBatch Hanko authenticates the
-///      revealing Entity. This registry deliberately knows nothing about a
+///      in the owning Depository. The owning Depository authenticates the revealing Entity
+///      through Source processBatch or standalone Target publication. This registry deliberately knows nothing about a
 ///      dispute, but every record is scoped to one ordered Account participant
-///      pair: authenticated writer plus declared counterparty. A first Source
-///      write additionally uses only AccountInfo's frozen active clock; no
-///      ProofBody, Pull index or transformer authorization enters admission.
-///      A signed DeltaTransformer.Pull is the sole authority that later assigns
-///      financial meaning to an exact (entity, counterparty, ladder, role) record and
-///      validates its timestamp against the active dispute window.
+///      pair: authenticated writer plus declared counterparty. The signed Pull
+///      alone assigns financial meaning and an absolute reveal deadline. Both
+///      namespaces preserve first-seen evidence, including before a dispute.
 library HashLadderRegistry {
   error E1();
   error E9();
@@ -45,7 +42,6 @@ library HashLadderRegistry {
 
   function registerReveal(
     mapping(bytes32 => mapping(bytes32 => mapping(bytes32 => mapping(bool => uint256)))) storage records,
-    mapping(bytes => AccountInfo) storage accounts,
     bytes32 entityId,
     HashLadderRegistration memory registration
   ) external {
@@ -60,40 +56,12 @@ library HashLadderRegistry {
     bytes32 ladderHash = keccak256(abi.encodePacked(registration.fullHash, registration.partialRoot));
     uint256 existing = records[entityId][registration.counterpartyEntity][ladderHash][registration.targetRole];
     uint16 existingRatio = uint16(existing);
-    if (!registration.targetRole && existing == 0) {
-      bytes memory accountKey = entityId < registration.counterpartyEntity
-        ? abi.encodePacked(entityId, registration.counterpartyEntity)
-        : abi.encodePacked(registration.counterpartyEntity, entityId);
-      AccountInfo storage account = accounts[accountKey];
-      uint32 ownerWindow = entityId < registration.counterpartyEntity
-        ? account.leftResponseSeconds
-        : account.rightResponseSeconds;
-      // A first Source write outside [S,S+W_owner] would permanently consume
-      // its single-shot slot. Exact retries bypass this gate below and remain
-      // sticky no-ops, while Target retains its refresh semantics.
-      if (
-        account.disputeHash == bytes32(0)
-        || block.timestamp < account.disputeStartTimestamp
-        || block.timestamp > account.disputeStartTimestamp + uint256(ownerWindow)
-      ) revert E12();
-    }
     if (existing != 0) {
-      if (!registration.targetRole) {
-        // A Source reveal is immutable evidence. Its exact retry is a sticky
-        // no-op; a conflicting retry must never replace what watchers saw.
-        if (existingRatio == witness.fillRatio) return;
-        revert E12();
-      }
-      // Equal Target evidence is sticky inside this dispute: a late redelivery
-      // must not turn a timely payout into zero. Only a pre-dispute record may
-      // refresh into the new active window; higher ratios still advance.
-      if (witness.fillRatio < existingRatio) revert E12();
-      if (witness.fillRatio == existingRatio) {
-        bytes memory accountKey = entityId < registration.counterpartyEntity
-          ? abi.encodePacked(entityId, registration.counterpartyEntity)
-          : abi.encodePacked(registration.counterpartyEntity, entityId);
-        if ((existing >> 16) >= accounts[accountKey].disputeStartTimestamp) return;
-      }
+      // The Source witness is single-shot. Its Target port has the same ratio:
+      // exact retries preserve first-seen evidence even after D; conflicting
+      // writes must not replace timely evidence with a late timestamp.
+      if (existingRatio == witness.fillRatio) return;
+      revert E12();
     }
 
     uint256 revealedAt = block.timestamp;

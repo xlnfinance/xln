@@ -160,6 +160,9 @@ const runCase = async (name: string, initial: EntityState, tx: EntityTx) => {
     swapOffersCreated: result.swapOffersCreated ?? [],
   };
   const outbox = {
+    hashesToSign: result.hashesToSign ?? [],
+    targetReveals: (result.jOutputs ?? []).flatMap(input => input.jTxs.flatMap(tx =>
+      tx.type === 'hashLadderReveal' ? [{ jurisdictionName: input.jurisdictionName, ...tx }] : [])),
     outputs: result.outputs.map(output => ({
       entityId: output.entityId,
       signerId: output.signerId,
@@ -229,7 +232,7 @@ const addPull = (value: EntityState, peer: string, route: CrossJurisdictionSwapR
     claimedRatio: 0,
     claimedAmount: 0n,
     fullHash: pull.fullHash,
-    partialRoot: pull.partialRoot,
+    partialRoot: pull.partialRoot, deadline: pull.deadline,
     crossJurisdiction: buildCrossJurisdictionPullBinding(route, role),
     createdHeight: 0,
     createdTimestamp: NOW,
@@ -361,6 +364,8 @@ export const executeCrossJEntityKindsGroupD = async () => {
     ...restingWithoutHash,
     status: 'resting',
     expiresAt: NOW - 1,
+    sourcePull: { ...resting.sourcePull!, deadline: Math.floor((NOW - 1) / 1000) },
+    targetPull: { ...resting.targetPull!, deadline: Math.floor((NOW - 1) / 1000) + 233 },
   });
   const sweepState = state(SOURCE_HUB, SOURCE_HUB_SIGNER, SOURCE_USER, expiredRoute);
   addPull(sweepState, SOURCE_USER, expiredRoute, 'source');

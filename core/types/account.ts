@@ -45,9 +45,7 @@ export interface PullCommitment {
   amount: bigint;
   claimedRatio?: number;
   claimedAmount?: bigint;
-  // Settlement clock is on-chain dispute-relative. Both signed roles use this
-  // Pull beneficiary's side window from their own Account dispute start.
-  // No sealed route/market deadline field — that was a second clock with no L1 force.
+  deadline: number; // Signed absolute Unix-second reveal deadline.
   fullHash: string;
   partialRoot: string;
   crossJurisdiction: CrossJurisdictionPullBinding;
@@ -853,6 +851,7 @@ export type AccountTx =
         amount: bigint;
         fullHash: string;
         partialRoot: string;
+        deadline: number;
         crossJurisdiction: CrossJurisdictionPullBinding;
         crossJurisdictionRoute: CrossJurisdictionSwapRoute;
       };

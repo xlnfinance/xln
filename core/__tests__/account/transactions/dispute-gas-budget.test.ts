@@ -159,7 +159,7 @@ test('cross_pull_lock refuses before mutation and remains queued when a concurre
       tokenId: pull.tokenId,
       amount: pull.signedAmount,
       fullHash: pull.fullHash,
-      partialRoot: pull.partialRoot,
+      partialRoot: pull.partialRoot, deadline: pull.deadline,
       crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'source'),
       crossJurisdictionRoute: route,
     },

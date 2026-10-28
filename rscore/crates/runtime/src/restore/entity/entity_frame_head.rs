@@ -185,6 +185,7 @@ fn hash_type(value: &str, path: &str) -> Result<HashType, EntityFrameHeadRestore
         "settlement" => HashType::Settlement,
         "profile" => HashType::Profile,
         "jBatch" => HashType::JBatch,
+        "hashLadderReveal" => HashType::HashLadderReveal,
         "entityProviderAction" => HashType::EntityProviderAction,
         _ => return Err(invalid(format!("HASH_TYPE:{path}:{value}"))),
     })

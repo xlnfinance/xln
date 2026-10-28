@@ -797,8 +797,7 @@ fn apply_hanko_batch_processed(
         return Ok(());
     }
     batch_state.sent_batch = None;
-    let flushed =
-        crate::cross_j::flush_deferred_hash_ladder_reveals(state, dispute_views, routed_outputs)?;
+    let flushed = crate::cross_j::flush_deferred_hash_ladder_reveals(state, routed_outputs)?;
     let batch_state = state.j_batch_state.get_or_insert_with(Default::default);
     batch_state.status = if crate::local_control::has_queued_batch_work(batch_state) {
         JBatchStatus::Accumulating
@@ -1715,16 +1714,7 @@ fn apply_dispute_started(
             outputs,
         )?;
     }
-    let mut flushed_reveals = 0_usize;
-    for route_id in crate::cross_j::target_recovery_route_ids(state, &counterparty, view)? {
-        flushed_reveals += crate::cross_j::flush_pending_target_reveal_for_route(
-            state,
-            &route_id,
-            &counterparty,
-            outputs,
-        )?;
-    }
-    if (counter_proof_queued || flushed_reveals > 0) && removed == 0 {
+    if counter_proof_queued && removed == 0 {
         queue_j_broadcast(state, outputs)?;
     }
     for secret in dispute_initial_secrets(&event.starter_initial_arguments) {
@@ -1918,6 +1908,7 @@ fn apply_counter_dispute_registered(
 
 fn apply_dispute_finalized(
     state: &mut EntityStateSlice,
+    authority: Option<&crate::EntityFrameAuthority>,
     event: &xln_rscore_engine::DisputeFinalizedEvent,
     evidence: &[xln_rscore_engine::DisputeFinalizationEvidence],
     views: &BTreeMap<String, xln_rscore_batch::ResidentAccountDisputeView>,
@@ -2053,6 +2044,14 @@ fn apply_dispute_finalized(
             ),
         );
     }
+    crate::cross_j::terminalize_finalized_routes(
+        state,
+        &counterparty,
+        authority,
+        &final_body,
+        view,
+        frame_events,
+    )?;
     Ok(())
 }
 
@@ -2416,6 +2415,7 @@ pub(crate) fn apply_finalized_j_event_batches_in_frame(
                 }
                 JurisdictionEvent::DisputeFinalized(value) => apply_dispute_finalized(
                     state,
+                    authority,
                     value,
                     &evidence,
                     dispute_views,
@@ -2661,7 +2661,7 @@ mod tests {
     }
 
     #[test]
-    fn hanko_batch_ack_flushes_deferred_target_registry_reveal() {
+    fn hanko_batch_ack_cannot_requeue_standalone_target_registry_publication() {
         let source_user = entity(0x11);
         let source_hub = entity(0x22);
         let target_hub = entity(0x33);
@@ -2722,19 +2722,14 @@ mod tests {
         apply_hanko_batch_processed(&mut state, &event, &views, &mut outputs, &mut Vec::new())
             .expect("batch ack");
         let batch = state.j_batch_state.as_ref().expect("batch");
-        assert_eq!(batch.batch.hash_ladder_registrations.len(), 1);
-        assert!(batch.batch.hash_ladder_registrations[0].target_role);
-        assert_eq!(
-            batch.batch.hash_ladder_registrations[0].witness.fill_ratio,
-            17
-        );
+        assert!(batch.batch.hash_ladder_registrations.is_empty());
         let route = state
             .cross_jurisdiction_swaps
             .as_ref()
             .and_then(|routes| routes.get("route-1"))
             .expect("route");
-        assert!(object_field(route, "pendingTargetRegistryReveal").is_none());
-        assert_eq!(outputs.len(), 1);
+        assert!(object_field(route, "pendingTargetRegistryReveal").is_some());
+        assert!(outputs.is_empty());
     }
 
     #[test]
@@ -3473,10 +3468,12 @@ mod tests {
                 Token::Uint(U256::zero()),
                 Token::Tuple(vec![Token::Bool(false), Token::Uint(U256::from(100_u64))]),
                 Token::Uint(U256::from(17_u8)),
+                Token::Uint(U256::from(120_u64)),
                 Token::FixedBytes(vec![0x55; 32]),
                 Token::FixedBytes(vec![0x66; 32]),
                 Token::Bool(false),
             ])]),
+            Token::Array(Vec::new()),
         ])]);
         let engine_body = xln_rscore_engine::DisputeProofBody {
             watch_seed: [0x33; 32],
@@ -3666,6 +3663,7 @@ mod tests {
         let mut frame_events = Vec::new();
         apply_dispute_finalized(
             &mut state,
+            None,
             &finalized,
             &[evidence],
             &views,

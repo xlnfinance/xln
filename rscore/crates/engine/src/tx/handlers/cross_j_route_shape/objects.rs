@@ -53,6 +53,7 @@ pub(super) fn pull(value: Option<&CanonicalValue>, code: &str) -> Result<(), Str
             "tokenId",
             "amount",
             "signedAmount",
+            "deadline",
             "fullHash",
             "partialRoot",
         ],
@@ -63,6 +64,7 @@ pub(super) fn pull(value: Option<&CanonicalValue>, code: &str) -> Result<(), Str
         string(get(fields, key), &format!("{code}_{key}"))?;
     }
     integer(get(fields, "tokenId"), &format!("{code}_TOKEN"), 1)?;
+    integer(get(fields, "deadline"), &format!("{code}_DEADLINE"), 1)?;
     bigint(get(fields, "amount"), &format!("{code}_AMOUNT"), Some(0))?;
     bigint(
         get(fields, "signedAmount"),
@@ -175,7 +177,7 @@ pub(super) fn time_policy(value: Option<&CanonicalValue>, code: &str) -> Result<
         ),
         (
             "finalityPolicy",
-            "independent_beneficiary_windows_pull_sum_finality",
+            "absolute_pull_deadlines",
             "FINALITY",
         ),
     ] {

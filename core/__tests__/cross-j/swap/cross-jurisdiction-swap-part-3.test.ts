@@ -1,3 +1,6 @@
+import { registerPendingCommittedJOutbox, splitJOutboxForDurableSubmit } from '../../../runtime/j-submit/j-submit-state';
+import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../../../storage/wal/snapshot';
+import { applyGovernanceSubmitResultRuntimeTx, makeGovernanceSubmitResultRuntimeTx, requireCanonicalGovernanceAttempt } from '../../../runtime/registration/governance-submit-state';
 import { describe, expect, test } from 'bun:test';
 import { readEntityFrameEventMessages } from '../../../entity/frame-events';
 
@@ -248,7 +251,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       tokenId: pull.tokenId,
       amount: pull.signedAmount,
       fullHash: pull.fullHash,
-      partialRoot: pull.partialRoot,
+      partialRoot: pull.partialRoot, deadline: pull.deadline,
       crossJurisdiction: buildCrossJurisdictionPullBinding(route, role),
       createdHeight: 1,
       createdTimestamp: state.timestamp,
@@ -277,7 +280,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     return account;
   };
 
-  const makeBidirectionalSalvageRuntimeFixture = (scenario: string) => {
+  const makeBidirectionalSalvageRuntimeFixture = (scenario: string, expiresAt = 90_000) => {
     const env = createEmptyEnv(scenario);
     env.scenarioMode = true;
     env.state.timestamp = 30_000;
@@ -299,6 +302,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     alternateTargetState.prevFrameHash = 'genesis';
     const route = buildPreparedCrossJurisdictionRoute(
       {
+      expiresAt,
         orderId: `${scenario}-route`,
         makerEntityId: sourceUser,
         hubEntityId: sourceHub,
@@ -348,7 +352,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       tokenId: route.sourcePull!.tokenId,
       amount: route.sourcePull!.signedAmount,
       fullHash: route.sourcePull!.fullHash,
-      partialRoot: route.sourcePull!.partialRoot,
+      partialRoot: route.sourcePull!.partialRoot, deadline: route.sourcePull!.deadline,
       crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'source'),
       createdHeight: 1,
       createdTimestamp: env.state.timestamp,
@@ -359,7 +363,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       tokenId: route.targetPull!.tokenId,
       amount: route.targetPull!.signedAmount,
       fullHash: route.targetPull!.fullHash,
-      partialRoot: route.targetPull!.partialRoot,
+      partialRoot: route.targetPull!.partialRoot, deadline: route.targetPull!.deadline,
       crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'target'),
       createdHeight: 1,
       createdTimestamp: env.state.timestamp,
@@ -367,8 +371,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const targetProof = buildAccountProofBody(targetAccount, addr('99'));
     targetAccount.counterpartyDisputeProofBodyHash = targetProof.proofBodyHash;
 
-    // The target registry write is authorized only by the exact initial body
-    // of an observed active dispute, never by the unauthenticated route cache.
+    // Keep a disputed Target Account to exercise standalone publication during recovery.
     targetAccount.status = 'disputed';
     targetAccount.activeDispute = {
       startedByLeft: targetAccount.state.leftEntity !== targetUser,
@@ -460,6 +463,78 @@ describe('cross-jurisdiction hashledger swap', () => {
       buildSourceRevealRange,
     };
   };
+
+  test('hub Source close at D_source+1 is rejected without changing the Account', async () => {
+    const { sourceState, sourceHub, sourceUser, route, binary } =
+      makeBidirectionalSalvageRuntimeFixture('late-source-close');
+    const account = getTestAccountForWrite(sourceState, sourceHub);
+    const pull = route.sourcePull!;
+    const delta = { ...account.state.deltas.get(pull.tokenId)! };
+    if (pull.signedAmount > 0n) delta.rightHold = pull.signedAmount;
+    else delta.leftHold = -pull.signedAmount;
+    account.state.deltas = account.state.deltas.updated(pull.tokenId, delta);
+    const root = computeAccountStateRoot(account.state);
+    const close: AccountTx = { type: 'cross_pull_close', data: {
+      pullId: pull.pullId, binary, proof: buildCrossJurisdictionCloseProof(route, binary),
+    } };
+    const rejected = await applyAccountTx(account, close, sourceHub < sourceUser,
+      (pull.deadline + 1) * 1000, 2);
+    expect(rejected.ok).toBe(false);
+    expect(rejected.ok ? '' : rejected.rejection.message).toBe('Cross-j source close deadline exceeded');
+    expect(computeAccountStateRoot(account.state)).toBe(root);
+    const accepted = await applyAccountTx(account, close, sourceHub < sourceUser,
+      pull.deadline * 1000 + 999, 2);
+    expect(accepted.ok).toBe(true);
+  });
+
+  test('late Target close still pays the user after D_target', async () => {
+    const { env, targetUser, targetSigner, route, binary } = makeBidirectionalSalvageRuntimeFixture('late-target-close');
+    const state = env.state.eReplicas.get(`${targetUser}:${targetSigner}`)!.state;
+    const account = getTestAccountForWrite(state, route.target.entityId);
+    account.status = 'active';
+    account.activeDispute = undefined;
+    const pull = route.targetPull!;
+    const delta = { ...account.state.deltas.get(pull.tokenId)! };
+    if (pull.signedAmount > 0n) delta.rightHold = pull.signedAmount;
+    else delta.leftHold = -pull.signedAmount;
+    account.state.deltas = account.state.deltas.updated(pull.tokenId, delta);
+    const result = await applyAccountTx(account, { type: 'cross_pull_close', data: {
+      pullId: pull.pullId, binary, proof: buildCrossJurisdictionCloseProof(route, binary),
+    } }, route.target.entityId < targetUser, (pull.deadline + 1000) * 1000, 2);
+    expect(result.ok, result.ok ? '' : result.rejection.message).toBe(true);
+    expect(account.state.pulls.has(pull.pullId)).toBe(false);
+  });
+
+  test('Target port at 1149 bypasses a batch ACK at 1297 before D_target=1233', async () => {
+    const { env, targetUser, targetSigner, route, binary, fillRatio } =
+      makeBidirectionalSalvageRuntimeFixture('pending-batch-timeline', 1_000_000);
+    expect(route.sourcePull!.deadline).toBe(1000);
+    expect(route.targetPull!.deadline).toBe(1233);
+    const state = env.state.eReplicas.get(`${targetUser}:${targetSigner}`)!.state;
+    state.timestamp = 1_149_000;
+    const nextLeader = addr('ef');
+    state.config.validators.push(nextLeader);
+    state.config.shares[nextLeader] = 1n;
+    state.leaderState = { activeValidatorId: nextLeader, view: 1, changedAtHeight: state.height };
+    state.jBatchState = initJBatch();
+    state.jBatchState.sentBatch = {
+      batch: createEmptyBatch(), batchHash: secret('cc'), encodedBatch: '0x',
+      entityNonce: 1, firstSubmittedAt: 1_148_000, lastSubmittedAt: 1_148_000, submitAttempts: 1,
+    };
+    const before = structuredClone(state.jBatchState);
+    const result = await applyEntityTx(env, state, { type: 'crossJurisdictionSalvage', data: {
+      routeId: route.orderId, binary, fillRatio, sourceEntityId: route.source.entityId,
+      sourceCounterpartyEntityId: route.source.counterpartyEntityId, observedAt: 1_149_000,
+    } });
+    // Standalone inclusion at 1149+24=1173 is timely; batch ACK+24=1321 is not.
+    expect(1149 + 24).toBeLessThanOrEqual(1233);
+    expect(1148 + 144 + 5 + 24).toBeGreaterThan(1233);
+    expect(result.jOutputs?.flatMap(output => output.jTxs).map(tx => tx.type)).toEqual(['hashLadderReveal']);
+    expect(result.jOutputs?.[0]?.jTxs[0]?.data).toMatchObject({ signerId: nextLeader });
+    expect(result.hashesToSign).toHaveLength(1);
+    expect(result.newState.jBatchState).toEqual(before);
+    expect(result.outputs).toEqual([]);
+  });
 
   test('source user queues cross-j Account cancel without a local orderbook extension', async () => {
     const env = createEmptyEnv('cross-cancel-no-orderbook-ext');
@@ -930,6 +1005,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const initialProof = buildAccountProofBody(account, addr('99'));
 
     const route = buildPreparedCrossJurisdictionRouteCanonical({
+      expiresAt: (env.state.timestamp) + 60_000,
       orderId: 'cross-counter-source-window',
       makerEntityId: sourceUser,
       hubEntityId: sourceHub,
@@ -962,7 +1038,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       tokenId: route.sourcePull!.tokenId,
       amount: route.sourcePull!.signedAmount,
       fullHash: route.sourcePull!.fullHash,
-      partialRoot: route.sourcePull!.partialRoot,
+      partialRoot: route.sourcePull!.partialRoot, deadline: route.sourcePull!.deadline,
       crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'source'),
       createdHeight: 1,
       createdTimestamp: env.state.timestamp,
@@ -1092,15 +1168,11 @@ describe('cross-jurisdiction hashledger swap', () => {
       [],
       { isReplay: false, routingDeps: makeLocalCrossJRoutingDeps() },
     );
-    // The port and its validator-authenticated j_broadcast continuation drain
-    // in the same Runtime transition. There is no source mirror: the on-chain
-    // registry record itself is the shared evidence.
+    // The port produces one quorum-signed standalone J output in this transition.
     expect(result.localCrossJurisdictionEventTrace.map(input => input.entityId)).toEqual([
-      targetUser,
       targetUser,
     ]);
     expect(result.localCrossJurisdictionEventTrace.map(input => input.signerId)).toEqual([
-      targetSigner,
       targetSigner,
     ]);
     const port = getEffectiveEntityInputTxs(result.localCrossJurisdictionEventTrace[0]!)[0];
@@ -1108,19 +1180,44 @@ describe('cross-jurisdiction hashledger swap', () => {
       type: 'crossJurisdictionSalvage',
       data: { routeId: route.orderId, binary, fillRatio },
     });
-    expect(getEffectiveEntityInputTxs(result.localCrossJurisdictionEventTrace[1]!)[0]?.type).toBe('j_broadcast');
     expect(result.entityOutbox).toEqual([]);
     expect(result.jOutbox).toHaveLength(1);
     const committedSource = env.state.eReplicas.get(`${sourceUser}:${sourceSigner}`)!.state;
     const committedTarget = env.state.eReplicas.get(`${targetUser}:${targetSigner}`)!.state;
     // The port never injects dispute arguments: it queues a registry write.
     expect(committedTarget.jBatchState?.batch.disputeStarts ?? []).toEqual([]);
-    const queuedReveals = committedTarget.jBatchState?.sentBatch?.batch.hashLadderRegistrations ?? [];
+    const queuedReveals = result.jOutbox.flatMap(input => input.jTxs).flatMap(tx => tx.type === 'hashLadderReveal' ? [tx.data.registration] : []);
+    expect(result.jOutbox[0]!.jTxs[0]!.data).toHaveProperty('hankoSignature');
     expect(queuedReveals).toHaveLength(1);
     expect(queuedReveals[0]).toMatchObject({
       targetRole: true,
       witness: { fillRatio },
     });
+    const split = splitJOutboxForDurableSubmit(result.jOutbox);
+    expect(split.maintenance).toEqual([]);
+    expect(split.retries).toEqual([]);
+    const persisted = createEmptyEnv('target-port-persisted');
+    persisted.state.timestamp = env.state.timestamp;
+    registerPendingCommittedJOutbox(persisted, split.durable);
+    const snapshot = buildDurableRuntimeMachineSnapshot(persisted);
+    const recovered = createEmptyEnv('target-port-recovered');
+    restoreDurableRuntimeSnapshot(recovered, snapshot);
+    expect(recovered.infrastructure?.pendingCommittedJOutbox).toEqual(split.durable);
+    const pendingInput = recovered.infrastructure!.pendingCommittedJOutbox![0]!;
+    const pending = pendingInput.jTxs[0]!;
+    if (pending.type !== 'hashLadderReveal') throw new Error('TEST_TARGET_PUBLICATION_MISSING');
+    const firstAttempt = requireCanonicalGovernanceAttempt(pendingInput.jurisdictionName, pending);
+    const transient = makeGovernanceSubmitResultRuntimeTx(pendingInput.jurisdictionName, pending, 'transientFailure');
+    applyGovernanceSubmitResultRuntimeTx(recovered, transient);
+    const nextAttempt = requireCanonicalGovernanceAttempt(pendingInput.jurisdictionName, pending);
+    expect(nextAttempt.attemptNumber).toBe(firstAttempt.attemptNumber + 1);
+    expect(nextAttempt.attemptId).not.toBe(firstAttempt.attemptId);
+    const corrupted = structuredClone(pending);
+    corrupted.data.registration.counterpartyEntity = entity('ff');
+    expect(() => requireCanonicalGovernanceAttempt(pendingInput.jurisdictionName, corrupted)).toThrow('ATTEMPT_ID_MISMATCH');
+    const submitted = makeGovernanceSubmitResultRuntimeTx(pendingInput.jurisdictionName, pending, 'submitted');
+    applyGovernanceSubmitResultRuntimeTx(recovered, submitted);
+    expect(recovered.infrastructure?.pendingCommittedJOutbox).toEqual([]);
     // Hub wrote on-chain — observer must NOT latch the user's own Source slot
     // (shared ladderHash would make target salvage return already-queued).
     const sourceRoute = committedSource.crossJurisdictionSwaps?.get(route.orderId);
@@ -1145,6 +1242,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       [],
       { isReplay: true, routingDeps: makeLocalCrossJRoutingDeps() },
     );
+    expect(replayResult.jOutbox).toEqual(result.jOutbox);
     expect(replayResult.localCrossJurisdictionEventTrace.map(input => input.signerId)).toEqual(
       result.localCrossJurisdictionEventTrace.map(input => input.signerId),
     );
@@ -1232,6 +1330,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     addReplica(env, makeState(targetUser, targetSigner, base, targetHub), targetSigner);
     const route = buildPreparedCrossJurisdictionRoute(
       {
+      expiresAt: (env.state.timestamp) + 60_000,
         orderId: 'cross-pull-reveal-port',
         makerEntityId: sourceUser,
         hubEntityId: sourceHub,
@@ -1330,6 +1429,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const state = makeState(sourceUser, signer, eth, sourceHub);
     const route = buildPreparedCrossJurisdictionRoute(
       {
+      expiresAt: (env.state.timestamp) + 60_000,
         orderId: 'cross-pull-finalize-unsigned-sidecar',
         makerEntityId: sourceUser,
         hubEntityId: sourceHub,
@@ -1433,6 +1533,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const state = makeState(sourceUser, sourceSigner, eth, sourceHub);
     const route = buildPreparedCrossJurisdictionRoute(
       {
+      expiresAt: (env.state.timestamp) + 60_000,
         orderId: 'cross-no-pull-args',
         makerEntityId: sourceUser,
         hubEntityId: sourceHub,
@@ -1469,7 +1570,7 @@ describe('cross-jurisdiction hashledger swap', () => {
           tokenId: route.sourcePull!.tokenId,
           amount: route.sourcePull!.signedAmount,
           fullHash: route.sourcePull!.fullHash,
-          partialRoot: route.sourcePull!.partialRoot,
+          partialRoot: route.sourcePull!.partialRoot, deadline: route.sourcePull!.deadline,
           crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'source'),
           createdHeight: 1,
           createdTimestamp: env.state.timestamp,

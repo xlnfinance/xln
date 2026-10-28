@@ -24,6 +24,7 @@ import { createEmptyEnv } from '../../../runtime';
 import type { AccountInput, AccountReplica, AccountTx } from '../../../types/account';
 import type { EntityTx } from '../../../types/entity-tx';
 import { entity, jref, makeAccount, makeJurisdiction, putTestAccountDelta, putTestAccountPull } from '../../helpers/cross-j';
+import { crossJDeadlines } from '../../../extensions/cross-j/deadlines';
 
 const SELF = entity('11');
 const PEER = entity('22');
@@ -133,7 +134,9 @@ describe('peer Account input is a typed reject, never a Runtime halt', () => {
     },
   });
 
-  const pull = { pullId: `0x${'aa'.repeat(32)}`, tokenId: 1, amount: 10n ** 18n, signedAmount: 10n ** 18n,
+  const expiresAt = 20_000;
+  const deadlines = crossJDeadlines({ expiresAt });
+  const pull = { pullId: `0x${'aa'.repeat(32)}`, tokenId: 1, amount: 10n ** 18n, signedAmount: 10n ** 18n, deadline: deadlines.source,
     fullHash: `0x${'bb'.repeat(32)}`, partialRoot: `0x${'cc'.repeat(32)}` };
   const validRoute = (): Record<string, unknown> => ({
     orderId: 'order-1', makerEntityId: PEER, hubEntityId: SELF,
@@ -141,8 +144,8 @@ describe('peer Account input is a typed reject, never a Runtime halt', () => {
     target: { jurisdiction: TARGET_J, entityId: PEER, counterpartyEntityId: SELF, tokenId: 2, amount: 10n ** 18n },
     sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
     targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
-    status: 'resting', createdAt: 1, updatedAt: 1,
-    sourcePull: { ...pull }, targetPull: { ...pull, pullId: `0x${'dd'.repeat(32)}`, tokenId: 2 },
+    status: 'resting', createdAt: 1, updatedAt: 1, expiresAt,
+    sourcePull: { ...pull }, targetPull: { ...pull, pullId: `0x${'dd'.repeat(32)}`, tokenId: 2, deadline: deadlines.target },
   });
 
   test('swap_offer: a record-only cross-j route without makerEntityId is a shape reject, not a TypeError', async () => {

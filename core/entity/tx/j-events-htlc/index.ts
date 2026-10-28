@@ -122,7 +122,7 @@ const counterpartyForRouteLeg = (
   throw new Error(`J_HASH_LADDER_ACCOUNT_PARTY_MISMATCH:${route.orderId}:${self}`);
 };
 
-/** Queue one signed-role registry write: source is sticky, target replaceable. */
+/** Queue one signed-role registry write: both roles preserve first-seen evidence. */
 export type HashLadderRevealQueueResult =
   | 'queued'
   | 'already-queued'
@@ -134,53 +134,20 @@ export const isSourceRevealWindowExpired = (
   deadlineSec: number,
 ): boolean => unixMsToUnixSFloor(toUnixMs(runtimeTimestampMs)) > deadlineSec;
 
-/**
- * Mirror Depository's first-Source admission clock before mutating a J draft.
- * A local unobserved dispute is allowed because its start and reveal are mined
- * by one processBatch; an observed dispute uses inclusive unix-second bounds.
- */
-const sourceRevealWindowStatus = (
-  state: EntityState,
-  counterpartyEntity: string,
-): 'open' | 'expired' => {
-  const counterparty = counterpartyEntity.toLowerCase();
-  const account = state.accounts.get(counterparty);
-  if (!account?.activeDispute) {
-    throw new Error(`J_HASH_LADDER_SOURCE_ACTIVE_DISPUTE_MISSING:${counterparty}`);
-  }
-  const active = account.activeDispute;
-  if (!active.observedOnChain) return 'open';
-  const startSec = Number(active.disputeStartTimestamp);
-  if (!Number.isSafeInteger(startSec) || startSec < 0) {
-    throw new Error(`J_HASH_LADDER_SOURCE_DISPUTE_START_INVALID:${String(active.disputeStartTimestamp)}`);
-  }
-  const self = state.entityId.toLowerCase();
-  const selfIsLeft = account.state.leftEntity.toLowerCase() === self;
-  const ownerWindow = selfIsLeft
-    ? account.state.disputeConfig.leftResponseSeconds
-    : account.state.disputeConfig.rightResponseSeconds;
-  const nowSec = unixMsToUnixSFloor(toUnixMs(Number(state.timestamp)));
-  if (nowSec < startSec) {
-    throw new Error(`J_HASH_LADDER_SOURCE_WINDOW_NOT_OPEN:${nowSec}:${startSec}`);
-  }
-  return nowSec > startSec + ownerWindow ? 'expired' : 'open';
-};
-
-export const stashPendingRegistryReveal = (
+const stashPendingRegistryReveal = (
   state: EntityState,
   counterpartyEntity: string,
   pull: { fullHash: string; partialRoot: string },
   decoded: { fillRatio: number; fullSecret?: string; reveals?: [string, string, string, string] },
-  targetRole: boolean,
 ): void => {
   const ladderHash = ladderHashForPull(pull);
   const normalizedCounterparty = String(counterpartyEntity).toLowerCase();
   let matchedRoutes = 0;
   const routes = state.crossJurisdictionSwaps;
   for (const found of routes?.values?.() ?? []) {
-    const rolePull = targetRole ? found.targetPull : found.sourcePull;
+    const rolePull = found.sourcePull;
     if (!pullMatchesLadder(rolePull, ladderHash)) continue;
-    if (counterpartyForRouteLeg(state, found, targetRole) !== normalizedCounterparty) continue;
+    if (counterpartyForRouteLeg(state, found, false) !== normalizedCounterparty) continue;
     matchedRoutes += 1;
     const route = getEntityCollectionValueForWrite(routes!, found.orderId);
     if (!route) {
@@ -191,11 +158,7 @@ export const stashPendingRegistryReveal = (
       fullSecret: decoded.fullSecret ?? ZERO_BYTES32,
       reveals: decoded.reveals ?? [ZERO_BYTES32, ZERO_BYTES32, ZERO_BYTES32, ZERO_BYTES32],
     };
-    if (targetRole) {
-      // Target may always replace an unsent port with the newest public Source
-      // evidence. Its signed Pull reads the replaceable Target slot.
-      route.pendingTargetRegistryReveal = pending;
-    } else if (!route.pendingSourceRegistryReveal) {
+    if (!route.pendingSourceRegistryReveal) {
       // Never replace source evidence: a second witness can be combined with
       // the first. The first queued source reveal is the only one publishable.
       route.pendingSourceRegistryReveal = pending;
@@ -205,27 +168,15 @@ export const stashPendingRegistryReveal = (
   if (matchedRoutes === 0) {
     throw new Error(
       `J_HASH_LADDER_ROUTE_SLOT_MISSING:${state.entityId}:` +
-      `${ladderHash}:${targetRole ? 'target' : 'source'}`,
+      `${ladderHash}:source`,
     );
   }
 };
 
-const targetRevealHasActiveDispute = (
-  state: EntityState,
-  route: CrossJurisdictionSwapRoute,
-): boolean => Boolean(
-  state.accounts.get(String(route.target.entityId || '').toLowerCase())?.activeDispute,
-);
-
-/** Count witnesses that have not yet entered an immutable sent batch. */
 export const countDeferredHashLadderReveals = (state: EntityState): number => {
   let pending = 0;
   for (const route of state.crossJurisdictionSwaps?.values?.() ?? []) {
     if (route.pendingSourceRegistryReveal) pending += 1;
-    // Pre-binding Target evidence is durable but not yet publishable. It must
-    // neither block an unrelated Account finalization nor be flushed by an
-    // unrelated Hanko ACK before the target dispute defines S.
-    if (route.pendingTargetRegistryReveal && targetRevealHasActiveDispute(state, route)) pending += 1;
   }
   return pending;
 };
@@ -240,10 +191,8 @@ export const flushDeferredHashLadderReveals = (
   let flushed = 0;
   for (const found of state.crossJurisdictionSwaps?.values?.() ?? []) {
     const sourcePending = found.pendingSourceRegistryReveal;
-    const targetPending = found.pendingTargetRegistryReveal;
     const sourceReady = Boolean(sourcePending && found.sourcePull);
-    const targetReady = Boolean(targetPending && found.targetPull && targetRevealHasActiveDispute(state, found));
-    if (!sourceReady && !targetReady) continue;
+    if (!sourceReady) continue;
     const routes = state.crossJurisdictionSwaps;
     const route = Object.isFrozen(found) && routes
       ? getEntityCollectionValueForWrite(routes, found.orderId)
@@ -267,19 +216,6 @@ export const flushDeferredHashLadderReveals = (
       );
       if (result === 'queued') flushed += 1;
     }
-    if (targetPending && route.targetPull && targetRevealHasActiveDispute(state, route)) {
-      const targetCounterparty = counterpartyForRouteLeg(state, route, true);
-      if (scopedCounterparty && targetCounterparty !== scopedCounterparty) continue;
-      delete route.pendingTargetRegistryReveal;
-      const result = queueHashLadderRevealRegistration(
-        state,
-        targetCounterparty,
-        route.targetPull,
-        targetPending,
-        true,
-      );
-      if (result === 'queued') flushed += 1;
-    }
     routes?.set(route.orderId, route);
   }
   return flushed;
@@ -289,7 +225,6 @@ const collectExistingRegistryRatios = (
   state: EntityState,
   normalizedCounterparty: string,
   ladderHash: string,
-  targetRole: boolean,
 ): {
   jBatchState: NonNullable<EntityState['jBatchState']>;
   confirmedRatios: number[];
@@ -299,15 +234,11 @@ const collectExistingRegistryRatios = (
   const confirmedRatios: number[] = [];
   const queuedRatios: number[] = [];
   for (const route of state.crossJurisdictionSwaps?.values?.() ?? []) {
-    const rolePull = targetRole ? route.targetPull : route.sourcePull;
+    const rolePull = route.sourcePull;
     if (!pullMatchesLadder(rolePull, ladderHash)) continue;
-    if (counterpartyForRouteLeg(state, route, targetRole) !== normalizedCounterparty) continue;
-    const confirmed = targetRole
-      ? route.targetRegistryFillRatio
-      : route.sourceRegistryFillRatio;
-    const pending = targetRole
-      ? route.pendingTargetRegistryReveal
-      : route.pendingSourceRegistryReveal;
+    if (counterpartyForRouteLeg(state, route, false) !== normalizedCounterparty) continue;
+    const confirmed = route.sourceRegistryFillRatio;
+    const pending = route.pendingSourceRegistryReveal;
     if (confirmed !== undefined) confirmedRatios.push(confirmed);
     if (pending) queuedRatios.push(pending.fillRatio);
   }
@@ -316,7 +247,7 @@ const collectExistingRegistryRatios = (
   ): void => {
     for (const registration of registrations) {
       if (
-        registration.targetRole === targetRole
+        !registration.targetRole
         && registration.counterpartyEntity.toLowerCase() === normalizedCounterparty
         && ladderHashForPull(registration) === ladderHash
       ) queuedRatios.push(registration.witness.fillRatio);
@@ -337,6 +268,7 @@ export const queueHashLadderRevealRegistration = (
   decoded: { fillRatio: number; fullSecret?: string; reveals?: [string, string, string, string] },
   targetRole: boolean,
 ): HashLadderRevealQueueResult => {
+  if (targetRole) throw new Error('TARGET_REVEAL_REQUIRES_STANDALONE_PUBLICATION');
   if (!Number.isInteger(decoded.fillRatio) || decoded.fillRatio <= 0 || decoded.fillRatio > 0xffff) {
     throw new Error(`J_HASH_LADDER_FILL_RATIO_INVALID:${String(decoded.fillRatio)}`);
   }
@@ -345,25 +277,19 @@ export const queueHashLadderRevealRegistration = (
   if (!ethers.isHexString(normalizedCounterparty, 32)) {
     throw new Error(`J_HASH_LADDER_COUNTERPARTY_INVALID:${counterpartyEntity}`);
   }
-  // A source reveal is a one-time witness: an exact retry is harmless, while
-  // any different ratio is E12-equivalent evidence of an attempted second
-  // source. Target is intentionally replaceable, but only monotonically: an
-  // exact retry is a no-op, a lower ratio is stale/conflicting, and a higher
-  // ratio replaces the draft or becomes the one deferred successor to a sent
-  // batch. Include confirmed and deferred route state so retries cannot create
-  // redundant broadcasts merely because the same write left the draft batch.
+  // Both namespaces preserve the first witness. Include confirmed and deferred
+  // state so a retry after its batch receipt cannot erase timely evidence.
   const { jBatchState, confirmedRatios, queuedRatios } = collectExistingRegistryRatios(
     state,
     normalizedCounterparty,
     ladderHash,
-    targetRole,
   );
   if (queuedRatios.includes(decoded.fillRatio)) return 'already-queued';
   if (confirmedRatios.includes(decoded.fillRatio)) return 'already-queued';
   const existingRatios = [...confirmedRatios, ...queuedRatios];
   if (existingRatios.length > 0) {
     const currentRatio = Math.max(...existingRatios);
-    if (!targetRole || decoded.fillRatio < currentRatio) {
+    if (decoded.fillRatio !== currentRatio) {
       throw new Error(
         `J_HASH_LADDER_REGISTRATION_CONFLICT:${ladderHash}:` +
         `${targetRole ? 'target' : 'source'}:` +
@@ -371,7 +297,7 @@ export const queueHashLadderRevealRegistration = (
       );
     }
   }
-  if (!targetRole && sourceRevealWindowStatus(state, normalizedCounterparty) === 'expired') {
+  if (isSourceRevealWindowExpired(Number(state.timestamp), pull.deadline)) {
     return 'source-window-expired';
   }
 
@@ -391,7 +317,7 @@ export const queueHashLadderRevealRegistration = (
     },
   };
   if (!hasHashLadderRegistrationRoom(jBatchState.batch, registration)) {
-    stashPendingRegistryReveal(state, normalizedCounterparty, pull, decoded, targetRole);
+    stashPendingRegistryReveal(state, normalizedCounterparty, pull, decoded);
     if (jBatchState.sentBatch && !isBatchEmpty(jBatchState.batch)) {
       // The immutable batch's ACK must drain this already-full successor before
       // the pending witness can enter the following batch. Without the latch,
@@ -418,7 +344,7 @@ export type SourceHubClaimRegistration = {
 
 /**
  * Publish the Source Hub's already-committed independent registry evidence.
- * The Account dispute supplies only the settlement clock: registry admission
+ * The signed Pull supplies its absolute deadline. Registry admission
  * does not inspect or replay its ProofBody because processBatch already
  * authenticates the writing Entity.
  *
@@ -449,17 +375,8 @@ const queueSourceHubClaimRegistrationForRoute = (
   if (!sourceAccount) {
     throw haltRuntimeFailure("CROSS_J_SOURCE_CLAIM_ACCOUNT_MISSING", `CROSS_J_SOURCE_CLAIM_ACCOUNT_MISSING:${routeId}:${counterpartyId}`);
   }
-  const active = sourceAccount.activeDispute;
-  if (active?.observedOnChain) {
-    const startSec = Number(active.disputeStartTimestamp);
-    const selfIsLeft = sourceAccount.state.leftEntity.toLowerCase() === self;
-    const beneficiaryWindow = selfIsLeft
-      ? sourceAccount.state.disputeConfig.leftResponseSeconds
-      : sourceAccount.state.disputeConfig.rightResponseSeconds;
-    const deadlineSec = startSec + beneficiaryWindow;
-    if (isSourceRevealWindowExpired(Number(state.timestamp), deadlineSec)) {
-      return { routeId, fillRatio, result: 'source-window-expired' };
-    }
+  if (isSourceRevealWindowExpired(Number(state.timestamp), route.sourcePull.deadline)) {
+    return { routeId, fillRatio, result: 'source-window-expired' };
   }
   const reveal = buildCrossJurisdictionPullReveal(
     route,

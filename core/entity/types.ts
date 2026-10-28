@@ -348,7 +348,7 @@ export type HashType =
   | 'dispute'
   | 'settlement'
   | 'profile'
-  | 'jBatch'
+  | 'hashLadderReveal' | 'jBatch'
   | 'entityProviderAction';
 
 
@@ -550,7 +550,7 @@ export interface EntityReplica {
   // Persists finalized hankos for on-chain disputes, settlements, batch submissions
   hankoWitness?: Map<string, {
     hanko: HankoString;
-    type: 'accountFrame' | 'dispute' | 'profile' | 'settlement' | 'jBatch' | 'entityProviderAction';
+    type: 'accountFrame' | 'dispute' | 'profile' | 'settlement' | 'hashLadderReveal' | 'jBatch' | 'entityProviderAction';
     entityHeight: number;  // Height when created
     createdAt: number;     // Timestamp
   }>;

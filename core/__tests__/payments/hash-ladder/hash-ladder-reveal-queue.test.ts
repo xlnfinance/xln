@@ -25,6 +25,7 @@ import {
 
 const pull: CrossJurisdictionPullLeg = {
   pullId: 'test-pull',
+  deadline: 11,
   tokenId: 1,
   amount: 65_535n,
   signedAmount: 65_535n,
@@ -69,7 +70,7 @@ const installActiveSignedPull = (
     tokenId: signedPull.tokenId,
     amount: signedPull.signedAmount,
     fullHash: signedPull.fullHash,
-    partialRoot: signedPull.partialRoot,
+    partialRoot: signedPull.partialRoot, deadline: signedPull.deadline,
     crossJurisdiction: {
       orderId: 'test-order',
       routeHash: ethers.ZeroHash,
@@ -116,8 +117,8 @@ const installActiveSignedPull = (
   return signedPull;
 };
 
-describe('hash-ladder reveal queue (source single-shot / target replaceable)', () => {
-  test('mirrors the first-Source active window before mutating the J draft', () => {
+describe('hash-ladder reveal queue (both roles single-shot)', () => {
+  test('uses the absolute Source deadline before mutating the J draft', () => {
     const eth = makeJurisdiction('Ethereum', 1, '11', '12');
     const hub = entity('5a');
     const user = entity('5b');
@@ -138,8 +139,7 @@ describe('hash-ladder reveal queue (source single-shot / target replaceable)', (
     const inactive = makeState(hub, addr('5e'), eth, user);
     const inactivePull = installActiveSignedPull(inactive, user);
     delete inactive.accounts.get(user)!.activeDispute;
-    expect(() => queueHashLadderRevealRegistration(inactive, user, inactivePull, reveal(0x1000), false))
-      .toThrow('J_HASH_LADDER_SOURCE_ACTIVE_DISPUTE_MISSING');
+    expect(queueHashLadderRevealRegistration(inactive, user, inactivePull, reveal(0x1000), false)).toBe('queued');
   });
 
   test('full Entity draft defers an urgent reveal and drains it after capacity clears', () => {
@@ -278,76 +278,16 @@ describe('hash-ladder reveal queue (source single-shot / target replaceable)', (
     expect(state.jBatchState?.batch.hashLadderRegistrations ?? []).toHaveLength(0);
   });
 
-  test('target retries are exact no-ops, higher replacements, and lower conflicts', () => {
-    const env = createEmptyEnv('reveal-queue-target-replace');
-    env.scenarioMode = true;
+  test('Target evidence cannot re-enter the retired batch publication path', () => {
     const eth = makeJurisdiction('Ethereum', 1, '11', '12');
     const user = entity('a1');
     const hub = entity('a2');
-    const signer = addr('a3');
-    const state = createEntityFrameCandidateState(makeState(user, signer, eth, hub));
+    const state = createEntityFrameCandidateState(makeState(user, addr('a3'), eth, hub));
     const signedPull = installActiveSignedPull(state, hub, true);
-
-    expect(queueHashLadderRevealRegistration(state, hub, signedPull, reveal(0x1000), true)).toBe('queued');
-    expect(queueHashLadderRevealRegistration(state, hub, signedPull, reveal(0x1000), true)).toBe('already-queued');
-    expect(queueHashLadderRevealRegistration(state, hub, signedPull, reveal(0x2000), true)).toBe('queued');
-    expect(state.jBatchState?.batch.hashLadderRegistrations[0]?.witness.fillRatio)
-      .toBe(0x2000);
-    state.jBatchState!.recoveryBatches = [state.jBatchState!.batch];
-    state.jBatchState!.batch = initJBatch().batch;
-    expect(queueHashLadderRevealRegistration(state, hub, signedPull, reveal(0x2000), true))
-      .toBe('already-queued');
-    expect(() => queueHashLadderRevealRegistration(state, hub, signedPull, reveal(0x1800), true))
-      .toThrow('J_HASH_LADDER_REGISTRATION_CONFLICT');
-    expect(state.jBatchState?.batch.hashLadderRegistrations).toHaveLength(0);
-  });
-
-  test('queues target immediately at its dispute-start millisecond', () => {
-    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
-    const user = entity('b1');
-    const hub = entity('b2');
-    const state = createEntityFrameCandidateState(makeState(user, addr('b3'), eth, hub));
-    const signedPull = installActiveSignedPull(state, hub, true);
-    const route: CrossJurisdictionSwapRoute = {
-      orderId: 'early-target',
-      makerEntityId: entity('b4'),
-      hubEntityId: hub,
-      source: {
-        jurisdiction: 'base', entityId: entity('b4'), counterpartyEntityId: entity('b5'),
-        tokenId: 1, amount: 100n,
-      },
-      sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
-      target: { jurisdiction: 'eth', entityId: hub, counterpartyEntityId: user, tokenId: 1, amount: 90n },
-      targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
-      targetPull: signedPull,
-      status: 'resting',
-      createdAt: 1,
-      updatedAt: 1,
-    };
-    state.crossJurisdictionSwaps = new Map([[route.orderId, route]]);
-    state.timestamp = 1_000;
-
-    expect(queueHashLadderRevealRegistration(state, hub, signedPull, reveal(0x1000), true))
-      .toBe('queued');
-    expect(state.jBatchState?.batch.hashLadderRegistrations).toHaveLength(1);
-  });
-
-  test('co-batches target registration with its exact unobserved dispute start', () => {
-    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
-    const user = entity('c1');
-    const hub = entity('c2');
-    const state = createEntityFrameCandidateState(makeState(user, addr('c3'), eth, hub));
-    const signedPull = installActiveSignedPull(state, hub, true, pull.pullId, true);
-
-    // Zero-second windows are valid bilateral policy. Waiting for the
-    // DisputeStarted event would make such a Target reveal impossible, so the
-    // runtime authenticates the exact mutable start and submits both ops in
-    // one batch. Depository orders starts before registrations.
-    expect(queueHashLadderRevealRegistration(state, hub, signedPull, reveal(0x1000), true))
-      .toBe('queued');
-    expect(state.jBatchState?.batch.disputeStarts).toHaveLength(1);
-    expect(state.jBatchState?.batch.hashLadderRegistrations).toHaveLength(1);
-    expect(state.jBatchState?.batch.hashLadderRegistrations[0]?.targetRole).toBe(true);
+    const before = structuredClone(state.jBatchState);
+    expect(() => queueHashLadderRevealRegistration(state, hub, signedPull, reveal(0x1000), true))
+      .toThrow('TARGET_REVEAL_REQUIRES_STANDALONE_PUBLICATION');
+    expect(state.jBatchState).toEqual(before);
   });
 
   test('same writer/ladder/role stays isolated across bilateral Account keys', () => {

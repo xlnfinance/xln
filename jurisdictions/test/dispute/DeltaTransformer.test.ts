@@ -191,7 +191,7 @@ describe("DeltaTransformer", function () {
     tokenIds: Array<bigint | number> = deltas.map((_, index) => index + 1),
   ) {
     const currentTimestamp = await time.latest();
-    const disputeStartTimestamp = Math.max(1, currentTimestamp - 2);
+    const disputeStartTimestamp = Math.max(1, currentTimestamp - 3);
     const disputeTimeout = disputeStartTimestamp + 2;
     return (await transformer.applyBatch.staticCall(
       deltas.map(value => encodeInt768(BigInt(value))),
@@ -228,7 +228,7 @@ describe("DeltaTransformer", function () {
     const currentTimestamp = await time.latest();
     // Default: dispute already past full T (seconds) so pull settlement can run.
     const startTs = disputeClock?.startTs ?? Math.max(1, currentTimestamp - 200);
-    const timeoutTs = disputeClock?.timeoutTs ?? currentTimestamp;
+    const timeoutTs = disputeClock?.timeoutTs ?? currentTimestamp - 1;
     const totalWindow = timeoutTs - startTs;
     const leftResponseSeconds = disputeClock?.leftResponseSeconds ?? Math.floor(totalWindow / 2);
     const rightResponseSeconds = disputeClock?.rightResponseSeconds ?? totalWindow - leftResponseSeconds;
@@ -348,7 +348,7 @@ describe("DeltaTransformer", function () {
     ).to.revert(ethers);
   });
 
-  it("settles pulls only from role-windowed records of this dispute", async function () {
+  it("settles pulls only from evidence within signed absolute deadlines", async function () {
     const { transformer, registry } = await loadFixture(deployFixture);
     const partialRatio = 0x1234;
     const partialProof = buildPullProof("delta-partial", partialRatio);
@@ -360,7 +360,7 @@ describe("DeltaTransformer", function () {
     const openTimeout = nowTs + 100; // T=100s still open
     const settledStart = Math.max(1, nowTs - 200);
     const settledTimeout = nowTs; // T already elapsed
-    const timelyRevealAt = settledStart + 10; // inside the beneficiary Source window
+    const timelyRevealAt = settledStart + 10; // within the signed absolute deadline
 
     const batch = {
       payment: [],
@@ -370,6 +370,7 @@ describe("DeltaTransformer", function () {
           deltaIndex: 0,
           amount: encodeSignedAmount(BigInt(MAX_FILL_RATIO)),
           claimedRatio: 0,
+          deadline: nowTs - 1,
           fullHash: partialProof.fullHash,
           partialRoot: partialProof.partialRoot,
           targetRole: false,
@@ -378,6 +379,7 @@ describe("DeltaTransformer", function () {
           deltaIndex: 1,
           amount: encodeSignedAmount(BigInt(-1234)),
           claimedRatio: 0,
+          deadline: nowTs - 1,
           fullHash: fullProof.fullHash,
           partialRoot: fullProof.partialRoot,
           targetRole: false,
@@ -404,8 +406,8 @@ describe("DeltaTransformer", function () {
     expect(result[0]).to.equal(BigInt(partialRatio));
     expect(result[1]).to.equal(-1234n);
 
-    // Source (targetRole=false): registration after the beneficiary-side
-    // response window settles as 0.
+    // A Source record at its signed absolute D+1 contributes zero.
+    const sourceDeadline = settledStart + 100;
     const lateProof = buildPullProof("delta-late", 0x0100);
     const lateBatch = await transformer.encodeBatch({
       payment: [],
@@ -414,13 +416,13 @@ describe("DeltaTransformer", function () {
         deltaIndex: 0,
         amount: encodeSignedAmount(BigInt(MAX_FILL_RATIO)),
         claimedRatio: 0,
+        deadline: sourceDeadline,
         fullHash: lateProof.fullHash,
         partialRoot: lateProof.partialRoot,
           targetRole: false,
       }],
     });
     const sourceBeneficiaryWindow = 100;
-    const sourceDeadline = settledStart + sourceBeneficiaryWindow;
     await registry.setReveal(
       LEFT_ENTITY,
       RIGHT_ENTITY,
@@ -437,8 +439,7 @@ describe("DeltaTransformer", function () {
     });
     expect(late[0]).to.equal(0n);
 
-    // A record from before this dispute never becomes valid merely because a
-    // broken client reused the same ladder in a later signed ProofBody.
+    // Timely publication before dispute start remains valid.
     const staleProof = buildPullProof("delta-stale-prior-dispute", 0x0110);
     const staleBatch = await transformer.encodeBatch({
       payment: [],
@@ -447,6 +448,7 @@ describe("DeltaTransformer", function () {
         deltaIndex: 0,
         amount: encodeSignedAmount(BigInt(MAX_FILL_RATIO)),
         claimedRatio: 0,
+        deadline: nowTs - 1,
         fullHash: staleProof.fullHash,
         partialRoot: staleProof.partialRoot,
         targetRole: false,
@@ -470,11 +472,9 @@ describe("DeltaTransformer", function () {
       [1],
       { startTs: settledStart, timeoutTs: settledTimeout },
     );
-    expect(stale[0]).to.equal(0n);
+    expect(stale[0]).to.equal(0x0110n);
 
-    // Target (targetRole=true) opens at its own dispute start and receives the
-    // beneficiary's exact signed window. Use asymmetric windows because a
-    // 50/50 fixture cannot detect selecting the wrong side.
+    // Asymmetric response periods cannot change the Target absolute deadline.
     const targetProof = buildPullProof("delta-target", 0x0200);
     const targetBatch = await transformer.encodeBatch({
       payment: [],
@@ -483,6 +483,7 @@ describe("DeltaTransformer", function () {
         deltaIndex: 0,
         amount: encodeSignedAmount(BigInt(MAX_FILL_RATIO)),
         claimedRatio: 0,
+        deadline: settledStart + 30,
         fullHash: targetProof.fullHash,
         partialRoot: targetProof.partialRoot,
         targetRole: true,
@@ -494,8 +495,7 @@ describe("DeltaTransformer", function () {
       leftResponseSeconds: 30,
       rightResponseSeconds: 170,
     };
-    // Beneficiary is LEFT, so the exact Target deadline is S+30. The full
-    // S+200 sum remains only the finalization barrier.
+    // The signed absolute Target D is independent of the Account clock.
     await registry.setReveal(
       LEFT_ENTITY, RIGHT_ENTITY, ladderHash(targetProof), true, 0x0200,
       settledStart,
@@ -530,6 +530,7 @@ describe("DeltaTransformer", function () {
         deltaIndex: 0,
         amount: encodeSignedAmount(BigInt(MAX_FILL_RATIO)),
         claimedRatio: 0,
+        deadline: nowTs - 1,
         fullHash: noneProof.fullHash,
         partialRoot: noneProof.partialRoot,
         targetRole: false,
@@ -550,6 +551,7 @@ describe("DeltaTransformer", function () {
         deltaIndex: 0,
         amount: encodeSignedAmount(BigInt(MAX_FILL_RATIO)),
         claimedRatio: previouslyClaimed,
+        deadline: nowTs - 1,
         fullHash: partialProof.fullHash,
         partialRoot: partialProof.partialRoot,
         targetRole: false,

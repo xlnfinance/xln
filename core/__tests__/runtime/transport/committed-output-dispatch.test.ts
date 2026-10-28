@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import retryVector from '../../fixtures/storage/cross-j-proposal-retry.json';
 import { decodeBuffer, encodeBuffer } from '../../../storage/codec/codec';
+import { decodeRuntimeEntityInputsEnvelope } from '../../../network/p2p/auth/entity-input-envelope';
 import { validateDeliverableEntityInput } from '../../../runtime/delivery/topology/routing-validation';
 import { dispatchEntityOutputs } from '../../../runtime/delivery/dispatch';
 import { groupAtomicCrossJAdmissionOutputs } from '../../../runtime/delivery/pending';
@@ -109,7 +110,22 @@ describe('committed Runtime output dispatch', () => {
   });
 });
 
-test('a captured cross-J proposal retry retains its incomplete cohort without sending a leg or halting', () => {
+test('cross-J retry fixture passes the authenticated plaintext decoder with signed Pull deadlines', () => {
+  for (const frame of retryVector.rows) {
+    const entityInputs = frame.rowsBase64.map(row =>
+      validateDeliverableEntityInput(decodeBuffer(Buffer.from(row, 'base64'))));
+    const source = entityInputs[0]?.sourceRuntimeFrame;
+    if (!source) throw new Error('CROSS_J_RETRY_SOURCE_FRAME_MISSING');
+    expect(decodeRuntimeEntityInputsEnvelope({
+      sourceRuntimeId: retryVector.runtimeId,
+      sourceRuntimeHeight: source.height,
+      sourceRuntimeTimestamp: source.timestamp,
+      entityInputs,
+    }).entityInputs).toEqual(entityInputs);
+  }
+});
+
+test('a regenerated cross-J proposal retry retains its incomplete cohort without sending a leg or halting', () => {
   const [completeFrame, retryFrame] = retryVector.rows;
   if (!completeFrame || !retryFrame) throw new Error('CROSS_J_RETRY_VECTOR_MISSING');
   const complete = completeFrame.rowsBase64.map(row =>

@@ -66,6 +66,7 @@ pub enum HashType {
     Settlement,
     Profile,
     JBatch,
+    HashLadderReveal,
     EntityProviderAction,
 }
 
@@ -218,6 +219,7 @@ impl HashType {
             Self::Settlement => "settlement",
             Self::Profile => "profile",
             Self::JBatch => "jBatch",
+            Self::HashLadderReveal => "hashLadderReveal",
             Self::EntityProviderAction => "entityProviderAction",
         }
     }

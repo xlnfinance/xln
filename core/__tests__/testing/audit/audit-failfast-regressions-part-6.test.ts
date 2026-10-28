@@ -867,6 +867,7 @@ describe('audit fail-fast regressions', () => {
     attachSigningReplica(env, hubId, hubSigner.signerId);
     const route = buildPreparedCrossJurisdictionRoute(
       {
+      expiresAt: (env.state.timestamp) + 60_000,
         orderId: 'cross-close-evidence',
         sourceDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
         targetDisputeConfig: { leftResponseSeconds: 10, rightResponseSeconds: 10 },
@@ -922,6 +923,7 @@ describe('audit fail-fast regressions', () => {
           tokenId: route.sourcePull!.tokenId,
           amount: route.sourcePull!.signedAmount,
           claimedRatio: 0,
+          deadline: route.sourcePull!.deadline,
           claimedAmount: 0n,
           fullHash: route.sourcePull!.fullHash,
           partialRoot: route.sourcePull!.partialRoot,

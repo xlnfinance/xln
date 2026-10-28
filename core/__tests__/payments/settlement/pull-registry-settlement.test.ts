@@ -1,3 +1,4 @@
+import parityVectors from '../../../../rscore/fixtures/cross-j-absolute-deadline.json';
 import { describe, expect, test } from 'bun:test';
 import { ethers } from 'ethers';
 import type { DeltaTransformer } from '../../../../jurisdictions/typechain-types/DeltaTransformer.sol/DeltaTransformer';
@@ -17,6 +18,7 @@ const jurisdiction = { chainId: 1, depositoryAddress: addr('31') };
 const deltaTransformerAddress = `0x${'44'.repeat(20)}`;
 const pull: CrossJurisdictionPullLeg = {
   pullId: 'target-pull',
+  deadline: 120,
   tokenId: 1,
   amount: 100n,
   signedAmount: 100n,
@@ -24,7 +26,7 @@ const pull: CrossJurisdictionPullLeg = {
   partialRoot: secret('42'),
 };
 
-const proofbody = (claimedRatio: number, targetRole = true, signedAmount = pull.signedAmount): ProofBodyStruct => ({
+const proofbody = (claimedRatio: number, targetRole = true, signedAmount = pull.signedAmount, deadline = pull.deadline): ProofBodyStruct => ({
   watchSeed: secret('43'),
   leftResponseSeconds: 10,
   rightResponseSeconds: 20,
@@ -42,6 +44,7 @@ const proofbody = (claimedRatio: number, targetRole = true, signedAmount = pull.
           deltaIndex: 0,
           amount: encodeSignedAmount(signedAmount),
           claimedRatio,
+          deadline,
           fullHash: pull.fullHash,
           partialRoot: pull.partialRoot,
           targetRole,
@@ -71,6 +74,56 @@ const activeAccount = () => {
 };
 
 describe('finalized Pull registry settlement parity', () => {
+  test('changing only a Pull deadline changes signed bytes and rejects substitution', () => {
+    const original = proofbody(0);
+    const changed = proofbody(0, true, pull.signedAmount, pull.deadline + 1);
+    expect(ethers.keccak256(original.transformers[0]!.encodedBatch))
+      .not.toBe(ethers.keccak256(changed.transformers[0]!.encodedBatch));
+    expect(() => resolveFinalizedPullFillRatio({ account: activeAccount(), proofbody: changed,
+      canonicalDeltaTransformerAddress: deltaTransformerAddress, expectedPull: pull, targetRole: true,
+      record: { fillRatio: 65535, revealedAt: 120 },
+    })).toThrow('CROSS_J_FINAL_PULL_MISSING');
+  });
+
+  test('shared TS/Rust signed ABI settlement vectors', () => {
+    for (const vector of parityVectors) {
+      const account = activeAccount();
+      account.activeDispute!.disputeStartTimestamp = vector.start;
+      account.activeDispute!.disputeTimeout = vector.start + 30;
+      const body = proofbody(vector.claimed, vector.targetRole, 100n, vector.deadline);
+      expect(body.transformers[0]!.encodedBatch).toBe(vector.encodedBatch);
+      expect(resolveFinalizedPullFillRatio({ account, proofbody: body,
+        canonicalDeltaTransformerAddress: deltaTransformerAddress,
+        expectedPull: { ...pull, deadline: vector.deadline }, targetRole: vector.targetRole,
+        record: { fillRatio: vector.ratio, revealedAt: vector.revealedAt },
+      })).toBe(vector.expected);
+    }
+  });
+
+  test('absolute deadlines survive asymmetric starts and pre-dispute publication', () => {
+    for (const [targetRole, start, deadline, revealedAt] of [
+      [false, 110, 120, 120], [true, 100, 340, 130], [true, 200, 340, 130],
+    ] as const) {
+      const account = activeAccount();
+      account.activeDispute!.disputeStartTimestamp = start;
+      account.activeDispute!.disputeTimeout = start + 30;
+      expect(resolveFinalizedPullFillRatio({ account,
+        proofbody: proofbody(0, targetRole, pull.signedAmount, deadline),
+        canonicalDeltaTransformerAddress: deltaTransformerAddress,
+        expectedPull: { ...pull, deadline }, targetRole,
+        record: { fillRatio: 65535, revealedAt },
+      })).toBe(65535);
+    }
+  });
+
+  test('absolute deadline is inclusive; D+1 is late', () => {
+    for (const revealedAt of [120, 121]) expect(resolveFinalizedPullFillRatio({
+      account: activeAccount(), proofbody: proofbody(0),
+      canonicalDeltaTransformerAddress: deltaTransformerAddress, expectedPull: pull,
+      targetRole: true, record: { fillRatio: 65535, revealedAt },
+    })).toBe(revealedAt === 120 ? 65535 : 0);
+  });
+
   test('selects the same leg for user and Hub projections without crossing stacks', () => {
     const route = {
       orderId: 'route-projection-parity',
@@ -119,9 +172,9 @@ describe('finalized Pull registry settlement parity', () => {
     })).toThrow('CROSS_J_FINALITY_LEG_MISSING');
   });
 
-  test('accepts both inclusive beneficiary-window boundaries', () => {
-    for (const [signedAmount, end] of [[100n, 110], [-100n, 120]] as const) {
-      for (const revealedAt of [100, end]) {
+  test('accepts pre-dispute evidence and the inclusive absolute deadline', () => {
+    for (const [signedAmount, end] of [[100n, 120], [-100n, 120]] as const) {
+      for (const revealedAt of [99, 100, end]) {
         expect(resolveFinalizedPullFillRatio({
           account: activeAccount(),
           proofbody: proofbody(0x1000, true, signedAmount),
@@ -131,7 +184,7 @@ describe('finalized Pull registry settlement parity', () => {
           record: { fillRatio: 0x2000, revealedAt },
         })).toBe(0x2000);
       }
-      for (const revealedAt of [99, end + 1]) {
+      for (const revealedAt of [0, end + 1]) {
         expect(resolveFinalizedPullFillRatio({
           account: activeAccount(),
           proofbody: proofbody(0x1000, true, signedAmount),
@@ -151,7 +204,7 @@ describe('finalized Pull registry settlement parity', () => {
       canonicalDeltaTransformerAddress: deltaTransformerAddress,
       expectedPull: pull,
       targetRole: true,
-      record: { fillRatio: 0x3000, revealedAt: 111 },
+      record: { fillRatio: 0x3000, revealedAt: 121 },
     })).toBe(0x1000);
   });
 

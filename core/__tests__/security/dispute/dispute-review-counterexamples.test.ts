@@ -27,7 +27,8 @@ function setup() {
   state.timestamp = 120_000;
   const account = openWritableEntityAccounts(state).getForWrite(peer)!;
   putTestAccountPull(account, 'pull', {
-    pullId: 'pull', tokenId: 1, amount: 1n, claimedRatio: 0, claimedAmount: 0n,
+    pullId: 'pull', tokenId: 1, amount: 1n, claimedRatio: 0,
+    deadline: 99, claimedAmount: 0n,
     fullHash: entity('41'), partialRoot: entity('42'), createdHeight: 1, createdTimestamp: 1000,
     crossJurisdiction: { orderId: 'order', routeHash: entity('43'), leg: 'target' },
   });

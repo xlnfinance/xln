@@ -21,7 +21,6 @@ contract SettlementDeltasHarness {
   mapping(bytes => mapping(uint256 => AccountCollateral)) public collaterals;
   mapping(bytes32 => mapping(bytes32 => mapping(bytes32 => mapping(bool => uint256))))
     public ladderRecords;
-  mapping(bytes => AccountInfo) public accounts;
 
   TransformerLivenessHarness public immutable transformer;
 
@@ -174,7 +173,7 @@ contract SettlementDeltasHarness {
     reg.partialRoot = keccak256(abi.encode(writer, counterparty, "partial"));
     reg.witness.fillRatio = type(uint16).max; // FULL_FILL_RATIO fast path
     reg.witness.fullSecret = fullSecret;
-    HashLadderRegistry.registerReveal(ladderRecords, accounts, writer, reg);
+    HashLadderRegistry.registerReveal(ladderRecords, writer, reg);
     return HashLadderRegistry.getReveal(
       ladderRecords, writer, counterparty, _ladder(writer, counterparty, fullSecret), true
     );

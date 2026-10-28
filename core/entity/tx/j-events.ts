@@ -1469,7 +1469,7 @@ type HashLadderRevealRegisteredEventData = {
 /**
  * Resolve economics before Account finality retires the active clock/body.
  * The exact signed Pull contributes claimedRatio; only a timestamped record
- * inside this beneficiary's [S,S+W] interval may raise it. Queue latches and
+ * at or before this Pull's absolute deadline may raise it. Queue latches and
  * raw event ratios are deliberately not settlement authority.
  */
 type CrossJurisdictionFinalitySettlement = Readonly<{
@@ -1596,22 +1596,10 @@ const updateRegistryRecord = (
     throw haltRuntimeFailure("CROSS_J_REGISTRY_REVEALED_AT_INVALID", `CROSS_J_REGISTRY_REVEALED_AT_INVALID:${orderId}:${String(data.revealedAt)}`);
   }
   if (!existing) return next;
-  if (existing.fillRatio === next.fillRatio) {
-    if (!data.targetRole && existing.revealedAt !== next.revealedAt) {
-      throw haltRuntimeFailure("CROSS_J_REGISTRY_RETRY_TIME_CONFLICT", `CROSS_J_REGISTRY_RETRY_TIME_CONFLICT:${orderId}`);
-    }
-    if (next.revealedAt < existing.revealedAt) {
-      throw haltRuntimeFailure("CROSS_J_REGISTRY_RECORD_TIME_REGRESSION", `CROSS_J_REGISTRY_RECORD_TIME_REGRESSION:${orderId}`);
-    }
-    // Target exact-ratio publication intentionally refreshes its timestamp.
-    // This lets evidence published before a target dispute be republished
-    // inside the signed target window without changing the claimed ratio.
-    return next.revealedAt === existing.revealedAt ? existing : next;
-  }
-  if (!data.targetRole || next.fillRatio < existing.fillRatio || next.revealedAt < existing.revealedAt) {
+  if (existing.fillRatio !== next.fillRatio || existing.revealedAt !== next.revealedAt) {
     throw haltRuntimeFailure("CROSS_J_REGISTRY_RECORD_CONFLICT", `CROSS_J_REGISTRY_RECORD_CONFLICT:${orderId}:${existing.fillRatio}:${next.fillRatio}`);
   }
-  return next;
+  return existing;
 };
 
 /**

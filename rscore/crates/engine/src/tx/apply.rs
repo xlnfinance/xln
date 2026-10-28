@@ -389,9 +389,16 @@ pub(crate) fn apply_to_candidate(
                 context.committed_timestamp,
             )
         }
-        AccountTx::CrossPullClose { data } => {
-            crate::tx::handlers::cross_j::apply_pull_close(candidate, data, proposer)
-        }
+        AccountTx::CrossPullClose { data } => crate::tx::handlers::cross_j::apply_pull_close(
+            candidate,
+            data,
+            proposer,
+            context
+                .ok_or(TransitionError::ExecutionContextRequired(
+                    "cross_pull_close",
+                ))?
+                .committed_timestamp,
+        ),
         AccountTx::SettleTransition { data } => {
             let context = context.ok_or(TransitionError::ExecutionContextRequired(
                 "settle_transition",

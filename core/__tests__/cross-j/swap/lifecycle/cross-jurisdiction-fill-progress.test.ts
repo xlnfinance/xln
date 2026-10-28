@@ -384,7 +384,7 @@ describe('cross-j ratio-only fill progress', () => {
         claimedRatio: 0,
         claimedAmount: 0n,
         fullHash: sourcePull.fullHash,
-        partialRoot: sourcePull.partialRoot,
+        partialRoot: sourcePull.partialRoot, deadline: sourcePull.deadline,
         crossJurisdiction: buildCrossJurisdictionPullBinding(prepared, 'source'),
         createdHeight: 0,
         createdTimestamp: NOW,

@@ -1839,11 +1839,6 @@ fn submit_committed_governance_attempt(
         let (rpc, config, entity_provider) =
             live_submit_context(replica, &attempt.jurisdiction_name, operator_private_key)?;
         let submitter = JSubmitter::new(&rpc, config)?;
-        let supporter_hankos = attempt
-            .supporter_votes
-            .iter()
-            .map(|vote| (&vote.entity_id, vote.hanko.as_slice()))
-            .collect::<Vec<_>>();
         let authority = |claimed_entity: &[u8; 32], board_hash: &[u8; 32], _claim_index: usize| {
             entity_state
                 .certified_board_authority()
@@ -1851,18 +1846,43 @@ fn submit_committed_governance_attempt(
                 .as_ref()
                 == Some(board_hash)
         };
-        submitter.submit_control_board_proposal(crate::j_submit::ControlBoardProposal {
-            entity_provider,
-            shareholder_entity_id: &attempt.shareholder_entity_id,
-            target_entity_id: &attempt.target_entity_id,
-            new_board_hash: &attempt.new_board_hash,
-            target_board_epoch: attempt.target_board_epoch,
-            action_nonce: attempt.action_nonce,
-            proposal_hash: &attempt.proposal_hash,
-            supporter_hankos: &supporter_hankos,
-            signer_key: &operator_private_key,
-            board_authority: Some(&authority),
-        })
+        match &attempt.payload {
+            crate::j_submit::PublicationPayload::TargetReveal {
+                registration,
+                hanko,
+            } => submitter.submit_target_reveal(
+                &attempt.shareholder_entity_id,
+                registration,
+                &attempt.proposal_hash,
+                hanko,
+                &operator_private_key,
+                Some(&authority),
+            ),
+            crate::j_submit::PublicationPayload::ControlBoard {
+                target_entity_id,
+                new_board_hash,
+                target_board_epoch,
+                action_nonce,
+                supporter_votes,
+            } => {
+                let supporter_hankos = supporter_votes
+                    .iter()
+                    .map(|v| (&v.entity_id, v.hanko.as_slice()))
+                    .collect::<Vec<_>>();
+                submitter.submit_control_board_proposal(crate::j_submit::ControlBoardProposal {
+                    entity_provider,
+                    shareholder_entity_id: &attempt.shareholder_entity_id,
+                    target_entity_id,
+                    new_board_hash,
+                    target_board_epoch: *target_board_epoch,
+                    action_nonce: *action_nonce,
+                    proposal_hash: &attempt.proposal_hash,
+                    supporter_hankos: &supporter_hankos,
+                    signer_key: &operator_private_key,
+                    board_authority: Some(&authority),
+                })
+            }
+        }
     };
     match submit() {
         Ok(JSubmitOutcome::MinedAwaitingAuthentication {

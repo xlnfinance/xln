@@ -81,6 +81,8 @@ struct EffectsProjection {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct OutboxProjection {
+    hashes_to_sign: Vec<Value>,
+    target_reveals: Vec<Value>,
     outputs: Vec<Value>,
     account_txs: Vec<AccountTxProjection>,
 }
@@ -358,6 +360,32 @@ fn assert_events(case: &Case, actual: &[EntityFrameEvent]) {
 }
 
 fn assert_outbox(case: &Case, actual: &CrossJurisdictionApplyResult) {
+    let hashes = actual
+        .hashes_to_sign
+        .iter()
+        .map(|h| serde_json::json!({"hash":h.hash,"type":h.kind.as_str(),"context":h.context}))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        hashes, case.outbox.hashes_to_sign,
+        "{} signed publication hashes",
+        case.name
+    );
+    let reveals = actual.j_outputs.iter().map(|output| {
+        let crate::EntityJOutput::TargetReveal { jurisdiction_name, entity_id, registration: r, reveal_hash, signer_id, timestamp } = output
+            else { panic!("unexpected J output") };
+        let hex = |bytes: &[u8]| format!("0x{}", hex::encode(bytes));
+        serde_json::json!({"jurisdictionName":jurisdiction_name,"type":"hashLadderReveal","entityId":hex(entity_id),
+            "timestamp":timestamp,"data":{"revealHash":hex(reveal_hash),"signerId":signer_id,"registration":{
+                "counterpartyEntity":hex(&r.counterparty_entity),"targetRole":r.target_role,"fullHash":hex(&r.full_hash),
+                "partialRoot":hex(&r.partial_root),"witness":{"fillRatio":r.witness.fill_ratio,"fullSecret":hex(&r.witness.full_secret),
+                "reveals":r.witness.reveals.iter().map(|v| hex(v)).collect::<Vec<_>>()}}}})
+    }).collect::<Vec<_>>();
+    assert_eq!(
+        reveals, case.outbox.target_reveals,
+        "{} standalone J output",
+        case.name
+    );
+
     assert_eq!(
         actual.outputs.len(),
         case.outbox.outputs.len(),

@@ -34,7 +34,7 @@
                 "makerEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
                 "orderId": "cross-j-group-d-order",
                 "riskMode": "fully_collateralized",
-                "routeHash": "0x7640c3b7dcaf8094e429baf84c7fe1d7045c0415c9d2d4e9717cb536c6fc232a",
+                "routeHash": "0x64ff2815a05f6d3430c3f037c0d0490f1262a0d7402f80acbcb370e4f0e0569b",
                 "source": {
                   "amount": {
                     "__xlnType": "BigInt",
@@ -70,7 +70,7 @@
                 "targetSignerId": "0x5252525252525252525252525252525252525252",
                 "timePolicy": {
                   "deadlineConversion": "floor_ms_to_unix_seconds",
-                  "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                  "finalityPolicy": "absolute_pull_deadlines",
                   "runtimeClock": "unix_ms",
                   "runtimeExpiresAtMs": 70000,
                   "settlementClock": "unix_seconds"
@@ -80,7 +80,7 @@
               }
             ]
           ],
-          "root": "0x481875997cd1fd478d0258561ca5525485c7607fccd58ff1f6524996b3a1d273"
+          "root": "0x08b88a23cb2ac44ddd0a314d963fc1abce0988848fa412626c08959845d6b99f"
         },
         "crossJurisdictionBookAdmissions": {
           "entries": [],
@@ -136,7 +136,7 @@
       "digests": {
         "effects": "0x6aeb3711a6e584f27436be90f5d6ae39e38d053d3d6daefbd360f3ee9d860626",
         "events": "0x9767d55fdc792d78484a099b8becbd5c1d015e084066476efb0675d3efa8ff49",
-        "outbox": "0xa05775d6b252adb7319b267c31e1c677120dfe3c8825b3579d300967c7c8dd55"
+        "outbox": "0x35ad3fb26724d59f5a8fe253773e02f09762e2fbbc499408a19a6f02310312e3"
       },
       "effects": {
         "candidateEffects": [],
@@ -152,6 +152,7 @@
       "name": "prepareCrossJurisdictionSwap",
       "outbox": {
         "accountTxs": [],
+        "hashesToSign": [],
         "outputs": [
           {
             "entityId": "0x4141414141414141414141414141414141414141414141414141414141414141",
@@ -176,7 +177,7 @@
                       "makerEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
                       "orderId": "cross-j-group-d-order",
                       "riskMode": "fully_collateralized",
-                      "routeHash": "0x7640c3b7dcaf8094e429baf84c7fe1d7045c0415c9d2d4e9717cb536c6fc232a",
+                      "routeHash": "0x64ff2815a05f6d3430c3f037c0d0490f1262a0d7402f80acbcb370e4f0e0569b",
                       "source": {
                         "amount": {
                           "__xlnType": "BigInt",
@@ -212,7 +213,7 @@
                       "targetSignerId": "0x5252525252525252525252525252525252525252",
                       "timePolicy": {
                         "deadlineConversion": "floor_ms_to_unix_seconds",
-                        "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                        "finalityPolicy": "absolute_pull_deadlines",
                         "runtimeClock": "unix_ms",
                         "runtimeExpiresAtMs": 70000,
                         "settlementClock": "unix_seconds"
@@ -223,12 +224,13 @@
                   },
                   "type": "prepareCrossJurisdictionSwap"
                 },
-                "txDigest": "0x935058b0908227ae6a04fec2a01311caf7a82e4ce77e0f1385abfe01afb2f514"
+                "txDigest": "0x758cb7ee44c2025b77e9e51272dcc24b23bdf9009091682e620400b7ebb42638"
               }
             ],
             "signerId": "0x6161616161616161616161616161616161616161"
           }
-        ]
+        ],
+        "targetReveals": []
       },
       "signerId": "0x5151515151515151515151515151515151515151",
       "tx": {
@@ -250,7 +252,7 @@
             "makerEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
             "orderId": "cross-j-group-d-order",
             "riskMode": "fully_collateralized",
-            "routeHash": "0x7640c3b7dcaf8094e429baf84c7fe1d7045c0415c9d2d4e9717cb536c6fc232a",
+            "routeHash": "0x64ff2815a05f6d3430c3f037c0d0490f1262a0d7402f80acbcb370e4f0e0569b",
             "source": {
               "amount": {
                 "__xlnType": "BigInt",
@@ -286,7 +288,7 @@
             "targetSignerId": "0x5252525252525252525252525252525252525252",
             "timePolicy": {
               "deadlineConversion": "floor_ms_to_unix_seconds",
-              "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+              "finalityPolicy": "absolute_pull_deadlines",
               "runtimeClock": "unix_ms",
               "runtimeExpiresAtMs": 70000,
               "settlementClock": "unix_seconds"
@@ -339,7 +341,7 @@
                   "makerEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
                   "orderId": "cross-j-group-d-order",
                   "riskMode": "fully_collateralized",
-                  "routeHash": "0x7640c3b7dcaf8094e429baf84c7fe1d7045c0415c9d2d4e9717cb536c6fc232a",
+                  "routeHash": "0x64ff2815a05f6d3430c3f037c0d0490f1262a0d7402f80acbcb370e4f0e0569b",
                   "source": {
                     "amount": {
                       "__xlnType": "BigInt",
@@ -360,9 +362,10 @@
                       "__xlnType": "BigInt",
                       "value": "1000"
                     },
-                    "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                    "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                    "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+                    "deadline": 70,
+                    "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                    "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                    "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
                     "signedAmount": {
                       "__xlnType": "BigInt",
                       "value": "-1000"
@@ -391,9 +394,10 @@
                       "__xlnType": "BigInt",
                       "value": "900"
                     },
-                    "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                    "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                    "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                    "deadline": 303,
+                    "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                    "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                    "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                     "signedAmount": {
                       "__xlnType": "BigInt",
                       "value": "900"
@@ -403,7 +407,7 @@
                   "targetSignerId": "0x5252525252525252525252525252525252525252",
                   "timePolicy": {
                     "deadlineConversion": "floor_ms_to_unix_seconds",
-                    "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                    "finalityPolicy": "absolute_pull_deadlines",
                     "runtimeClock": "unix_ms",
                     "runtimeExpiresAtMs": 70000,
                     "settlementClock": "unix_seconds"
@@ -411,14 +415,14 @@
                   "updatedAt": 10000,
                   "venueId": "cross:stack:1:0x1111111111111111111111111111111111111111:1/stack:8453:0x2121212121212121212121212121212121212121:1"
                 },
-                "routeHash": "0x7640c3b7dcaf8094e429baf84c7fe1d7045c0415c9d2d4e9717cb536c6fc232a",
+                "routeHash": "0x64ff2815a05f6d3430c3f037c0d0490f1262a0d7402f80acbcb370e4f0e0569b",
                 "sourceEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
                 "status": "admitted",
                 "updatedAt": 10000
               }
             ]
           ],
-          "root": "0xfd23b479a94ffc3b531bfa25067a5b2d41652cbd6fb813c67ed6642971bd22d0"
+          "root": "0x353c32e813f965b1fbc5bd378b3502b2af667dbb66867cd104fb18987b11a80d"
         },
         "crossJurisdictionSwaps": {
           "entries": [
@@ -441,7 +445,7 @@
                 "makerEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
                 "orderId": "cross-j-group-d-order",
                 "riskMode": "fully_collateralized",
-                "routeHash": "0x7640c3b7dcaf8094e429baf84c7fe1d7045c0415c9d2d4e9717cb536c6fc232a",
+                "routeHash": "0x64ff2815a05f6d3430c3f037c0d0490f1262a0d7402f80acbcb370e4f0e0569b",
                 "source": {
                   "amount": {
                     "__xlnType": "BigInt",
@@ -462,9 +466,10 @@
                     "__xlnType": "BigInt",
                     "value": "1000"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+                  "deadline": 70,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "-1000"
@@ -493,9 +498,10 @@
                     "__xlnType": "BigInt",
                     "value": "900"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                  "deadline": 303,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "900"
@@ -505,7 +511,7 @@
                 "targetSignerId": "0x5252525252525252525252525252525252525252",
                 "timePolicy": {
                   "deadlineConversion": "floor_ms_to_unix_seconds",
-                  "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                  "finalityPolicy": "absolute_pull_deadlines",
                   "runtimeClock": "unix_ms",
                   "runtimeExpiresAtMs": 70000,
                   "settlementClock": "unix_seconds"
@@ -515,7 +521,7 @@
               }
             ]
           ],
-          "root": "0x367b82497838bbe691d29aef1aa1258f3e223eb707efb92b5ac4e0a89c5f5a76"
+          "root": "0xbe50a5bc122c3b463d3e3ae52e5e2d91bb68e271fd232aebb493c01c717b68e5"
         },
         "entityId": "0x4141414141414141414141414141414141414141414141414141414141414141",
         "knownAccounts": [
@@ -561,9 +567,9 @@
         "timestamp": 10000
       },
       "digests": {
-        "effects": "0xd1b77b89db3a635f5d2ea26880b5878648bcf6db5ab9869c2739b9a039bbfab4",
+        "effects": "0x1bf0c23fa538994f86613169db1263c9b05457b3c52e083be40af45383f7a36e",
         "events": "0xeb345f1ebc6c208b80e0d377d51f577f316564502d94778b521b47a998e85567",
-        "outbox": "0xba4cad8e5af5ace26df4b31bf4d461bf158fa1cbece7c0ef82d699aaa5833c76"
+        "outbox": "0x89037e003e09bc095d280d1ebfcc2bf6f5e71f643e46c49819d9a2a4fa3b176f"
       },
       "effects": {
         "candidateEffects": [],
@@ -589,7 +595,7 @@
               "makerEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
               "orderId": "cross-j-group-d-order",
               "riskMode": "fully_collateralized",
-              "routeHash": "0x7640c3b7dcaf8094e429baf84c7fe1d7045c0415c9d2d4e9717cb536c6fc232a",
+              "routeHash": "0x64ff2815a05f6d3430c3f037c0d0490f1262a0d7402f80acbcb370e4f0e0569b",
               "source": {
                 "amount": {
                   "__xlnType": "BigInt",
@@ -610,9 +616,10 @@
                   "__xlnType": "BigInt",
                   "value": "1000"
                 },
-                "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+                "deadline": 70,
+                "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
                 "signedAmount": {
                   "__xlnType": "BigInt",
                   "value": "-1000"
@@ -641,9 +648,10 @@
                   "__xlnType": "BigInt",
                   "value": "900"
                 },
-                "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                "deadline": 303,
+                "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                 "signedAmount": {
                   "__xlnType": "BigInt",
                   "value": "900"
@@ -653,7 +661,7 @@
               "targetSignerId": "0x5252525252525252525252525252525252525252",
               "timePolicy": {
                 "deadlineConversion": "floor_ms_to_unix_seconds",
-                "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                "finalityPolicy": "absolute_pull_deadlines",
                 "runtimeClock": "unix_ms",
                 "runtimeExpiresAtMs": 70000,
                 "settlementClock": "unix_seconds"
@@ -697,7 +705,9 @@
       "name": "admitCrossJurisdictionBookOrder",
       "outbox": {
         "accountTxs": [],
-        "outputs": []
+        "hashesToSign": [],
+        "outputs": [],
+        "targetReveals": []
       },
       "signerId": "0x6161616161616161616161616161616161616161",
       "tx": {
@@ -720,7 +730,7 @@
             "makerEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
             "orderId": "cross-j-group-d-order",
             "riskMode": "fully_collateralized",
-            "routeHash": "0x7640c3b7dcaf8094e429baf84c7fe1d7045c0415c9d2d4e9717cb536c6fc232a",
+            "routeHash": "0x64ff2815a05f6d3430c3f037c0d0490f1262a0d7402f80acbcb370e4f0e0569b",
             "source": {
               "amount": {
                 "__xlnType": "BigInt",
@@ -741,9 +751,10 @@
                 "__xlnType": "BigInt",
                 "value": "1000"
               },
-              "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-              "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-              "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+              "deadline": 70,
+              "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+              "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+              "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
               "signedAmount": {
                 "__xlnType": "BigInt",
                 "value": "-1000"
@@ -772,9 +783,10 @@
                 "__xlnType": "BigInt",
                 "value": "900"
               },
-              "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-              "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-              "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+              "deadline": 303,
+              "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+              "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+              "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
               "signedAmount": {
                 "__xlnType": "BigInt",
                 "value": "900"
@@ -784,7 +796,7 @@
             "targetSignerId": "0x5252525252525252525252525252525252525252",
             "timePolicy": {
               "deadlineConversion": "floor_ms_to_unix_seconds",
-              "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+              "finalityPolicy": "absolute_pull_deadlines",
               "runtimeClock": "unix_ms",
               "runtimeExpiresAtMs": 70000,
               "settlementClock": "unix_seconds"
@@ -866,7 +878,7 @@
                   "makerEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
                   "orderId": "cross-j-group-d-order",
                   "riskMode": "fully_collateralized",
-                  "routeHash": "0x1fcfb05b2b409be18d6dc2f4fc8169b6c28850b413b4a92ff935f5f653640345",
+                  "routeHash": "0x4af3493dcd78bab548963662b6b92f5cf0619bd59cf20c44543b4a8dc65d1005",
                   "source": {
                     "amount": {
                       "__xlnType": "BigInt",
@@ -891,9 +903,10 @@
                       "__xlnType": "BigInt",
                       "value": "1000"
                     },
-                    "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                    "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                    "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+                    "deadline": 70,
+                    "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                    "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                    "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
                     "signedAmount": {
                       "__xlnType": "BigInt",
                       "value": "-1000"
@@ -926,9 +939,10 @@
                       "__xlnType": "BigInt",
                       "value": "900"
                     },
-                    "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                    "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                    "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                    "deadline": 303,
+                    "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                    "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                    "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                     "signedAmount": {
                       "__xlnType": "BigInt",
                       "value": "900"
@@ -938,7 +952,7 @@
                   "targetSignerId": "0x5252525252525252525252525252525252525252",
                   "timePolicy": {
                     "deadlineConversion": "floor_ms_to_unix_seconds",
-                    "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                    "finalityPolicy": "absolute_pull_deadlines",
                     "runtimeClock": "unix_ms",
                     "runtimeExpiresAtMs": 70000,
                     "settlementClock": "unix_seconds"
@@ -946,14 +960,14 @@
                   "updatedAt": 10000,
                   "venueId": "cross:stack:1:0x1111111111111111111111111111111111111111:1/stack:8453:0x2121212121212121212121212121212121212121:1"
                 },
-                "routeHash": "0x1fcfb05b2b409be18d6dc2f4fc8169b6c28850b413b4a92ff935f5f653640345",
+                "routeHash": "0x4af3493dcd78bab548963662b6b92f5cf0619bd59cf20c44543b4a8dc65d1005",
                 "sourceEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
                 "status": "closed",
                 "updatedAt": 10000
               }
             ]
           ],
-          "root": "0x2d7f52aa90db65be74a99c565d27a8b22c014b6af0c3af4d7a23bde46600ba44"
+          "root": "0x5797a7676c7523297c17c9a2242277d84f070d9738a378c8c07603745560f56e"
         },
         "crossJurisdictionSwaps": {
           "entries": [
@@ -1003,7 +1017,7 @@
                 "makerEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
                 "orderId": "cross-j-group-d-order",
                 "riskMode": "fully_collateralized",
-                "routeHash": "0x1fcfb05b2b409be18d6dc2f4fc8169b6c28850b413b4a92ff935f5f653640345",
+                "routeHash": "0x4af3493dcd78bab548963662b6b92f5cf0619bd59cf20c44543b4a8dc65d1005",
                 "source": {
                   "amount": {
                     "__xlnType": "BigInt",
@@ -1028,9 +1042,10 @@
                     "__xlnType": "BigInt",
                     "value": "1000"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+                  "deadline": 70,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "-1000"
@@ -1063,9 +1078,10 @@
                     "__xlnType": "BigInt",
                     "value": "900"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                  "deadline": 303,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "900"
@@ -1075,7 +1091,7 @@
                 "targetSignerId": "0x5252525252525252525252525252525252525252",
                 "timePolicy": {
                   "deadlineConversion": "floor_ms_to_unix_seconds",
-                  "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                  "finalityPolicy": "absolute_pull_deadlines",
                   "runtimeClock": "unix_ms",
                   "runtimeExpiresAtMs": 70000,
                   "settlementClock": "unix_seconds"
@@ -1085,7 +1101,7 @@
               }
             ]
           ],
-          "root": "0x4869f9e9b7952fa4cce1f7bbe6cb476b1fc4fdde0f357b677a44c666b76a9b02"
+          "root": "0x2a370493395d346ae12025cc36c36013a249bc5e0a2c24e38bd2c87fc1e4eac8"
         },
         "entityId": "0x4242424242424242424242424242424242424242424242424242424242424242",
         "knownAccounts": [
@@ -1168,7 +1184,7 @@
                   "makerEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
                   "orderId": "cross-j-group-d-order",
                   "riskMode": "fully_collateralized",
-                  "routeHash": "0x1fcfb05b2b409be18d6dc2f4fc8169b6c28850b413b4a92ff935f5f653640345",
+                  "routeHash": "0x4af3493dcd78bab548963662b6b92f5cf0619bd59cf20c44543b4a8dc65d1005",
                   "source": {
                     "amount": {
                       "__xlnType": "BigInt",
@@ -1193,9 +1209,10 @@
                       "__xlnType": "BigInt",
                       "value": "1000"
                     },
-                    "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                    "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                    "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+                    "deadline": 70,
+                    "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                    "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                    "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
                     "signedAmount": {
                       "__xlnType": "BigInt",
                       "value": "-1000"
@@ -1228,9 +1245,10 @@
                       "__xlnType": "BigInt",
                       "value": "900"
                     },
-                    "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                    "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                    "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                    "deadline": 303,
+                    "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                    "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                    "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                     "signedAmount": {
                       "__xlnType": "BigInt",
                       "value": "900"
@@ -1240,7 +1258,7 @@
                   "targetSignerId": "0x5252525252525252525252525252525252525252",
                   "timePolicy": {
                     "deadlineConversion": "floor_ms_to_unix_seconds",
-                    "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                    "finalityPolicy": "absolute_pull_deadlines",
                     "runtimeClock": "unix_ms",
                     "runtimeExpiresAtMs": 70000,
                     "settlementClock": "unix_seconds"
@@ -1248,14 +1266,14 @@
                   "updatedAt": 10000,
                   "venueId": "cross:stack:1:0x1111111111111111111111111111111111111111:1/stack:8453:0x2121212121212121212121212121212121212121:1"
                 },
-                "routeHash": "0x1fcfb05b2b409be18d6dc2f4fc8169b6c28850b413b4a92ff935f5f653640345",
+                "routeHash": "0x4af3493dcd78bab548963662b6b92f5cf0619bd59cf20c44543b4a8dc65d1005",
                 "sourceEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
                 "status": "admitted",
                 "updatedAt": 10000
               }
             ]
           ],
-          "root": "0x40cd39dc7e556892bd3a627ea76ae666c8a5517be1b8b7206dc66b351620d7bc"
+          "root": "0xd514b5269f637d63d3040e322009a2dcdc656eaeb22017478408edab74e3b291"
         },
         "crossJurisdictionSwaps": {
           "entries": [
@@ -1305,7 +1323,7 @@
                 "makerEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
                 "orderId": "cross-j-group-d-order",
                 "riskMode": "fully_collateralized",
-                "routeHash": "0x1fcfb05b2b409be18d6dc2f4fc8169b6c28850b413b4a92ff935f5f653640345",
+                "routeHash": "0x4af3493dcd78bab548963662b6b92f5cf0619bd59cf20c44543b4a8dc65d1005",
                 "source": {
                   "amount": {
                     "__xlnType": "BigInt",
@@ -1330,9 +1348,10 @@
                     "__xlnType": "BigInt",
                     "value": "1000"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+                  "deadline": 70,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "-1000"
@@ -1365,9 +1384,10 @@
                     "__xlnType": "BigInt",
                     "value": "900"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                  "deadline": 303,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "900"
@@ -1377,7 +1397,7 @@
                 "targetSignerId": "0x5252525252525252525252525252525252525252",
                 "timePolicy": {
                   "deadlineConversion": "floor_ms_to_unix_seconds",
-                  "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                  "finalityPolicy": "absolute_pull_deadlines",
                   "runtimeClock": "unix_ms",
                   "runtimeExpiresAtMs": 70000,
                   "settlementClock": "unix_seconds"
@@ -1387,7 +1407,7 @@
               }
             ]
           ],
-          "root": "0x4869f9e9b7952fa4cce1f7bbe6cb476b1fc4fdde0f357b677a44c666b76a9b02"
+          "root": "0x2a370493395d346ae12025cc36c36013a249bc5e0a2c24e38bd2c87fc1e4eac8"
         },
         "entityId": "0x4242424242424242424242424242424242424242424242424242424242424242",
         "knownAccounts": [
@@ -1398,7 +1418,7 @@
       "digests": {
         "effects": "0x6aeb3711a6e584f27436be90f5d6ae39e38d053d3d6daefbd360f3ee9d860626",
         "events": "0x5afa7a2c2ac8f9cb41173b098e3b1b5e7ce8e738d16e4e1673812c7e08e2543c",
-        "outbox": "0xe1370b491fa490c56bb847a5dc6f9f8e10c1ab76a695cde7683c411ae5e04a81"
+        "outbox": "0x38a4afeb7750d3d2083b754d6c999dd405094634fbd96057157c5ca2d58c4f35"
       },
       "effects": {
         "candidateEffects": [],
@@ -1414,6 +1434,7 @@
       "name": "removeCrossJurisdictionBookOrder",
       "outbox": {
         "accountTxs": [],
+        "hashesToSign": [],
         "outputs": [
           {
             "entityId": "0x4141414141414141414141414141414141414141414141414141414141414141",
@@ -1468,7 +1489,7 @@
                       "makerEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
                       "orderId": "cross-j-group-d-order",
                       "riskMode": "fully_collateralized",
-                      "routeHash": "0x1fcfb05b2b409be18d6dc2f4fc8169b6c28850b413b4a92ff935f5f653640345",
+                      "routeHash": "0x4af3493dcd78bab548963662b6b92f5cf0619bd59cf20c44543b4a8dc65d1005",
                       "source": {
                         "amount": {
                           "__xlnType": "BigInt",
@@ -1493,9 +1514,10 @@
                           "__xlnType": "BigInt",
                           "value": "1000"
                         },
-                        "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                        "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                        "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+                        "deadline": 70,
+                        "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                        "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                        "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
                         "signedAmount": {
                           "__xlnType": "BigInt",
                           "value": "-1000"
@@ -1528,9 +1550,10 @@
                           "__xlnType": "BigInt",
                           "value": "900"
                         },
-                        "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                        "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                        "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                        "deadline": 303,
+                        "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                        "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                        "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                         "signedAmount": {
                           "__xlnType": "BigInt",
                           "value": "900"
@@ -1540,7 +1563,7 @@
                       "targetSignerId": "0x5252525252525252525252525252525252525252",
                       "timePolicy": {
                         "deadlineConversion": "floor_ms_to_unix_seconds",
-                        "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                        "finalityPolicy": "absolute_pull_deadlines",
                         "runtimeClock": "unix_ms",
                         "runtimeExpiresAtMs": 70000,
                         "settlementClock": "unix_seconds"
@@ -1553,12 +1576,13 @@
                   },
                   "type": "crossJurisdictionBookOrderRemoved"
                 },
-                "txDigest": "0xb9c5c2856dc4ff279a8d8439384612d35007717a9e1fd14242924739d074ff28"
+                "txDigest": "0x61af4288cc2071c9ece8356c5bf05bff64eafa4248ce42913dbaa8b242bd6931"
               }
             ],
             "signerId": "0x6161616161616161616161616161616161616161"
           }
-        ]
+        ],
+        "targetReveals": []
       },
       "signerId": "0x6262626262626262626262626262626262626262",
       "tx": {
@@ -1609,7 +1633,7 @@
             "makerEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
             "orderId": "cross-j-group-d-order",
             "riskMode": "fully_collateralized",
-            "routeHash": "0x1fcfb05b2b409be18d6dc2f4fc8169b6c28850b413b4a92ff935f5f653640345",
+            "routeHash": "0x4af3493dcd78bab548963662b6b92f5cf0619bd59cf20c44543b4a8dc65d1005",
             "source": {
               "amount": {
                 "__xlnType": "BigInt",
@@ -1634,9 +1658,10 @@
                 "__xlnType": "BigInt",
                 "value": "1000"
               },
-              "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-              "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-              "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+              "deadline": 70,
+              "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+              "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+              "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
               "signedAmount": {
                 "__xlnType": "BigInt",
                 "value": "-1000"
@@ -1669,9 +1694,10 @@
                 "__xlnType": "BigInt",
                 "value": "900"
               },
-              "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-              "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-              "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+              "deadline": 303,
+              "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+              "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+              "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
               "signedAmount": {
                 "__xlnType": "BigInt",
                 "value": "900"
@@ -1681,7 +1707,7 @@
             "targetSignerId": "0x5252525252525252525252525252525252525252",
             "timePolicy": {
               "deadlineConversion": "floor_ms_to_unix_seconds",
-              "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+              "finalityPolicy": "absolute_pull_deadlines",
               "runtimeClock": "unix_ms",
               "runtimeExpiresAtMs": 70000,
               "settlementClock": "unix_seconds"
@@ -1700,10 +1726,10 @@
         "accounts": [
           {
             "accountId": "0x3131313131313131313131313131313131313131313131313131313131313131",
-            "accountStateRoot": "0x59e348ef32151cbc09a751c6625a794b70c5fcc3ccae1b29756e68cd35f4df6c",
+            "accountStateRoot": "0x1db4c477ca69068d731289a4ab18a06281dae0fbabc48e541c1a73019d1f6afa",
             "activeDispute": null,
             "disputePrepare": null,
-            "entityLeaf": "0x03500927c3982e723f3ba5cc188b3b159b8f926a357c93606ce31f9f641ad43e",
+            "entityLeaf": "0xd8c027b591f37c7c4322060e0b39629e6e9de61b7f05e74e6187892877b3cc58",
             "status": "active"
           }
         ],
@@ -1765,7 +1791,7 @@
                   "makerEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
                   "orderId": "cross-j-group-d-order",
                   "riskMode": "fully_collateralized",
-                  "routeHash": "0x1fcfb05b2b409be18d6dc2f4fc8169b6c28850b413b4a92ff935f5f653640345",
+                  "routeHash": "0x4af3493dcd78bab548963662b6b92f5cf0619bd59cf20c44543b4a8dc65d1005",
                   "source": {
                     "amount": {
                       "__xlnType": "BigInt",
@@ -1790,9 +1816,10 @@
                       "__xlnType": "BigInt",
                       "value": "1000"
                     },
-                    "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                    "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                    "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+                    "deadline": 70,
+                    "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                    "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                    "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
                     "signedAmount": {
                       "__xlnType": "BigInt",
                       "value": "-1000"
@@ -1825,9 +1852,10 @@
                       "__xlnType": "BigInt",
                       "value": "900"
                     },
-                    "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                    "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                    "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                    "deadline": 303,
+                    "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                    "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                    "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                     "signedAmount": {
                       "__xlnType": "BigInt",
                       "value": "900"
@@ -1837,7 +1865,7 @@
                   "targetSignerId": "0x5252525252525252525252525252525252525252",
                   "timePolicy": {
                     "deadlineConversion": "floor_ms_to_unix_seconds",
-                    "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                    "finalityPolicy": "absolute_pull_deadlines",
                     "runtimeClock": "unix_ms",
                     "runtimeExpiresAtMs": 70000,
                     "settlementClock": "unix_seconds"
@@ -1845,14 +1873,14 @@
                   "updatedAt": 10000,
                   "venueId": "cross:stack:1:0x1111111111111111111111111111111111111111:1/stack:8453:0x2121212121212121212121212121212121212121:1"
                 },
-                "routeHash": "0x1fcfb05b2b409be18d6dc2f4fc8169b6c28850b413b4a92ff935f5f653640345",
+                "routeHash": "0x4af3493dcd78bab548963662b6b92f5cf0619bd59cf20c44543b4a8dc65d1005",
                 "sourceEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
                 "status": "closed",
                 "updatedAt": 10000
               }
             ]
           ],
-          "root": "0x2d7f52aa90db65be74a99c565d27a8b22c014b6af0c3af4d7a23bde46600ba44"
+          "root": "0x5797a7676c7523297c17c9a2242277d84f070d9738a378c8c07603745560f56e"
         },
         "crossJurisdictionSwaps": {
           "entries": [
@@ -1903,7 +1931,7 @@
                 "makerEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
                 "orderId": "cross-j-group-d-order",
                 "riskMode": "fully_collateralized",
-                "routeHash": "0x1fcfb05b2b409be18d6dc2f4fc8169b6c28850b413b4a92ff935f5f653640345",
+                "routeHash": "0x4af3493dcd78bab548963662b6b92f5cf0619bd59cf20c44543b4a8dc65d1005",
                 "source": {
                   "amount": {
                     "__xlnType": "BigInt",
@@ -1928,9 +1956,10 @@
                     "__xlnType": "BigInt",
                     "value": "1000"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+                  "deadline": 70,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "-1000"
@@ -1963,9 +1992,10 @@
                     "__xlnType": "BigInt",
                     "value": "900"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                  "deadline": 303,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "900"
@@ -1975,7 +2005,7 @@
                 "targetSignerId": "0x5252525252525252525252525252525252525252",
                 "timePolicy": {
                   "deadlineConversion": "floor_ms_to_unix_seconds",
-                  "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                  "finalityPolicy": "absolute_pull_deadlines",
                   "runtimeClock": "unix_ms",
                   "runtimeExpiresAtMs": 70000,
                   "settlementClock": "unix_seconds"
@@ -1985,7 +2015,7 @@
               }
             ]
           ],
-          "root": "0x63bae4b2f4651bdc34b183ff691583f94d58a1a87a382da5f63fcfadd5966256"
+          "root": "0x24dbd9c1f3997439a22e1a675ded7e577afffed753f70dd1ea3856c6a9027c52"
         },
         "entityId": "0x4141414141414141414141414141414141414141414141414141414141414141",
         "knownAccounts": [
@@ -2005,10 +2035,10 @@
         "accounts": [
           {
             "accountId": "0x3131313131313131313131313131313131313131313131313131313131313131",
-            "accountStateRoot": "0x59e348ef32151cbc09a751c6625a794b70c5fcc3ccae1b29756e68cd35f4df6c",
+            "accountStateRoot": "0x1db4c477ca69068d731289a4ab18a06281dae0fbabc48e541c1a73019d1f6afa",
             "activeDispute": null,
             "disputePrepare": null,
-            "entityLeaf": "0x03500927c3982e723f3ba5cc188b3b159b8f926a357c93606ce31f9f641ad43e",
+            "entityLeaf": "0xd8c027b591f37c7c4322060e0b39629e6e9de61b7f05e74e6187892877b3cc58",
             "status": "active"
           }
         ],
@@ -2068,7 +2098,7 @@
                   "makerEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
                   "orderId": "cross-j-group-d-order",
                   "riskMode": "fully_collateralized",
-                  "routeHash": "0x1fcfb05b2b409be18d6dc2f4fc8169b6c28850b413b4a92ff935f5f653640345",
+                  "routeHash": "0x4af3493dcd78bab548963662b6b92f5cf0619bd59cf20c44543b4a8dc65d1005",
                   "source": {
                     "amount": {
                       "__xlnType": "BigInt",
@@ -2093,9 +2123,10 @@
                       "__xlnType": "BigInt",
                       "value": "1000"
                     },
-                    "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                    "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                    "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+                    "deadline": 70,
+                    "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                    "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                    "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
                     "signedAmount": {
                       "__xlnType": "BigInt",
                       "value": "-1000"
@@ -2128,9 +2159,10 @@
                       "__xlnType": "BigInt",
                       "value": "900"
                     },
-                    "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                    "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                    "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                    "deadline": 303,
+                    "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                    "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                    "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                     "signedAmount": {
                       "__xlnType": "BigInt",
                       "value": "900"
@@ -2140,7 +2172,7 @@
                   "targetSignerId": "0x5252525252525252525252525252525252525252",
                   "timePolicy": {
                     "deadlineConversion": "floor_ms_to_unix_seconds",
-                    "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                    "finalityPolicy": "absolute_pull_deadlines",
                     "runtimeClock": "unix_ms",
                     "runtimeExpiresAtMs": 70000,
                     "settlementClock": "unix_seconds"
@@ -2148,14 +2180,14 @@
                   "updatedAt": 10000,
                   "venueId": "cross:stack:1:0x1111111111111111111111111111111111111111:1/stack:8453:0x2121212121212121212121212121212121212121:1"
                 },
-                "routeHash": "0x1fcfb05b2b409be18d6dc2f4fc8169b6c28850b413b4a92ff935f5f653640345",
+                "routeHash": "0x4af3493dcd78bab548963662b6b92f5cf0619bd59cf20c44543b4a8dc65d1005",
                 "sourceEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
                 "status": "admitted",
                 "updatedAt": 10000
               }
             ]
           ],
-          "root": "0x40cd39dc7e556892bd3a627ea76ae666c8a5517be1b8b7206dc66b351620d7bc"
+          "root": "0xd514b5269f637d63d3040e322009a2dcdc656eaeb22017478408edab74e3b291"
         },
         "crossJurisdictionSwaps": {
           "entries": [
@@ -2205,7 +2237,7 @@
                 "makerEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
                 "orderId": "cross-j-group-d-order",
                 "riskMode": "fully_collateralized",
-                "routeHash": "0x1fcfb05b2b409be18d6dc2f4fc8169b6c28850b413b4a92ff935f5f653640345",
+                "routeHash": "0x4af3493dcd78bab548963662b6b92f5cf0619bd59cf20c44543b4a8dc65d1005",
                 "source": {
                   "amount": {
                     "__xlnType": "BigInt",
@@ -2230,9 +2262,10 @@
                     "__xlnType": "BigInt",
                     "value": "1000"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+                  "deadline": 70,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "-1000"
@@ -2265,9 +2298,10 @@
                     "__xlnType": "BigInt",
                     "value": "900"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                  "deadline": 303,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "900"
@@ -2277,7 +2311,7 @@
                 "targetSignerId": "0x5252525252525252525252525252525252525252",
                 "timePolicy": {
                   "deadlineConversion": "floor_ms_to_unix_seconds",
-                  "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                  "finalityPolicy": "absolute_pull_deadlines",
                   "runtimeClock": "unix_ms",
                   "runtimeExpiresAtMs": 70000,
                   "settlementClock": "unix_seconds"
@@ -2287,7 +2321,7 @@
               }
             ]
           ],
-          "root": "0x4869f9e9b7952fa4cce1f7bbe6cb476b1fc4fdde0f357b677a44c666b76a9b02"
+          "root": "0x2a370493395d346ae12025cc36c36013a249bc5e0a2c24e38bd2c87fc1e4eac8"
         },
         "entityId": "0x4141414141414141414141414141414141414141414141414141414141414141",
         "knownAccounts": [
@@ -2298,7 +2332,7 @@
       "digests": {
         "effects": "0x6aeb3711a6e584f27436be90f5d6ae39e38d053d3d6daefbd360f3ee9d860626",
         "events": "0xa0df20d018350c876f4ef22ab58285dbb4b7c3bf0897224bd6a1918e04f23cee",
-        "outbox": "0xb7f46d07876cb93b144460aa8c27168029bec31b0863d9451cadcc1cf07047c9"
+        "outbox": "0x821514eafb4b8f92e44fc4194d8c46ddb04064001a6e39d31981fe9c068b5fa6"
       },
       "effects": {
         "candidateEffects": [],
@@ -2314,6 +2348,7 @@
       "name": "crossJurisdictionBookOrderRemoved",
       "outbox": {
         "accountTxs": [],
+        "hashesToSign": [],
         "outputs": [
           {
             "entityId": "0x4141414141414141414141414141414141414141414141414141414141414141",
@@ -2331,7 +2366,8 @@
             ],
             "signerId": "0x6161616161616161616161616161616161616161"
           }
-        ]
+        ],
+        "targetReveals": []
       },
       "signerId": "0x6161616161616161616161616161616161616161",
       "tx": {
@@ -2383,7 +2419,7 @@
             "makerEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
             "orderId": "cross-j-group-d-order",
             "riskMode": "fully_collateralized",
-            "routeHash": "0x1fcfb05b2b409be18d6dc2f4fc8169b6c28850b413b4a92ff935f5f653640345",
+            "routeHash": "0x4af3493dcd78bab548963662b6b92f5cf0619bd59cf20c44543b4a8dc65d1005",
             "source": {
               "amount": {
                 "__xlnType": "BigInt",
@@ -2408,9 +2444,10 @@
                 "__xlnType": "BigInt",
                 "value": "1000"
               },
-              "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-              "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-              "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+              "deadline": 70,
+              "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+              "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+              "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
               "signedAmount": {
                 "__xlnType": "BigInt",
                 "value": "-1000"
@@ -2443,9 +2480,10 @@
                 "__xlnType": "BigInt",
                 "value": "900"
               },
-              "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-              "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-              "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+              "deadline": 303,
+              "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+              "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+              "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
               "signedAmount": {
                 "__xlnType": "BigInt",
                 "value": "900"
@@ -2455,7 +2493,7 @@
             "targetSignerId": "0x5252525252525252525252525252525252525252",
             "timePolicy": {
               "deadlineConversion": "floor_ms_to_unix_seconds",
-              "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+              "finalityPolicy": "absolute_pull_deadlines",
               "runtimeClock": "unix_ms",
               "runtimeExpiresAtMs": 70000,
               "settlementClock": "unix_seconds"
@@ -2539,7 +2577,7 @@
                   "makerEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
                   "orderId": "cross-j-group-d-order",
                   "riskMode": "fully_collateralized",
-                  "routeHash": "0x1fcfb05b2b409be18d6dc2f4fc8169b6c28850b413b4a92ff935f5f653640345",
+                  "routeHash": "0x4af3493dcd78bab548963662b6b92f5cf0619bd59cf20c44543b4a8dc65d1005",
                   "source": {
                     "amount": {
                       "__xlnType": "BigInt",
@@ -2564,9 +2602,10 @@
                       "__xlnType": "BigInt",
                       "value": "1000"
                     },
-                    "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                    "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                    "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+                    "deadline": 70,
+                    "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                    "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                    "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
                     "signedAmount": {
                       "__xlnType": "BigInt",
                       "value": "-1000"
@@ -2599,9 +2638,10 @@
                       "__xlnType": "BigInt",
                       "value": "900"
                     },
-                    "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                    "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                    "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                    "deadline": 303,
+                    "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                    "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                    "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                     "signedAmount": {
                       "__xlnType": "BigInt",
                       "value": "900"
@@ -2611,7 +2651,7 @@
                   "targetSignerId": "0x5252525252525252525252525252525252525252",
                   "timePolicy": {
                     "deadlineConversion": "floor_ms_to_unix_seconds",
-                    "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                    "finalityPolicy": "absolute_pull_deadlines",
                     "runtimeClock": "unix_ms",
                     "runtimeExpiresAtMs": 70000,
                     "settlementClock": "unix_seconds"
@@ -2619,14 +2659,14 @@
                   "updatedAt": 10001,
                   "venueId": "cross:stack:1:0x1111111111111111111111111111111111111111:1/stack:8453:0x2121212121212121212121212121212121212121:1"
                 },
-                "routeHash": "0x1fcfb05b2b409be18d6dc2f4fc8169b6c28850b413b4a92ff935f5f653640345",
+                "routeHash": "0x4af3493dcd78bab548963662b6b92f5cf0619bd59cf20c44543b4a8dc65d1005",
                 "sourceEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
                 "status": "closed",
                 "updatedAt": 10000
               }
             ]
           ],
-          "root": "0x5a8871661db50614aef78a35bfabbf6d2f6f108aa467108f6a498a16c00a0730"
+          "root": "0x5113a9cb63eabd169f190ab58c72bb36988f69480aedded24845edf41b6a3631"
         },
         "crossJurisdictionSwaps": {
           "entries": [
@@ -2676,7 +2716,7 @@
                 "makerEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
                 "orderId": "cross-j-group-d-order",
                 "riskMode": "fully_collateralized",
-                "routeHash": "0x1fcfb05b2b409be18d6dc2f4fc8169b6c28850b413b4a92ff935f5f653640345",
+                "routeHash": "0x4af3493dcd78bab548963662b6b92f5cf0619bd59cf20c44543b4a8dc65d1005",
                 "source": {
                   "amount": {
                     "__xlnType": "BigInt",
@@ -2701,9 +2741,10 @@
                     "__xlnType": "BigInt",
                     "value": "1000"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+                  "deadline": 70,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "-1000"
@@ -2736,9 +2777,10 @@
                     "__xlnType": "BigInt",
                     "value": "900"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                  "deadline": 303,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "900"
@@ -2748,7 +2790,7 @@
                 "targetSignerId": "0x5252525252525252525252525252525252525252",
                 "timePolicy": {
                   "deadlineConversion": "floor_ms_to_unix_seconds",
-                  "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                  "finalityPolicy": "absolute_pull_deadlines",
                   "runtimeClock": "unix_ms",
                   "runtimeExpiresAtMs": 70000,
                   "settlementClock": "unix_seconds"
@@ -2758,7 +2800,7 @@
               }
             ]
           ],
-          "root": "0xd1110846be618c505a09840acf21ae841bda6dd5578fff5fa3be735ab5a4e447"
+          "root": "0xe256ebbe340edfc6111d2e8d628f8fa27cb801b41f260635b891beb85172d97f"
         },
         "entityId": "0x4141414141414141414141414141414141414141414141414141414141414141",
         "knownAccounts": [
@@ -2843,7 +2885,7 @@
                   "makerEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
                   "orderId": "cross-j-group-d-order",
                   "riskMode": "fully_collateralized",
-                  "routeHash": "0x1fcfb05b2b409be18d6dc2f4fc8169b6c28850b413b4a92ff935f5f653640345",
+                  "routeHash": "0x4af3493dcd78bab548963662b6b92f5cf0619bd59cf20c44543b4a8dc65d1005",
                   "source": {
                     "amount": {
                       "__xlnType": "BigInt",
@@ -2868,9 +2910,10 @@
                       "__xlnType": "BigInt",
                       "value": "1000"
                     },
-                    "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                    "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                    "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+                    "deadline": 70,
+                    "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                    "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                    "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
                     "signedAmount": {
                       "__xlnType": "BigInt",
                       "value": "-1000"
@@ -2903,9 +2946,10 @@
                       "__xlnType": "BigInt",
                       "value": "900"
                     },
-                    "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                    "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                    "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                    "deadline": 303,
+                    "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                    "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                    "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                     "signedAmount": {
                       "__xlnType": "BigInt",
                       "value": "900"
@@ -2915,7 +2959,7 @@
                   "targetSignerId": "0x5252525252525252525252525252525252525252",
                   "timePolicy": {
                     "deadlineConversion": "floor_ms_to_unix_seconds",
-                    "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                    "finalityPolicy": "absolute_pull_deadlines",
                     "runtimeClock": "unix_ms",
                     "runtimeExpiresAtMs": 70000,
                     "settlementClock": "unix_seconds"
@@ -2923,14 +2967,14 @@
                   "updatedAt": 10001,
                   "venueId": "cross:stack:1:0x1111111111111111111111111111111111111111:1/stack:8453:0x2121212121212121212121212121212121212121:1"
                 },
-                "routeHash": "0x1fcfb05b2b409be18d6dc2f4fc8169b6c28850b413b4a92ff935f5f653640345",
+                "routeHash": "0x4af3493dcd78bab548963662b6b92f5cf0619bd59cf20c44543b4a8dc65d1005",
                 "sourceEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
                 "status": "closed",
                 "updatedAt": 10000
               }
             ]
           ],
-          "root": "0x5a8871661db50614aef78a35bfabbf6d2f6f108aa467108f6a498a16c00a0730"
+          "root": "0x5113a9cb63eabd169f190ab58c72bb36988f69480aedded24845edf41b6a3631"
         },
         "crossJurisdictionSwaps": {
           "entries": [
@@ -2980,7 +3024,7 @@
                 "makerEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
                 "orderId": "cross-j-group-d-order",
                 "riskMode": "fully_collateralized",
-                "routeHash": "0x1fcfb05b2b409be18d6dc2f4fc8169b6c28850b413b4a92ff935f5f653640345",
+                "routeHash": "0x4af3493dcd78bab548963662b6b92f5cf0619bd59cf20c44543b4a8dc65d1005",
                 "source": {
                   "amount": {
                     "__xlnType": "BigInt",
@@ -3005,9 +3049,10 @@
                     "__xlnType": "BigInt",
                     "value": "1000"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+                  "deadline": 70,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "-1000"
@@ -3040,9 +3085,10 @@
                     "__xlnType": "BigInt",
                     "value": "900"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                  "deadline": 303,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "900"
@@ -3052,7 +3098,7 @@
                 "targetSignerId": "0x5252525252525252525252525252525252525252",
                 "timePolicy": {
                   "deadlineConversion": "floor_ms_to_unix_seconds",
-                  "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                  "finalityPolicy": "absolute_pull_deadlines",
                   "runtimeClock": "unix_ms",
                   "runtimeExpiresAtMs": 70000,
                   "settlementClock": "unix_seconds"
@@ -3062,7 +3108,7 @@
               }
             ]
           ],
-          "root": "0xd1110846be618c505a09840acf21ae841bda6dd5578fff5fa3be735ab5a4e447"
+          "root": "0xe256ebbe340edfc6111d2e8d628f8fa27cb801b41f260635b891beb85172d97f"
         },
         "entityId": "0x4141414141414141414141414141414141414141414141414141414141414141",
         "knownAccounts": [
@@ -3073,7 +3119,7 @@
       "digests": {
         "effects": "0x6aeb3711a6e584f27436be90f5d6ae39e38d053d3d6daefbd360f3ee9d860626",
         "events": "0x4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
-        "outbox": "0xba4cad8e5af5ace26df4b31bf4d461bf158fa1cbece7c0ef82d699aaa5833c76"
+        "outbox": "0x89037e003e09bc095d280d1ebfcc2bf6f5e71f643e46c49819d9a2a4fa3b176f"
       },
       "effects": {
         "candidateEffects": [],
@@ -3084,7 +3130,9 @@
       "name": "crossJurisdictionBookOrderRemovedAfterTerminal",
       "outbox": {
         "accountTxs": [],
-        "outputs": []
+        "hashesToSign": [],
+        "outputs": [],
+        "targetReveals": []
       },
       "signerId": "0x6161616161616161616161616161616161616161",
       "tx": {
@@ -3136,7 +3184,7 @@
             "makerEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
             "orderId": "cross-j-group-d-order",
             "riskMode": "fully_collateralized",
-            "routeHash": "0x1fcfb05b2b409be18d6dc2f4fc8169b6c28850b413b4a92ff935f5f653640345",
+            "routeHash": "0x4af3493dcd78bab548963662b6b92f5cf0619bd59cf20c44543b4a8dc65d1005",
             "source": {
               "amount": {
                 "__xlnType": "BigInt",
@@ -3161,9 +3209,10 @@
                 "__xlnType": "BigInt",
                 "value": "1000"
               },
-              "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-              "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-              "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+              "deadline": 70,
+              "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+              "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+              "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
               "signedAmount": {
                 "__xlnType": "BigInt",
                 "value": "-1000"
@@ -3196,9 +3245,10 @@
                 "__xlnType": "BigInt",
                 "value": "900"
               },
-              "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-              "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-              "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+              "deadline": 303,
+              "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+              "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+              "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
               "signedAmount": {
                 "__xlnType": "BigInt",
                 "value": "900"
@@ -3208,7 +3258,7 @@
             "targetSignerId": "0x5252525252525252525252525252525252525252",
             "timePolicy": {
               "deadlineConversion": "floor_ms_to_unix_seconds",
-              "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+              "finalityPolicy": "absolute_pull_deadlines",
               "runtimeClock": "unix_ms",
               "runtimeExpiresAtMs": 70000,
               "settlementClock": "unix_seconds"
@@ -3227,10 +3277,10 @@
         "accounts": [
           {
             "accountId": "0x3131313131313131313131313131313131313131313131313131313131313131",
-            "accountStateRoot": "0x0d76cd142530217c609b2c1dfc57c107f7ba0efdfc20c34934449df42a95f31d",
+            "accountStateRoot": "0x7408763dd3e596393ab4026e0131c444b4d7a5874e65867a6daec9115739874a",
             "activeDispute": null,
             "disputePrepare": null,
-            "entityLeaf": "0xee0912b47de50cd33b0152f33ab65fce1020e42966826c9ed8b94b2c1767928b",
+            "entityLeaf": "0x77acbc079331053268697eec72dfccab35a8fc410c6bc3dbe968172c1ceed492",
             "status": "active"
           }
         ],
@@ -3291,7 +3341,7 @@
                 "makerEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
                 "orderId": "cross-j-group-d-order",
                 "riskMode": "fully_collateralized",
-                "routeHash": "0x7640c3b7dcaf8094e429baf84c7fe1d7045c0415c9d2d4e9717cb536c6fc232a",
+                "routeHash": "0x64ff2815a05f6d3430c3f037c0d0490f1262a0d7402f80acbcb370e4f0e0569b",
                 "source": {
                   "amount": {
                     "__xlnType": "BigInt",
@@ -3316,9 +3366,10 @@
                     "__xlnType": "BigInt",
                     "value": "1000"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+                  "deadline": 70,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "-1000"
@@ -3351,9 +3402,10 @@
                     "__xlnType": "BigInt",
                     "value": "900"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                  "deadline": 303,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "900"
@@ -3363,7 +3415,7 @@
                 "targetSignerId": "0x5252525252525252525252525252525252525252",
                 "timePolicy": {
                   "deadlineConversion": "floor_ms_to_unix_seconds",
-                  "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                  "finalityPolicy": "absolute_pull_deadlines",
                   "runtimeClock": "unix_ms",
                   "runtimeExpiresAtMs": 70000,
                   "settlementClock": "unix_seconds"
@@ -3373,7 +3425,7 @@
               }
             ]
           ],
-          "root": "0x813523d9cd0a48fd7f5a39a08d30dc57fd4ef38b8e3d92a55d01630c316d673f"
+          "root": "0xa97d5e7c81aec40be6f5517377e9b9aa5565cf9ea2f22723daed61ec7d3f5832"
         },
         "entityId": "0x4141414141414141414141414141414141414141414141414141414141414141",
         "knownAccounts": [
@@ -3393,10 +3445,10 @@
         "accounts": [
           {
             "accountId": "0x3131313131313131313131313131313131313131313131313131313131313131",
-            "accountStateRoot": "0x0d76cd142530217c609b2c1dfc57c107f7ba0efdfc20c34934449df42a95f31d",
+            "accountStateRoot": "0x7408763dd3e596393ab4026e0131c444b4d7a5874e65867a6daec9115739874a",
             "activeDispute": null,
             "disputePrepare": null,
-            "entityLeaf": "0xee0912b47de50cd33b0152f33ab65fce1020e42966826c9ed8b94b2c1767928b",
+            "entityLeaf": "0x77acbc079331053268697eec72dfccab35a8fc410c6bc3dbe968172c1ceed492",
             "status": "active"
           }
         ],
@@ -3456,7 +3508,7 @@
                 "makerEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
                 "orderId": "cross-j-group-d-order",
                 "riskMode": "fully_collateralized",
-                "routeHash": "0x7640c3b7dcaf8094e429baf84c7fe1d7045c0415c9d2d4e9717cb536c6fc232a",
+                "routeHash": "0x64ff2815a05f6d3430c3f037c0d0490f1262a0d7402f80acbcb370e4f0e0569b",
                 "source": {
                   "amount": {
                     "__xlnType": "BigInt",
@@ -3481,9 +3533,10 @@
                     "__xlnType": "BigInt",
                     "value": "1000"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+                  "deadline": 70,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "-1000"
@@ -3516,9 +3569,10 @@
                     "__xlnType": "BigInt",
                     "value": "900"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                  "deadline": 303,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "900"
@@ -3528,7 +3582,7 @@
                 "targetSignerId": "0x5252525252525252525252525252525252525252",
                 "timePolicy": {
                   "deadlineConversion": "floor_ms_to_unix_seconds",
-                  "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                  "finalityPolicy": "absolute_pull_deadlines",
                   "runtimeClock": "unix_ms",
                   "runtimeExpiresAtMs": 70000,
                   "settlementClock": "unix_seconds"
@@ -3538,7 +3592,7 @@
               }
             ]
           ],
-          "root": "0x10b351ba1d4a1346f413965f66ccda903b35f6baa223b7838f20e15e90551471"
+          "root": "0x234191c83d6917835589a2975d4e53a460c476d857e001d0284dcd90644ea465"
         },
         "entityId": "0x4141414141414141414141414141414141414141414141414141414141414141",
         "knownAccounts": [
@@ -3549,7 +3603,7 @@
       "digests": {
         "effects": "0x6aeb3711a6e584f27436be90f5d6ae39e38d053d3d6daefbd360f3ee9d860626",
         "events": "0x46c032bb7b77ccde79dc529d884bca131eb7d560bff301796ba5fe5f390b4bc4",
-        "outbox": "0x7ab2ddb93be1c72bf9986d9cdf9f7b7bac6679cb80b1a292083e187c2b0b279d"
+        "outbox": "0xf56e164daa23997827c464cd3fdc23cc498221060f58dac6ab002b12fd5c0f77"
       },
       "effects": {
         "candidateEffects": [],
@@ -3565,6 +3619,7 @@
       "name": "crossJurisdictionFillNotice",
       "outbox": {
         "accountTxs": [],
+        "hashesToSign": [],
         "outputs": [
           {
             "entityId": "0x4141414141414141414141414141414141414141414141414141414141414141",
@@ -3582,7 +3637,8 @@
             ],
             "signerId": "0x6161616161616161616161616161616161616161"
           }
-        ]
+        ],
+        "targetReveals": []
       },
       "signerId": "0x6161616161616161616161616161616161616161",
       "tx": {
@@ -3598,7 +3654,7 @@
           "cumulativeFillRatio": 65535,
           "fillSeq": 2,
           "orderId": "cross-j-group-d-order",
-          "routeHash": "0x7640c3b7dcaf8094e429baf84c7fe1d7045c0415c9d2d4e9717cb536c6fc232a"
+          "routeHash": "0x64ff2815a05f6d3430c3f037c0d0490f1262a0d7402f80acbcb370e4f0e0569b"
         },
         "type": "crossJurisdictionFillNotice"
       }
@@ -3608,10 +3664,10 @@
         "accounts": [
           {
             "accountId": "0x3131313131313131313131313131313131313131313131313131313131313131",
-            "accountStateRoot": "0x0d76cd142530217c609b2c1dfc57c107f7ba0efdfc20c34934449df42a95f31d",
+            "accountStateRoot": "0x7408763dd3e596393ab4026e0131c444b4d7a5874e65867a6daec9115739874a",
             "activeDispute": null,
             "disputePrepare": null,
-            "entityLeaf": "0xee0912b47de50cd33b0152f33ab65fce1020e42966826c9ed8b94b2c1767928b",
+            "entityLeaf": "0x77acbc079331053268697eec72dfccab35a8fc410c6bc3dbe968172c1ceed492",
             "status": "active"
           }
         ],
@@ -3673,7 +3729,7 @@
                 "orderId": "cross-j-group-d-order",
                 "pendingClearRequestedAt": 10000,
                 "riskMode": "fully_collateralized",
-                "routeHash": "0x7640c3b7dcaf8094e429baf84c7fe1d7045c0415c9d2d4e9717cb536c6fc232a",
+                "routeHash": "0x64ff2815a05f6d3430c3f037c0d0490f1262a0d7402f80acbcb370e4f0e0569b",
                 "source": {
                   "amount": {
                     "__xlnType": "BigInt",
@@ -3698,9 +3754,10 @@
                     "__xlnType": "BigInt",
                     "value": "1000"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+                  "deadline": 70,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "-1000"
@@ -3733,9 +3790,10 @@
                     "__xlnType": "BigInt",
                     "value": "900"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                  "deadline": 303,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "900"
@@ -3745,7 +3803,7 @@
                 "targetSignerId": "0x5252525252525252525252525252525252525252",
                 "timePolicy": {
                   "deadlineConversion": "floor_ms_to_unix_seconds",
-                  "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                  "finalityPolicy": "absolute_pull_deadlines",
                   "runtimeClock": "unix_ms",
                   "runtimeExpiresAtMs": 70000,
                   "settlementClock": "unix_seconds"
@@ -3755,7 +3813,7 @@
               }
             ]
           ],
-          "root": "0xe5f266f5903f224fb90f387158e9e326817364ad83c7d3d5b33ccd20d7a7b737"
+          "root": "0xd4722f4906ccdfc448d34b0248550916e9cb481fc9c264a655772d4c695d2540"
         },
         "entityId": "0x4141414141414141414141414141414141414141414141414141414141414141",
         "knownAccounts": [
@@ -3775,10 +3833,10 @@
         "accounts": [
           {
             "accountId": "0x3131313131313131313131313131313131313131313131313131313131313131",
-            "accountStateRoot": "0x0d76cd142530217c609b2c1dfc57c107f7ba0efdfc20c34934449df42a95f31d",
+            "accountStateRoot": "0x7408763dd3e596393ab4026e0131c444b4d7a5874e65867a6daec9115739874a",
             "activeDispute": null,
             "disputePrepare": null,
-            "entityLeaf": "0xee0912b47de50cd33b0152f33ab65fce1020e42966826c9ed8b94b2c1767928b",
+            "entityLeaf": "0x77acbc079331053268697eec72dfccab35a8fc410c6bc3dbe968172c1ceed492",
             "status": "active"
           }
         ],
@@ -3838,7 +3896,7 @@
                 "makerEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
                 "orderId": "cross-j-group-d-order",
                 "riskMode": "fully_collateralized",
-                "routeHash": "0x7640c3b7dcaf8094e429baf84c7fe1d7045c0415c9d2d4e9717cb536c6fc232a",
+                "routeHash": "0x64ff2815a05f6d3430c3f037c0d0490f1262a0d7402f80acbcb370e4f0e0569b",
                 "source": {
                   "amount": {
                     "__xlnType": "BigInt",
@@ -3863,9 +3921,10 @@
                     "__xlnType": "BigInt",
                     "value": "1000"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+                  "deadline": 70,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "-1000"
@@ -3898,9 +3957,10 @@
                     "__xlnType": "BigInt",
                     "value": "900"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                  "deadline": 303,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "900"
@@ -3910,7 +3970,7 @@
                 "targetSignerId": "0x5252525252525252525252525252525252525252",
                 "timePolicy": {
                   "deadlineConversion": "floor_ms_to_unix_seconds",
-                  "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                  "finalityPolicy": "absolute_pull_deadlines",
                   "runtimeClock": "unix_ms",
                   "runtimeExpiresAtMs": 70000,
                   "settlementClock": "unix_seconds"
@@ -3920,7 +3980,7 @@
               }
             ]
           ],
-          "root": "0x10b351ba1d4a1346f413965f66ccda903b35f6baa223b7838f20e15e90551471"
+          "root": "0x234191c83d6917835589a2975d4e53a460c476d857e001d0284dcd90644ea465"
         },
         "entityId": "0x4141414141414141414141414141414141414141414141414141414141414141",
         "knownAccounts": [
@@ -3931,7 +3991,7 @@
       "digests": {
         "effects": "0x6aeb3711a6e584f27436be90f5d6ae39e38d053d3d6daefbd360f3ee9d860626",
         "events": "0x5fa84429d3fd9ad33442df70b188da82d6834798e1d77764ada3514e082f0ec4",
-        "outbox": "0xa4ccffaeec0a27ec39f7c57744d9dd314618b05e8906bf31b1b39ec5a5029a47"
+        "outbox": "0xc02ac27ee8d8f1e3574f443f7640ec30291d787eb44dd50437ea7dd6753032df"
       },
       "effects": {
         "candidateEffects": [],
@@ -3947,13 +4007,15 @@
       "name": "requestCrossJurisdictionClear",
       "outbox": {
         "accountTxs": [],
+        "hashesToSign": [],
         "outputs": [
           {
             "entityId": "0x4141414141414141414141414141414141414141414141414141414141414141",
             "entityTxs": [],
             "signerId": "0x6161616161616161616161616161616161616161"
           }
-        ]
+        ],
+        "targetReveals": []
       },
       "signerId": "0x6161616161616161616161616161616161616161",
       "tx": {
@@ -3969,10 +4031,10 @@
         "accounts": [
           {
             "accountId": "0x3131313131313131313131313131313131313131313131313131313131313131",
-            "accountStateRoot": "0x0d76cd142530217c609b2c1dfc57c107f7ba0efdfc20c34934449df42a95f31d",
+            "accountStateRoot": "0x7408763dd3e596393ab4026e0131c444b4d7a5874e65867a6daec9115739874a",
             "activeDispute": null,
             "disputePrepare": null,
-            "entityLeaf": "0xee0912b47de50cd33b0152f33ab65fce1020e42966826c9ed8b94b2c1767928b",
+            "entityLeaf": "0x77acbc079331053268697eec72dfccab35a8fc410c6bc3dbe968172c1ceed492",
             "status": "active"
           }
         ],
@@ -4034,7 +4096,7 @@
                 "orderId": "cross-j-group-d-order",
                 "pendingClearRequestedAt": 10000,
                 "riskMode": "fully_collateralized",
-                "routeHash": "0x7640c3b7dcaf8094e429baf84c7fe1d7045c0415c9d2d4e9717cb536c6fc232a",
+                "routeHash": "0x64ff2815a05f6d3430c3f037c0d0490f1262a0d7402f80acbcb370e4f0e0569b",
                 "source": {
                   "amount": {
                     "__xlnType": "BigInt",
@@ -4050,7 +4112,7 @@
                   "value": "500"
                 },
                 "sourceCloseProof": {
-                  "binaryHash": "0xc57d6682be6ccf72668d30b11aee29a055089d7bfc5434d4766599c6fccaafd4",
+                  "binaryHash": "0x374d1a126e6931243fa6643d12d04853ee0325c359caeaaac24cbd111a9a0a28",
                   "closeMode": "partial_cancel_remainder",
                   "cumulativeSourceAmount": {
                     "__xlnType": "BigInt",
@@ -4062,9 +4124,9 @@
                   },
                   "fillRatio": 32768,
                   "orderId": "cross-j-group-d-order",
-                  "routeHash": "0x7640c3b7dcaf8094e429baf84c7fe1d7045c0415c9d2d4e9717cb536c6fc232a",
-                  "sourcePullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
-                  "targetPullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f"
+                  "routeHash": "0x64ff2815a05f6d3430c3f037c0d0490f1262a0d7402f80acbcb370e4f0e0569b",
+                  "sourcePullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
+                  "targetPullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b"
                 },
                 "sourceDisputeConfig": {
                   "leftResponseSeconds": 10,
@@ -4076,9 +4138,10 @@
                     "__xlnType": "BigInt",
                     "value": "1000"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+                  "deadline": 70,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "-1000"
@@ -4111,9 +4174,10 @@
                     "__xlnType": "BigInt",
                     "value": "900"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                  "deadline": 303,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "900"
@@ -4123,7 +4187,7 @@
                 "targetSignerId": "0x5252525252525252525252525252525252525252",
                 "timePolicy": {
                   "deadlineConversion": "floor_ms_to_unix_seconds",
-                  "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                  "finalityPolicy": "absolute_pull_deadlines",
                   "runtimeClock": "unix_ms",
                   "runtimeExpiresAtMs": 70000,
                   "settlementClock": "unix_seconds"
@@ -4133,7 +4197,7 @@
               }
             ]
           ],
-          "root": "0x2ac0218d9759ae6701416e253d942b9d2c84edf8a83151448d2b552e476ce99c"
+          "root": "0x94a032b0606a14f406ba4e617e942d08d73b42e0cdb3f638e99d0d857869b489"
         },
         "entityId": "0x4141414141414141414141414141414141414141414141414141414141414141",
         "knownAccounts": [
@@ -4153,10 +4217,10 @@
         "accounts": [
           {
             "accountId": "0x3131313131313131313131313131313131313131313131313131313131313131",
-            "accountStateRoot": "0x0d76cd142530217c609b2c1dfc57c107f7ba0efdfc20c34934449df42a95f31d",
+            "accountStateRoot": "0x7408763dd3e596393ab4026e0131c444b4d7a5874e65867a6daec9115739874a",
             "activeDispute": null,
             "disputePrepare": null,
-            "entityLeaf": "0xee0912b47de50cd33b0152f33ab65fce1020e42966826c9ed8b94b2c1767928b",
+            "entityLeaf": "0x77acbc079331053268697eec72dfccab35a8fc410c6bc3dbe968172c1ceed492",
             "status": "active"
           }
         ],
@@ -4218,7 +4282,7 @@
                 "orderId": "cross-j-group-d-order",
                 "pendingClearRequestedAt": 10000,
                 "riskMode": "fully_collateralized",
-                "routeHash": "0x7640c3b7dcaf8094e429baf84c7fe1d7045c0415c9d2d4e9717cb536c6fc232a",
+                "routeHash": "0x64ff2815a05f6d3430c3f037c0d0490f1262a0d7402f80acbcb370e4f0e0569b",
                 "source": {
                   "amount": {
                     "__xlnType": "BigInt",
@@ -4243,9 +4307,10 @@
                     "__xlnType": "BigInt",
                     "value": "1000"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+                  "deadline": 70,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "-1000"
@@ -4278,9 +4343,10 @@
                     "__xlnType": "BigInt",
                     "value": "900"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                  "deadline": 303,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "900"
@@ -4290,7 +4356,7 @@
                 "targetSignerId": "0x5252525252525252525252525252525252525252",
                 "timePolicy": {
                   "deadlineConversion": "floor_ms_to_unix_seconds",
-                  "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                  "finalityPolicy": "absolute_pull_deadlines",
                   "runtimeClock": "unix_ms",
                   "runtimeExpiresAtMs": 70000,
                   "settlementClock": "unix_seconds"
@@ -4300,7 +4366,7 @@
               }
             ]
           ],
-          "root": "0xe5f266f5903f224fb90f387158e9e326817364ad83c7d3d5b33ccd20d7a7b737"
+          "root": "0xd4722f4906ccdfc448d34b0248550916e9cb481fc9c264a655772d4c695d2540"
         },
         "entityId": "0x4141414141414141414141414141414141414141414141414141414141414141",
         "knownAccounts": [
@@ -4311,7 +4377,7 @@
       "digests": {
         "effects": "0x6aeb3711a6e584f27436be90f5d6ae39e38d053d3d6daefbd360f3ee9d860626",
         "events": "0x9a789c369a975670236cf31f743e587397258692cb967ea23df718595b9a1299",
-        "outbox": "0x0128faa8e37aae15e4c5b64731bc258a422026050d7c712bde324218a1a9cbbf"
+        "outbox": "0x082be1cbf39bfe1c556fbdf92731c5705460235b69b289eaeff6b34d97d09ba6"
       },
       "effects": {
         "candidateEffects": [],
@@ -4331,9 +4397,9 @@
             "accountId": "0x3131313131313131313131313131313131313131313131313131313131313131",
             "tx": {
               "data": {
-                "binary": "0x800039e01a59bf6f52e10549ad75260733cc2f84b28c5a8b5880af6340f9e0ab0721d85747768d3a7ed86b80e5a3008f7f4511c963e85800d3c32020b6605f0455b588065c127ae39973bd73ce9d5d03f5d77774930e48fe08dbbd0ab4343fca9a8c970ba44132f406ba9b7faf64050907436adb8845a65f25b3de74a4fc3f69396c",
+                "binary": "0x800033d1314f2efffc82ed4b1f3e4a8b569a8153afd4a4d703aafa0feabdffb8b8de521f24c27f47a436392e9616035a4acbb5a93b6930c276dcdfa77206de2b240b37022e0cd50db39271318cff2e5c158a4f03201dcc523bf34eadcc4ec5deb5e04d52913b9d44f64c1eb2effd2335a40970f9d43d382044df9098a49663662df9",
                 "proof": {
-                  "binaryHash": "0xc57d6682be6ccf72668d30b11aee29a055089d7bfc5434d4766599c6fccaafd4",
+                  "binaryHash": "0x374d1a126e6931243fa6643d12d04853ee0325c359caeaaac24cbd111a9a0a28",
                   "closeMode": "partial_cancel_remainder",
                   "cumulativeSourceAmount": {
                     "__xlnType": "BigInt",
@@ -4345,17 +4411,18 @@
                   },
                   "fillRatio": 32768,
                   "orderId": "cross-j-group-d-order",
-                  "routeHash": "0x7640c3b7dcaf8094e429baf84c7fe1d7045c0415c9d2d4e9717cb536c6fc232a",
-                  "sourcePullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
-                  "targetPullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f"
+                  "routeHash": "0x64ff2815a05f6d3430c3f037c0d0490f1262a0d7402f80acbcb370e4f0e0569b",
+                  "sourcePullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
+                  "targetPullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b"
                 },
-                "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089"
+                "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e"
               },
               "type": "cross_pull_close"
             },
-            "txDigest": "0x873c5f514c14ca0efef389061787597b1bf8c7d5c1621f5ca96c1a90ff89ef86"
+            "txDigest": "0x5a96b0f48bb05eef4ce70da76e41f00363bc55014478c5f512cc1ed219fe61cc"
           }
         ],
+        "hashesToSign": [],
         "outputs": [
           {
             "entityId": "0x4242424242424242424242424242424242424242424242424242424242424242",
@@ -4363,11 +4430,11 @@
               {
                 "tx": {
                   "data": {
-                    "binary": "0x800039e01a59bf6f52e10549ad75260733cc2f84b28c5a8b5880af6340f9e0ab0721d85747768d3a7ed86b80e5a3008f7f4511c963e85800d3c32020b6605f0455b588065c127ae39973bd73ce9d5d03f5d77774930e48fe08dbbd0ab4343fca9a8c970ba44132f406ba9b7faf64050907436adb8845a65f25b3de74a4fc3f69396c",
+                    "binary": "0x800033d1314f2efffc82ed4b1f3e4a8b569a8153afd4a4d703aafa0feabdffb8b8de521f24c27f47a436392e9616035a4acbb5a93b6930c276dcdfa77206de2b240b37022e0cd50db39271318cff2e5c158a4f03201dcc523bf34eadcc4ec5deb5e04d52913b9d44f64c1eb2effd2335a40970f9d43d382044df9098a49663662df9",
                     "counterpartyEntityId": "0x3232323232323232323232323232323232323232323232323232323232323232",
                     "description": "Cross-j cross-j-group-d-order paired target close 32768/65535",
                     "proof": {
-                      "binaryHash": "0xc57d6682be6ccf72668d30b11aee29a055089d7bfc5434d4766599c6fccaafd4",
+                      "binaryHash": "0x374d1a126e6931243fa6643d12d04853ee0325c359caeaaac24cbd111a9a0a28",
                       "closeMode": "partial_cancel_remainder",
                       "cumulativeSourceAmount": {
                         "__xlnType": "BigInt",
@@ -4379,11 +4446,11 @@
                       },
                       "fillRatio": 32768,
                       "orderId": "cross-j-group-d-order",
-                      "routeHash": "0x7640c3b7dcaf8094e429baf84c7fe1d7045c0415c9d2d4e9717cb536c6fc232a",
-                      "sourcePullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
-                      "targetPullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f"
+                      "routeHash": "0x64ff2815a05f6d3430c3f037c0d0490f1262a0d7402f80acbcb370e4f0e0569b",
+                      "sourcePullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
+                      "targetPullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b"
                     },
-                    "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                    "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                     "route": {
                       "bookHubSignerId": "0x6161616161616161616161616161616161616161",
                       "bookOwnerEntityId": "0x4141414141414141414141414141414141414141414141414141414141414141",
@@ -4430,7 +4497,7 @@
                       "orderId": "cross-j-group-d-order",
                       "pendingClearRequestedAt": 10000,
                       "riskMode": "fully_collateralized",
-                      "routeHash": "0x7640c3b7dcaf8094e429baf84c7fe1d7045c0415c9d2d4e9717cb536c6fc232a",
+                      "routeHash": "0x64ff2815a05f6d3430c3f037c0d0490f1262a0d7402f80acbcb370e4f0e0569b",
                       "source": {
                         "amount": {
                           "__xlnType": "BigInt",
@@ -4446,7 +4513,7 @@
                         "value": "500"
                       },
                       "sourceCloseProof": {
-                        "binaryHash": "0xc57d6682be6ccf72668d30b11aee29a055089d7bfc5434d4766599c6fccaafd4",
+                        "binaryHash": "0x374d1a126e6931243fa6643d12d04853ee0325c359caeaaac24cbd111a9a0a28",
                         "closeMode": "partial_cancel_remainder",
                         "cumulativeSourceAmount": {
                           "__xlnType": "BigInt",
@@ -4458,9 +4525,9 @@
                         },
                         "fillRatio": 32768,
                         "orderId": "cross-j-group-d-order",
-                        "routeHash": "0x7640c3b7dcaf8094e429baf84c7fe1d7045c0415c9d2d4e9717cb536c6fc232a",
-                        "sourcePullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
-                        "targetPullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f"
+                        "routeHash": "0x64ff2815a05f6d3430c3f037c0d0490f1262a0d7402f80acbcb370e4f0e0569b",
+                        "sourcePullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
+                        "targetPullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b"
                       },
                       "sourceDisputeConfig": {
                         "leftResponseSeconds": 10,
@@ -4472,9 +4539,10 @@
                           "__xlnType": "BigInt",
                           "value": "1000"
                         },
-                        "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                        "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                        "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+                        "deadline": 70,
+                        "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                        "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                        "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
                         "signedAmount": {
                           "__xlnType": "BigInt",
                           "value": "-1000"
@@ -4507,9 +4575,10 @@
                           "__xlnType": "BigInt",
                           "value": "900"
                         },
-                        "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                        "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                        "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                        "deadline": 303,
+                        "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                        "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                        "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                         "signedAmount": {
                           "__xlnType": "BigInt",
                           "value": "900"
@@ -4519,7 +4588,7 @@
                       "targetSignerId": "0x5252525252525252525252525252525252525252",
                       "timePolicy": {
                         "deadlineConversion": "floor_ms_to_unix_seconds",
-                        "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                        "finalityPolicy": "absolute_pull_deadlines",
                         "runtimeClock": "unix_ms",
                         "runtimeExpiresAtMs": 70000,
                         "settlementClock": "unix_seconds"
@@ -4530,7 +4599,7 @@
                   },
                   "type": "crossPullClose"
                 },
-                "txDigest": "0x0b1970c8034283cf4a16c82b2da953ecb600258f51617caf0aa3f3d327a992cb"
+                "txDigest": "0x23c14bf0ac08a3b345c604a6dcfeb04b17a9dbbdd654847d67eb6fa000a32026"
               }
             ],
             "signerId": "0x6262626262626262626262626262626262626262"
@@ -4540,15 +4609,16 @@
             "entityTxs": [],
             "signerId": "0x6161616161616161616161616161616161616161"
           }
-        ]
+        ],
+        "targetReveals": []
       },
       "signerId": "0x6161616161616161616161616161616161616161",
       "tx": {
         "data": {
-          "binary": "0x800039e01a59bf6f52e10549ad75260733cc2f84b28c5a8b5880af6340f9e0ab0721d85747768d3a7ed86b80e5a3008f7f4511c963e85800d3c32020b6605f0455b588065c127ae39973bd73ce9d5d03f5d77774930e48fe08dbbd0ab4343fca9a8c970ba44132f406ba9b7faf64050907436adb8845a65f25b3de74a4fc3f69396c",
+          "binary": "0x800033d1314f2efffc82ed4b1f3e4a8b569a8153afd4a4d703aafa0feabdffb8b8de521f24c27f47a436392e9616035a4acbb5a93b6930c276dcdfa77206de2b240b37022e0cd50db39271318cff2e5c158a4f03201dcc523bf34eadcc4ec5deb5e04d52913b9d44f64c1eb2effd2335a40970f9d43d382044df9098a49663662df9",
           "orderId": "cross-j-group-d-order",
           "proof": {
-            "binaryHash": "0xc57d6682be6ccf72668d30b11aee29a055089d7bfc5434d4766599c6fccaafd4",
+            "binaryHash": "0x374d1a126e6931243fa6643d12d04853ee0325c359caeaaac24cbd111a9a0a28",
             "closeMode": "partial_cancel_remainder",
             "cumulativeSourceAmount": {
               "__xlnType": "BigInt",
@@ -4560,9 +4630,9 @@
             },
             "fillRatio": 32768,
             "orderId": "cross-j-group-d-order",
-            "routeHash": "0x7640c3b7dcaf8094e429baf84c7fe1d7045c0415c9d2d4e9717cb536c6fc232a",
-            "sourcePullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
-            "targetPullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f"
+            "routeHash": "0x64ff2815a05f6d3430c3f037c0d0490f1262a0d7402f80acbcb370e4f0e0569b",
+            "sourcePullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
+            "targetPullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b"
           },
           "proposerSignerId": "0x6161616161616161616161616161616161616161"
         },
@@ -4574,10 +4644,10 @@
         "accounts": [
           {
             "accountId": "0x3232323232323232323232323232323232323232323232323232323232323232",
-            "accountStateRoot": "0x0d1118ac07128866cc53be607b97e3273497becd13cccb7f1e5457090985fe02",
+            "accountStateRoot": "0x3c54944333be1df521e22feb237301e747803a6831f56bd73a852e3dc4dc462f",
             "activeDispute": null,
             "disputePrepare": null,
-            "entityLeaf": "0x10accf9ef78672e8fabea546e09cb1e810a2a58bbf8d1390e80758f5ae7cd191",
+            "entityLeaf": "0xbc82b91638db9e673f7414cdfc2b8355716b3b2ccdf79479366d26967dc409da",
             "status": "active"
           }
         ],
@@ -4639,7 +4709,7 @@
                 "orderId": "cross-j-group-d-order",
                 "pendingClearRequestedAt": 10000,
                 "riskMode": "fully_collateralized",
-                "routeHash": "0x7640c3b7dcaf8094e429baf84c7fe1d7045c0415c9d2d4e9717cb536c6fc232a",
+                "routeHash": "0x64ff2815a05f6d3430c3f037c0d0490f1262a0d7402f80acbcb370e4f0e0569b",
                 "source": {
                   "amount": {
                     "__xlnType": "BigInt",
@@ -4655,7 +4725,7 @@
                   "value": "500"
                 },
                 "sourceCloseProof": {
-                  "binaryHash": "0xc57d6682be6ccf72668d30b11aee29a055089d7bfc5434d4766599c6fccaafd4",
+                  "binaryHash": "0x374d1a126e6931243fa6643d12d04853ee0325c359caeaaac24cbd111a9a0a28",
                   "closeMode": "partial_cancel_remainder",
                   "cumulativeSourceAmount": {
                     "__xlnType": "BigInt",
@@ -4667,9 +4737,9 @@
                   },
                   "fillRatio": 32768,
                   "orderId": "cross-j-group-d-order",
-                  "routeHash": "0x7640c3b7dcaf8094e429baf84c7fe1d7045c0415c9d2d4e9717cb536c6fc232a",
-                  "sourcePullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
-                  "targetPullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f"
+                  "routeHash": "0x64ff2815a05f6d3430c3f037c0d0490f1262a0d7402f80acbcb370e4f0e0569b",
+                  "sourcePullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
+                  "targetPullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b"
                 },
                 "sourceDisputeConfig": {
                   "leftResponseSeconds": 10,
@@ -4681,9 +4751,10 @@
                     "__xlnType": "BigInt",
                     "value": "1000"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+                  "deadline": 70,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "-1000"
@@ -4716,9 +4787,10 @@
                     "__xlnType": "BigInt",
                     "value": "900"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                  "deadline": 303,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "900"
@@ -4728,7 +4800,7 @@
                 "targetSignerId": "0x5252525252525252525252525252525252525252",
                 "timePolicy": {
                   "deadlineConversion": "floor_ms_to_unix_seconds",
-                  "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                  "finalityPolicy": "absolute_pull_deadlines",
                   "runtimeClock": "unix_ms",
                   "runtimeExpiresAtMs": 70000,
                   "settlementClock": "unix_seconds"
@@ -4738,7 +4810,7 @@
               }
             ]
           ],
-          "root": "0xa8f0f51fd6ed03612aefcfc150544e6e42fb8d70fb2be1730b8a9402a887558a"
+          "root": "0x959b22071c4baa239b3f291196caa56a0530fe92a7ba55734334f516de0518f9"
         },
         "entityId": "0x4242424242424242424242424242424242424242424242424242424242424242",
         "knownAccounts": [
@@ -4758,10 +4830,10 @@
         "accounts": [
           {
             "accountId": "0x3232323232323232323232323232323232323232323232323232323232323232",
-            "accountStateRoot": "0x0d1118ac07128866cc53be607b97e3273497becd13cccb7f1e5457090985fe02",
+            "accountStateRoot": "0x3c54944333be1df521e22feb237301e747803a6831f56bd73a852e3dc4dc462f",
             "activeDispute": null,
             "disputePrepare": null,
-            "entityLeaf": "0x10accf9ef78672e8fabea546e09cb1e810a2a58bbf8d1390e80758f5ae7cd191",
+            "entityLeaf": "0xbc82b91638db9e673f7414cdfc2b8355716b3b2ccdf79479366d26967dc409da",
             "status": "active"
           }
         ],
@@ -4823,7 +4895,7 @@
                 "orderId": "cross-j-group-d-order",
                 "pendingClearRequestedAt": 10000,
                 "riskMode": "fully_collateralized",
-                "routeHash": "0x7640c3b7dcaf8094e429baf84c7fe1d7045c0415c9d2d4e9717cb536c6fc232a",
+                "routeHash": "0x64ff2815a05f6d3430c3f037c0d0490f1262a0d7402f80acbcb370e4f0e0569b",
                 "source": {
                   "amount": {
                     "__xlnType": "BigInt",
@@ -4839,7 +4911,7 @@
                   "value": "500"
                 },
                 "sourceCloseProof": {
-                  "binaryHash": "0xc57d6682be6ccf72668d30b11aee29a055089d7bfc5434d4766599c6fccaafd4",
+                  "binaryHash": "0x374d1a126e6931243fa6643d12d04853ee0325c359caeaaac24cbd111a9a0a28",
                   "closeMode": "partial_cancel_remainder",
                   "cumulativeSourceAmount": {
                     "__xlnType": "BigInt",
@@ -4851,9 +4923,9 @@
                   },
                   "fillRatio": 32768,
                   "orderId": "cross-j-group-d-order",
-                  "routeHash": "0x7640c3b7dcaf8094e429baf84c7fe1d7045c0415c9d2d4e9717cb536c6fc232a",
-                  "sourcePullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
-                  "targetPullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f"
+                  "routeHash": "0x64ff2815a05f6d3430c3f037c0d0490f1262a0d7402f80acbcb370e4f0e0569b",
+                  "sourcePullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
+                  "targetPullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b"
                 },
                 "sourceDisputeConfig": {
                   "leftResponseSeconds": 10,
@@ -4865,9 +4937,10 @@
                     "__xlnType": "BigInt",
                     "value": "1000"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+                  "deadline": 70,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "-1000"
@@ -4900,9 +4973,10 @@
                     "__xlnType": "BigInt",
                     "value": "900"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                  "deadline": 303,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "900"
@@ -4912,7 +4986,7 @@
                 "targetSignerId": "0x5252525252525252525252525252525252525252",
                 "timePolicy": {
                   "deadlineConversion": "floor_ms_to_unix_seconds",
-                  "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                  "finalityPolicy": "absolute_pull_deadlines",
                   "runtimeClock": "unix_ms",
                   "runtimeExpiresAtMs": 70000,
                   "settlementClock": "unix_seconds"
@@ -4922,7 +4996,7 @@
               }
             ]
           ],
-          "root": "0x2ac0218d9759ae6701416e253d942b9d2c84edf8a83151448d2b552e476ce99c"
+          "root": "0x94a032b0606a14f406ba4e617e942d08d73b42e0cdb3f638e99d0d857869b489"
         },
         "entityId": "0x4242424242424242424242424242424242424242424242424242424242424242",
         "knownAccounts": [
@@ -4933,7 +5007,7 @@
       "digests": {
         "effects": "0x6aeb3711a6e584f27436be90f5d6ae39e38d053d3d6daefbd360f3ee9d860626",
         "events": "0x4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
-        "outbox": "0xe6d5d483e7ee3b01d6b835adde40b038d78e69240c139d3dc5e5b59cdc8b8b42"
+        "outbox": "0xb05f612ac55db61e2f412be13eff6458ac9f15afb07e45fb35bfc74cd31adc27"
       },
       "effects": {
         "candidateEffects": [],
@@ -4948,9 +5022,9 @@
             "accountId": "0x3232323232323232323232323232323232323232323232323232323232323232",
             "tx": {
               "data": {
-                "binary": "0x800039e01a59bf6f52e10549ad75260733cc2f84b28c5a8b5880af6340f9e0ab0721d85747768d3a7ed86b80e5a3008f7f4511c963e85800d3c32020b6605f0455b588065c127ae39973bd73ce9d5d03f5d77774930e48fe08dbbd0ab4343fca9a8c970ba44132f406ba9b7faf64050907436adb8845a65f25b3de74a4fc3f69396c",
+                "binary": "0x800033d1314f2efffc82ed4b1f3e4a8b569a8153afd4a4d703aafa0feabdffb8b8de521f24c27f47a436392e9616035a4acbb5a93b6930c276dcdfa77206de2b240b37022e0cd50db39271318cff2e5c158a4f03201dcc523bf34eadcc4ec5deb5e04d52913b9d44f64c1eb2effd2335a40970f9d43d382044df9098a49663662df9",
                 "proof": {
-                  "binaryHash": "0xc57d6682be6ccf72668d30b11aee29a055089d7bfc5434d4766599c6fccaafd4",
+                  "binaryHash": "0x374d1a126e6931243fa6643d12d04853ee0325c359caeaaac24cbd111a9a0a28",
                   "closeMode": "partial_cancel_remainder",
                   "cumulativeSourceAmount": {
                     "__xlnType": "BigInt",
@@ -4962,33 +5036,35 @@
                   },
                   "fillRatio": 32768,
                   "orderId": "cross-j-group-d-order",
-                  "routeHash": "0x7640c3b7dcaf8094e429baf84c7fe1d7045c0415c9d2d4e9717cb536c6fc232a",
-                  "sourcePullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
-                  "targetPullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f"
+                  "routeHash": "0x64ff2815a05f6d3430c3f037c0d0490f1262a0d7402f80acbcb370e4f0e0569b",
+                  "sourcePullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
+                  "targetPullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b"
                 },
-                "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f"
+                "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b"
               },
               "type": "cross_pull_close"
             },
-            "txDigest": "0x522f3898e5f25106aeec1ad6173937aa9c8b8462b8a2f3ee3f988bc80cae0992"
+            "txDigest": "0x61517363fb4edb6f6b9bcd8a18dba1d114bacb49c64e34eaa62fdcfdcf4f3e98"
           }
         ],
+        "hashesToSign": [],
         "outputs": [
           {
             "entityId": "0x4242424242424242424242424242424242424242424242424242424242424242",
             "entityTxs": [],
             "signerId": "0x6262626262626262626262626262626262626262"
           }
-        ]
+        ],
+        "targetReveals": []
       },
       "signerId": "0x6262626262626262626262626262626262626262",
       "tx": {
         "data": {
-          "binary": "0x800039e01a59bf6f52e10549ad75260733cc2f84b28c5a8b5880af6340f9e0ab0721d85747768d3a7ed86b80e5a3008f7f4511c963e85800d3c32020b6605f0455b588065c127ae39973bd73ce9d5d03f5d77774930e48fe08dbbd0ab4343fca9a8c970ba44132f406ba9b7faf64050907436adb8845a65f25b3de74a4fc3f69396c",
+          "binary": "0x800033d1314f2efffc82ed4b1f3e4a8b569a8153afd4a4d703aafa0feabdffb8b8de521f24c27f47a436392e9616035a4acbb5a93b6930c276dcdfa77206de2b240b37022e0cd50db39271318cff2e5c158a4f03201dcc523bf34eadcc4ec5deb5e04d52913b9d44f64c1eb2effd2335a40970f9d43d382044df9098a49663662df9",
           "counterpartyEntityId": "0x3232323232323232323232323232323232323232323232323232323232323232",
           "description": "Cross-j cross-j-group-d-order paired target close 32768/65535",
           "proof": {
-            "binaryHash": "0xc57d6682be6ccf72668d30b11aee29a055089d7bfc5434d4766599c6fccaafd4",
+            "binaryHash": "0x374d1a126e6931243fa6643d12d04853ee0325c359caeaaac24cbd111a9a0a28",
             "closeMode": "partial_cancel_remainder",
             "cumulativeSourceAmount": {
               "__xlnType": "BigInt",
@@ -5000,11 +5076,11 @@
             },
             "fillRatio": 32768,
             "orderId": "cross-j-group-d-order",
-            "routeHash": "0x7640c3b7dcaf8094e429baf84c7fe1d7045c0415c9d2d4e9717cb536c6fc232a",
-            "sourcePullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
-            "targetPullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f"
+            "routeHash": "0x64ff2815a05f6d3430c3f037c0d0490f1262a0d7402f80acbcb370e4f0e0569b",
+            "sourcePullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
+            "targetPullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b"
           },
-          "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+          "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
           "route": {
             "bookHubSignerId": "0x6161616161616161616161616161616161616161",
             "bookOwnerEntityId": "0x4141414141414141414141414141414141414141414141414141414141414141",
@@ -5051,7 +5127,7 @@
             "orderId": "cross-j-group-d-order",
             "pendingClearRequestedAt": 10000,
             "riskMode": "fully_collateralized",
-            "routeHash": "0x7640c3b7dcaf8094e429baf84c7fe1d7045c0415c9d2d4e9717cb536c6fc232a",
+            "routeHash": "0x64ff2815a05f6d3430c3f037c0d0490f1262a0d7402f80acbcb370e4f0e0569b",
             "source": {
               "amount": {
                 "__xlnType": "BigInt",
@@ -5067,7 +5143,7 @@
               "value": "500"
             },
             "sourceCloseProof": {
-              "binaryHash": "0xc57d6682be6ccf72668d30b11aee29a055089d7bfc5434d4766599c6fccaafd4",
+              "binaryHash": "0x374d1a126e6931243fa6643d12d04853ee0325c359caeaaac24cbd111a9a0a28",
               "closeMode": "partial_cancel_remainder",
               "cumulativeSourceAmount": {
                 "__xlnType": "BigInt",
@@ -5079,9 +5155,9 @@
               },
               "fillRatio": 32768,
               "orderId": "cross-j-group-d-order",
-              "routeHash": "0x7640c3b7dcaf8094e429baf84c7fe1d7045c0415c9d2d4e9717cb536c6fc232a",
-              "sourcePullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
-              "targetPullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f"
+              "routeHash": "0x64ff2815a05f6d3430c3f037c0d0490f1262a0d7402f80acbcb370e4f0e0569b",
+              "sourcePullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
+              "targetPullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b"
             },
             "sourceDisputeConfig": {
               "leftResponseSeconds": 10,
@@ -5093,9 +5169,10 @@
                 "__xlnType": "BigInt",
                 "value": "1000"
               },
-              "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-              "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-              "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+              "deadline": 70,
+              "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+              "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+              "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
               "signedAmount": {
                 "__xlnType": "BigInt",
                 "value": "-1000"
@@ -5128,9 +5205,10 @@
                 "__xlnType": "BigInt",
                 "value": "900"
               },
-              "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-              "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-              "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+              "deadline": 303,
+              "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+              "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+              "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
               "signedAmount": {
                 "__xlnType": "BigInt",
                 "value": "900"
@@ -5140,7 +5218,7 @@
             "targetSignerId": "0x5252525252525252525252525252525252525252",
             "timePolicy": {
               "deadlineConversion": "floor_ms_to_unix_seconds",
-              "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+              "finalityPolicy": "absolute_pull_deadlines",
               "runtimeClock": "unix_ms",
               "runtimeExpiresAtMs": 70000,
               "settlementClock": "unix_seconds"
@@ -5157,10 +5235,10 @@
         "accounts": [
           {
             "accountId": "0x3131313131313131313131313131313131313131313131313131313131313131",
-            "accountStateRoot": "0x2212d03cbb31d4a843691eb82de876987f0f50d8cb18f26de25cf070f323b6f7",
+            "accountStateRoot": "0xa36c04ca9a5b1a9910631c0c1e2d2e3ef434713524a49d46c86dec2448600d42",
             "activeDispute": null,
             "disputePrepare": null,
-            "entityLeaf": "0x0a7944c8fdf0f3b16ad0f20a03d4f5b5a6592627d3cd3f4c9ede98d6f23bcd4e",
+            "entityLeaf": "0x9986e373a2e583903d9aaa8a3b32b22a6ab296df99d01d0e019a4072512df124",
             "status": "active"
           }
         ],
@@ -5195,7 +5273,7 @@
                 "orderId": "cross-j-group-d-order",
                 "pendingClearRequestedAt": 10000,
                 "riskMode": "fully_collateralized",
-                "routeHash": "0xf6301f8e323a2dde4f6642f4f71b7a3f05ea155f1bf66b509de8bd390617b4c3",
+                "routeHash": "0xdeac4921a0bb787e4ce2c7b0e8cf0d92ae11f76ece7e23320b600e40e2e5222f",
                 "source": {
                   "amount": {
                     "__xlnType": "BigInt",
@@ -5219,9 +5297,9 @@
                   },
                   "fillRatio": 0,
                   "orderId": "cross-j-group-d-order",
-                  "routeHash": "0xf6301f8e323a2dde4f6642f4f71b7a3f05ea155f1bf66b509de8bd390617b4c3",
-                  "sourcePullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
-                  "targetPullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f"
+                  "routeHash": "0xdeac4921a0bb787e4ce2c7b0e8cf0d92ae11f76ece7e23320b600e40e2e5222f",
+                  "sourcePullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
+                  "targetPullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b"
                 },
                 "sourceDisputeConfig": {
                   "leftResponseSeconds": 10,
@@ -5233,9 +5311,10 @@
                     "__xlnType": "BigInt",
                     "value": "1000"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+                  "deadline": 9,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "-1000"
@@ -5264,9 +5343,10 @@
                     "__xlnType": "BigInt",
                     "value": "900"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                  "deadline": 242,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "900"
@@ -5276,7 +5356,7 @@
                 "targetSignerId": "0x5252525252525252525252525252525252525252",
                 "timePolicy": {
                   "deadlineConversion": "floor_ms_to_unix_seconds",
-                  "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                  "finalityPolicy": "absolute_pull_deadlines",
                   "runtimeClock": "unix_ms",
                   "runtimeExpiresAtMs": 70000,
                   "settlementClock": "unix_seconds"
@@ -5286,7 +5366,7 @@
               }
             ]
           ],
-          "root": "0xd86a9a0dc07c6d590a8fcab38c41d523cce0cc0abd3eeb07548b500236bb02e3"
+          "root": "0x409bfcb34b1e0064966e0c57cba3a419cda4ea86318c3d4f224a7866bb2724d3"
         },
         "entityId": "0x4141414141414141414141414141414141414141414141414141414141414141",
         "knownAccounts": [
@@ -5306,10 +5386,10 @@
         "accounts": [
           {
             "accountId": "0x3131313131313131313131313131313131313131313131313131313131313131",
-            "accountStateRoot": "0x2212d03cbb31d4a843691eb82de876987f0f50d8cb18f26de25cf070f323b6f7",
+            "accountStateRoot": "0xa36c04ca9a5b1a9910631c0c1e2d2e3ef434713524a49d46c86dec2448600d42",
             "activeDispute": null,
             "disputePrepare": null,
-            "entityLeaf": "0x0a7944c8fdf0f3b16ad0f20a03d4f5b5a6592627d3cd3f4c9ede98d6f23bcd4e",
+            "entityLeaf": "0x9986e373a2e583903d9aaa8a3b32b22a6ab296df99d01d0e019a4072512df124",
             "status": "active"
           }
         ],
@@ -5342,7 +5422,7 @@
                 "makerEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
                 "orderId": "cross-j-group-d-order",
                 "riskMode": "fully_collateralized",
-                "routeHash": "0xf6301f8e323a2dde4f6642f4f71b7a3f05ea155f1bf66b509de8bd390617b4c3",
+                "routeHash": "0xdeac4921a0bb787e4ce2c7b0e8cf0d92ae11f76ece7e23320b600e40e2e5222f",
                 "source": {
                   "amount": {
                     "__xlnType": "BigInt",
@@ -5363,9 +5443,10 @@
                     "__xlnType": "BigInt",
                     "value": "1000"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+                  "deadline": 9,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "-1000"
@@ -5394,9 +5475,10 @@
                     "__xlnType": "BigInt",
                     "value": "900"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                  "deadline": 242,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "900"
@@ -5406,7 +5488,7 @@
                 "targetSignerId": "0x5252525252525252525252525252525252525252",
                 "timePolicy": {
                   "deadlineConversion": "floor_ms_to_unix_seconds",
-                  "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                  "finalityPolicy": "absolute_pull_deadlines",
                   "runtimeClock": "unix_ms",
                   "runtimeExpiresAtMs": 70000,
                   "settlementClock": "unix_seconds"
@@ -5416,7 +5498,7 @@
               }
             ]
           ],
-          "root": "0x77824cdd8bf4e52ebc52995853e8bd0b0c1c07e5f13a7e14791a05a261ec4159"
+          "root": "0x258f5991e2229e7f1577becf63a6aad1335411d3022875821f53369df2efb9f1"
         },
         "entityId": "0x4141414141414141414141414141414141414141414141414141414141414141",
         "knownAccounts": [
@@ -5427,7 +5509,7 @@
       "digests": {
         "effects": "0x6aeb3711a6e584f27436be90f5d6ae39e38d053d3d6daefbd360f3ee9d860626",
         "events": "0x854071854c09d316e4f09ff5b612fc257e3d22283a3a3f6ebf09a29462f6f8b1",
-        "outbox": "0x17e7ea832650cb9e657a66210792f446c6fb90ae76e7dc626c08c78a166e10f4"
+        "outbox": "0x9df3445c8248fd5a0cf26b0d77a00c86f045212a20a88c5344f87a9768855d78"
       },
       "effects": {
         "candidateEffects": [],
@@ -5465,17 +5547,18 @@
                   },
                   "fillRatio": 0,
                   "orderId": "cross-j-group-d-order",
-                  "routeHash": "0xf6301f8e323a2dde4f6642f4f71b7a3f05ea155f1bf66b509de8bd390617b4c3",
-                  "sourcePullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
-                  "targetPullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f"
+                  "routeHash": "0xdeac4921a0bb787e4ce2c7b0e8cf0d92ae11f76ece7e23320b600e40e2e5222f",
+                  "sourcePullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
+                  "targetPullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b"
                 },
-                "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089"
+                "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e"
               },
               "type": "cross_pull_close"
             },
-            "txDigest": "0x69dea273e61553168778197d7499c38d07adf8cb642abb717d504cea29e6b8f8"
+            "txDigest": "0x8c41ab72b43d1273ac35e211d22b2709504c6410b4804d9d9185bb9de0a61d79"
           }
         ],
+        "hashesToSign": [],
         "outputs": [
           {
             "entityId": "0x4242424242424242424242424242424242424242424242424242424242424242",
@@ -5499,11 +5582,11 @@
                       },
                       "fillRatio": 0,
                       "orderId": "cross-j-group-d-order",
-                      "routeHash": "0xf6301f8e323a2dde4f6642f4f71b7a3f05ea155f1bf66b509de8bd390617b4c3",
-                      "sourcePullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
-                      "targetPullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f"
+                      "routeHash": "0xdeac4921a0bb787e4ce2c7b0e8cf0d92ae11f76ece7e23320b600e40e2e5222f",
+                      "sourcePullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
+                      "targetPullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b"
                     },
-                    "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                    "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                     "route": {
                       "bookHubSignerId": "0x6161616161616161616161616161616161616161",
                       "bookOwnerEntityId": "0x4141414141414141414141414141414141414141414141414141414141414141",
@@ -5521,7 +5604,7 @@
                       "makerEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
                       "orderId": "cross-j-group-d-order",
                       "riskMode": "fully_collateralized",
-                      "routeHash": "0xf6301f8e323a2dde4f6642f4f71b7a3f05ea155f1bf66b509de8bd390617b4c3",
+                      "routeHash": "0xdeac4921a0bb787e4ce2c7b0e8cf0d92ae11f76ece7e23320b600e40e2e5222f",
                       "source": {
                         "amount": {
                           "__xlnType": "BigInt",
@@ -5545,9 +5628,9 @@
                         },
                         "fillRatio": 0,
                         "orderId": "cross-j-group-d-order",
-                        "routeHash": "0xf6301f8e323a2dde4f6642f4f71b7a3f05ea155f1bf66b509de8bd390617b4c3",
-                        "sourcePullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
-                        "targetPullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f"
+                        "routeHash": "0xdeac4921a0bb787e4ce2c7b0e8cf0d92ae11f76ece7e23320b600e40e2e5222f",
+                        "sourcePullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
+                        "targetPullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b"
                       },
                       "sourceDisputeConfig": {
                         "leftResponseSeconds": 10,
@@ -5559,9 +5642,10 @@
                           "__xlnType": "BigInt",
                           "value": "1000"
                         },
-                        "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                        "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                        "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+                        "deadline": 9,
+                        "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                        "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                        "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
                         "signedAmount": {
                           "__xlnType": "BigInt",
                           "value": "-1000"
@@ -5590,9 +5674,10 @@
                           "__xlnType": "BigInt",
                           "value": "900"
                         },
-                        "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                        "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                        "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                        "deadline": 242,
+                        "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                        "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                        "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                         "signedAmount": {
                           "__xlnType": "BigInt",
                           "value": "900"
@@ -5602,7 +5687,7 @@
                       "targetSignerId": "0x5252525252525252525252525252525252525252",
                       "timePolicy": {
                         "deadlineConversion": "floor_ms_to_unix_seconds",
-                        "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                        "finalityPolicy": "absolute_pull_deadlines",
                         "runtimeClock": "unix_ms",
                         "runtimeExpiresAtMs": 70000,
                         "settlementClock": "unix_seconds"
@@ -5613,7 +5698,7 @@
                   },
                   "type": "crossPullClose"
                 },
-                "txDigest": "0xce80ba91df0be969238f6e71ec8cac24cb8c6e5694a0e8132c96ae172be3e852"
+                "txDigest": "0x64203d7b2d3700aa8984796d64a0515ec7df8edd30ac0803d9ae16cee3e16f49"
               }
             ],
             "signerId": "0x6262626262626262626262626262626262626262"
@@ -5623,7 +5708,8 @@
             "entityTxs": [],
             "signerId": "0x6161616161616161616161616161616161616161"
           }
-        ]
+        ],
+        "targetReveals": []
       },
       "signerId": "0x6161616161616161616161616161616161616161",
       "tx": {
@@ -5704,14 +5790,14 @@
                   "fillRatio": 32768,
                   "fullSecret": "0x0000000000000000000000000000000000000000000000000000000000000000",
                   "reveals": [
-                    "0x39e01a59bf6f52e10549ad75260733cc2f84b28c5a8b5880af6340f9e0ab0721",
-                    "0xd85747768d3a7ed86b80e5a3008f7f4511c963e85800d3c32020b6605f0455b5",
-                    "0x88065c127ae39973bd73ce9d5d03f5d77774930e48fe08dbbd0ab4343fca9a8c",
-                    "0x970ba44132f406ba9b7faf64050907436adb8845a65f25b3de74a4fc3f69396c"
+                    "0x33d1314f2efffc82ed4b1f3e4a8b569a8153afd4a4d703aafa0feabdffb8b8de",
+                    "0x521f24c27f47a436392e9616035a4acbb5a93b6930c276dcdfa77206de2b240b",
+                    "0x37022e0cd50db39271318cff2e5c158a4f03201dcc523bf34eadcc4ec5deb5e0",
+                    "0x4d52913b9d44f64c1eb2effd2335a40970f9d43d382044df9098a49663662df9"
                   ]
                 },
                 "riskMode": "fully_collateralized",
-                "routeHash": "0x7640c3b7dcaf8094e429baf84c7fe1d7045c0415c9d2d4e9717cb536c6fc232a",
+                "routeHash": "0x64ff2815a05f6d3430c3f037c0d0490f1262a0d7402f80acbcb370e4f0e0569b",
                 "source": {
                   "amount": {
                     "__xlnType": "BigInt",
@@ -5736,9 +5822,10 @@
                     "__xlnType": "BigInt",
                     "value": "1000"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+                  "deadline": 70,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "-1000"
@@ -5771,9 +5858,10 @@
                     "__xlnType": "BigInt",
                     "value": "900"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                  "deadline": 303,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "900"
@@ -5783,7 +5871,7 @@
                 "targetSignerId": "0x5252525252525252525252525252525252525252",
                 "timePolicy": {
                   "deadlineConversion": "floor_ms_to_unix_seconds",
-                  "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                  "finalityPolicy": "absolute_pull_deadlines",
                   "runtimeClock": "unix_ms",
                   "runtimeExpiresAtMs": 70000,
                   "settlementClock": "unix_seconds"
@@ -5793,7 +5881,7 @@
               }
             ]
           ],
-          "root": "0x44a92fbf66466a8a95b23fba25f9a07f16f1a3a4d08f334bda516264f2a0a076"
+          "root": "0x9e42780b2c21f2e606873cb60f2e8f5f98718bf30a1a35dfb8ff38cfd2de0d94"
         },
         "entityId": "0x3232323232323232323232323232323232323232323232323232323232323232",
         "knownAccounts": [
@@ -5876,7 +5964,7 @@
                 "makerEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
                 "orderId": "cross-j-group-d-order",
                 "riskMode": "fully_collateralized",
-                "routeHash": "0x7640c3b7dcaf8094e429baf84c7fe1d7045c0415c9d2d4e9717cb536c6fc232a",
+                "routeHash": "0x64ff2815a05f6d3430c3f037c0d0490f1262a0d7402f80acbcb370e4f0e0569b",
                 "source": {
                   "amount": {
                     "__xlnType": "BigInt",
@@ -5901,9 +5989,10 @@
                     "__xlnType": "BigInt",
                     "value": "1000"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+                  "deadline": 70,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "-1000"
@@ -5936,9 +6025,10 @@
                     "__xlnType": "BigInt",
                     "value": "900"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                  "deadline": 303,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "900"
@@ -5948,7 +6038,7 @@
                 "targetSignerId": "0x5252525252525252525252525252525252525252",
                 "timePolicy": {
                   "deadlineConversion": "floor_ms_to_unix_seconds",
-                  "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                  "finalityPolicy": "absolute_pull_deadlines",
                   "runtimeClock": "unix_ms",
                   "runtimeExpiresAtMs": 70000,
                   "settlementClock": "unix_seconds"
@@ -5958,7 +6048,7 @@
               }
             ]
           ],
-          "root": "0x10b351ba1d4a1346f413965f66ccda903b35f6baa223b7838f20e15e90551471"
+          "root": "0x234191c83d6917835589a2975d4e53a460c476d857e001d0284dcd90644ea465"
         },
         "entityId": "0x3232323232323232323232323232323232323232323232323232323232323232",
         "knownAccounts": [
@@ -5968,29 +6058,59 @@
       },
       "digests": {
         "effects": "0x6aeb3711a6e584f27436be90f5d6ae39e38d053d3d6daefbd360f3ee9d860626",
-        "events": "0x616c0bc0f8e79c282b1a4145706eb3844ee6ba112a246eb81393aaf658d2b154",
-        "outbox": "0xba4cad8e5af5ace26df4b31bf4d461bf158fa1cbece7c0ef82d699aaa5833c76"
+        "events": "0x4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "outbox": "0x69368509bb16c1b63aa1d99f9ef6bbc1b122d6f39f6df6b92a41b28fe23ade18"
       },
       "effects": {
         "candidateEffects": [],
         "storageChanges": [],
         "swapOffersCreated": []
       },
-      "events": [
-        {
-          "message": "⏳ Cross-j reveal port cross-j-group-d-order: waiting for the target dispute clock",
-          "type": "status"
-        }
-      ],
+      "events": [],
       "name": "crossJurisdictionSalvage",
       "outbox": {
         "accountTxs": [],
-        "outputs": []
+        "hashesToSign": [
+          {
+            "context": "targetReveal:cross-j-group-d-order",
+            "hash": "0xbd653f15b988f5e45c37952b9cf78e57fef1b9e89f9b58f7cb6054d87f0d486e",
+            "type": "hashLadderReveal"
+          }
+        ],
+        "outputs": [],
+        "targetReveals": [
+          {
+            "data": {
+              "registration": {
+                "counterpartyEntity": "0x4242424242424242424242424242424242424242424242424242424242424242",
+                "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                "targetRole": true,
+                "witness": {
+                  "fillRatio": 32768,
+                  "fullSecret": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                  "reveals": [
+                    "0x33d1314f2efffc82ed4b1f3e4a8b569a8153afd4a4d703aafa0feabdffb8b8de",
+                    "0x521f24c27f47a436392e9616035a4acbb5a93b6930c276dcdfa77206de2b240b",
+                    "0x37022e0cd50db39271318cff2e5c158a4f03201dcc523bf34eadcc4ec5deb5e0",
+                    "0x4d52913b9d44f64c1eb2effd2335a40970f9d43d382044df9098a49663662df9"
+                  ]
+                }
+              },
+              "revealHash": "0xbd653f15b988f5e45c37952b9cf78e57fef1b9e89f9b58f7cb6054d87f0d486e",
+              "signerId": "0x5252525252525252525252525252525252525252"
+            },
+            "entityId": "0x3232323232323232323232323232323232323232323232323232323232323232",
+            "jurisdictionName": "Group D Target",
+            "timestamp": 10000,
+            "type": "hashLadderReveal"
+          }
+        ]
       },
       "signerId": "0x5252525252525252525252525252525252525252",
       "tx": {
         "data": {
-          "binary": "0x800039e01a59bf6f52e10549ad75260733cc2f84b28c5a8b5880af6340f9e0ab0721d85747768d3a7ed86b80e5a3008f7f4511c963e85800d3c32020b6605f0455b588065c127ae39973bd73ce9d5d03f5d77774930e48fe08dbbd0ab4343fca9a8c970ba44132f406ba9b7faf64050907436adb8845a65f25b3de74a4fc3f69396c",
+          "binary": "0x800033d1314f2efffc82ed4b1f3e4a8b569a8153afd4a4d703aafa0feabdffb8b8de521f24c27f47a436392e9616035a4acbb5a93b6930c276dcdfa77206de2b240b37022e0cd50db39271318cff2e5c158a4f03201dcc523bf34eadcc4ec5deb5e04d52913b9d44f64c1eb2effd2335a40970f9d43d382044df9098a49663662df9",
           "fillRatio": 32768,
           "observedAt": 10000,
           "routeId": "cross-j-group-d-order",
@@ -6005,7 +6125,7 @@
         "accounts": [
           {
             "accountId": "0x4141414141414141414141414141414141414141414141414141414141414141",
-            "accountStateRoot": "0x4c5a6dea61ae2a061ff239d78c3b30463ee8b3d6a3859cb18b52c092b333e0e2",
+            "accountStateRoot": "0x4c53829cc05d9d3b2ac79ed31a2019c481d3171850b241fe5ed2d3b0badf4b35",
             "activeDispute": null,
             "disputePrepare": {
               "readyAfter": 10000,
@@ -6016,7 +6136,7 @@
               },
               "startedAt": 10000
             },
-            "entityLeaf": "0xc8cb0c1f202c2132259f6b3c0ba07578c4022d9cc803e6de7eabc50995dce21b",
+            "entityLeaf": "0xe3ebb76cc94d0d4cb912bf0c7262924d676d5db5a0017056ce6e57896f470e43",
             "status": "dispute_preparing"
           }
         ],
@@ -6049,7 +6169,7 @@
                 "makerEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
                 "orderId": "cross-j-group-d-order",
                 "riskMode": "fully_collateralized",
-                "routeHash": "0x7640c3b7dcaf8094e429baf84c7fe1d7045c0415c9d2d4e9717cb536c6fc232a",
+                "routeHash": "0x64ff2815a05f6d3430c3f037c0d0490f1262a0d7402f80acbcb370e4f0e0569b",
                 "source": {
                   "amount": {
                     "__xlnType": "BigInt",
@@ -6070,9 +6190,10 @@
                     "__xlnType": "BigInt",
                     "value": "1000"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+                  "deadline": 70,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "-1000"
@@ -6101,9 +6222,10 @@
                     "__xlnType": "BigInt",
                     "value": "900"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                  "deadline": 303,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "900"
@@ -6113,7 +6235,7 @@
                 "targetSignerId": "0x5252525252525252525252525252525252525252",
                 "timePolicy": {
                   "deadlineConversion": "floor_ms_to_unix_seconds",
-                  "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                  "finalityPolicy": "absolute_pull_deadlines",
                   "runtimeClock": "unix_ms",
                   "runtimeExpiresAtMs": 70000,
                   "settlementClock": "unix_seconds"
@@ -6123,7 +6245,7 @@
               }
             ]
           ],
-          "root": "0xb5c00867962fb814ebcbc07f11c039b83fa0408348d03cb458718e615a1d0d24"
+          "root": "0x2437421b9feb97363b25c98971b2418173661a6bb07b3e5ac3f00edf1b0e43c9"
         },
         "entityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
         "knownAccounts": [
@@ -6143,10 +6265,10 @@
         "accounts": [
           {
             "accountId": "0x4141414141414141414141414141414141414141414141414141414141414141",
-            "accountStateRoot": "0x4c5a6dea61ae2a061ff239d78c3b30463ee8b3d6a3859cb18b52c092b333e0e2",
+            "accountStateRoot": "0x4c53829cc05d9d3b2ac79ed31a2019c481d3171850b241fe5ed2d3b0badf4b35",
             "activeDispute": null,
             "disputePrepare": null,
-            "entityLeaf": "0xc5dc7c7076a36ba70c40a2fb3a3ac1bcf69ab89d7e4048447cc4788ec6315ae7",
+            "entityLeaf": "0x249a66dd1ea683724e4a94dd13b9b96fed4473a2351db2d3a72cba548de593b3",
             "status": "active"
           }
         ],
@@ -6179,7 +6301,7 @@
                 "makerEntityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
                 "orderId": "cross-j-group-d-order",
                 "riskMode": "fully_collateralized",
-                "routeHash": "0x7640c3b7dcaf8094e429baf84c7fe1d7045c0415c9d2d4e9717cb536c6fc232a",
+                "routeHash": "0x64ff2815a05f6d3430c3f037c0d0490f1262a0d7402f80acbcb370e4f0e0569b",
                 "source": {
                   "amount": {
                     "__xlnType": "BigInt",
@@ -6200,9 +6322,10 @@
                     "__xlnType": "BigInt",
                     "value": "1000"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0xeef684ed50241920bc1f62873ba09aa8c52b4eb711af03048ea4f6d1f7b24089",
+                  "deadline": 70,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0xbc509abaa9c5410635373abb33560fa69cb7fc72c9006c9a4173551433b56d6e",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "-1000"
@@ -6231,9 +6354,10 @@
                     "__xlnType": "BigInt",
                     "value": "900"
                   },
-                  "fullHash": "0xe2ec2992ba26c1399fcc46f21e802f228a0634af93896622be9a3e15735df2c1",
-                  "partialRoot": "0xaf06ca8935175f4896db5c059919d7b3c1229fcd84e72bc9cca3318d03fd13f3",
-                  "pullId": "0x1d90d7f15a6dd08ddf864687796126923f112d93c73b51dca90561113634566f",
+                  "deadline": 303,
+                  "fullHash": "0x2763547454abadf67e653d59700f806383e56ee03f01f86509af1f94c9209605",
+                  "partialRoot": "0xa871852cc520fc0dffe8a251bafcac7c7f69890e1a79deebfe438cdc10a665c1",
+                  "pullId": "0x449a240871ff856dedad7b95ad0b691f4a3517e48c2815ac312f8c645e7c298b",
                   "signedAmount": {
                     "__xlnType": "BigInt",
                     "value": "900"
@@ -6243,7 +6367,7 @@
                 "targetSignerId": "0x5252525252525252525252525252525252525252",
                 "timePolicy": {
                   "deadlineConversion": "floor_ms_to_unix_seconds",
-                  "finalityPolicy": "independent_beneficiary_windows_pull_sum_finality",
+                  "finalityPolicy": "absolute_pull_deadlines",
                   "runtimeClock": "unix_ms",
                   "runtimeExpiresAtMs": 70000,
                   "settlementClock": "unix_seconds"
@@ -6253,7 +6377,7 @@
               }
             ]
           ],
-          "root": "0xb5c00867962fb814ebcbc07f11c039b83fa0408348d03cb458718e615a1d0d24"
+          "root": "0x2437421b9feb97363b25c98971b2418173661a6bb07b3e5ac3f00edf1b0e43c9"
         },
         "entityId": "0x3131313131313131313131313131313131313131313131313131313131313131",
         "knownAccounts": [
@@ -6264,7 +6388,7 @@
       "digests": {
         "effects": "0x6aeb3711a6e584f27436be90f5d6ae39e38d053d3d6daefbd360f3ee9d860626",
         "events": "0x2833da1825aadef941074cd8ea21c63e0248d5a62f14e5b6da727d7e74ddb205",
-        "outbox": "0xba4cad8e5af5ace26df4b31bf4d461bf158fa1cbece7c0ef82d699aaa5833c76"
+        "outbox": "0x89037e003e09bc095d280d1ebfcc2bf6f5e71f643e46c49819d9a2a4fa3b176f"
       },
       "effects": {
         "candidateEffects": [],
@@ -6284,7 +6408,9 @@
       "name": "crossJurisdictionForceSiblingDispute",
       "outbox": {
         "accountTxs": [],
-        "outputs": []
+        "hashesToSign": [],
+        "outputs": [],
+        "targetReveals": []
       },
       "signerId": "0x5151515151515151515151515151515151515151",
       "tx": {

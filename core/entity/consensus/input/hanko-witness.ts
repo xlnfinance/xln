@@ -21,7 +21,7 @@ import { getEntityAccountForWrite } from '../../state/persistent-account-map';
 
 export type HankoWitnessEntry = {
   hanko: HankoString;
-  type: 'accountFrame' | 'dispute' | 'profile' | 'settlement' | 'jBatch' | 'entityProviderAction';
+  type: 'accountFrame' | 'dispute' | 'profile' | 'settlement' | 'hashLadderReveal' | 'jBatch' | 'entityProviderAction';
   entityHeight: number;
   createdAt: number;
 };
@@ -364,6 +364,11 @@ export const attachHankoWitnessToOutputs = (
 
   for (const jInput of jOutputs) {
     for (const jTx of jInput.jTxs) {
+      if (jTx.type === 'hashLadderReveal') {
+        jTx.data.hankoSignature = requireDraftWitness(hankoWitness, jTx.data.revealHash,
+          'hashLadderReveal', entityHeight, jTx.data.hankoSignature);
+        attachedCount++;
+      }
       if (jTx.type === 'batch' && jTx.data?.batchHash) {
         jTx.data.hankoSignature = requireDraftWitness(
           hankoWitness,

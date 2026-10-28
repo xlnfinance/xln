@@ -173,7 +173,7 @@ fn typescript_route_hash_vector_is_materialized_before_state_commit() {
     assert_eq!(
         hash,
         Some(&string(
-            "0xc7256dc31e315883c77c1743527b1a8b5b4966db203cecb91cfbfeab7c444f03"
+            "0x25d85d1a0fe2a866e331e7d0d3511478f5c9aa15f38d54b344492f6a77681aa7"
         ))
     );
     assert_eq!(
@@ -185,13 +185,13 @@ fn typescript_route_hash_vector_is_materialized_before_state_commit() {
                 .expect("authorization map")
                 .root_hash())
         ),
-        "0x3c55d08a3e43175b173cf9bc1ed4b3cceb72fe1717f811b7800ff0277524010c"
+        "0xc18d45324ce14b76ccd44dc3608c10abc5ba18e7ad32df7505e28838a751038c"
     );
 }
 
 #[test]
 fn cross_j_domain_override_preserves_typescript_authorization_and_rejects_substitution() {
-    let signed_hash = "0x12695b780b36925998983227c333dd8759116e980a88ce3df85a6f598dc70d90";
+    let signed_hash = "0xfcaf4f40285e6167a873ffbcd8dcb1667a3da84ca4694f18d4e27cd9d5c21053";
     let mut supplied = route(Some(signed_hash));
     let CanonicalValue::Object(fields) = &mut supplied else {
         panic!("route object")

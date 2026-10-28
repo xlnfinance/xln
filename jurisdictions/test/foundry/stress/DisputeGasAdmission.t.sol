@@ -89,7 +89,7 @@ abstract contract DisputeGasFixture is XlnFixture {
             b.swap[i] = DeltaTransformer.Swap(true, i % tokens, 1, (i + 1) % tokens, 1);
           } else if (kind == 2) {
             (bytes32 fullHash, bytes32 root,) = _ladder(offset + i);
-            b.pull[i] = DeltaTransformer.Pull(i % tokens, SignedAmount(false, 10000), 0, fullHash, root, false);
+            b.pull[i] = DeltaTransformer.Pull(i % tokens, SignedAmount(false, 10000), 0, block.timestamp + DISPUTE_WINDOW_SECONDS, fullHash, root, false);
           } else {
             uint256 principal = wideSavings ? type(uint256).max / 2 : 10000;
             // Principal plus both term and late coupons remains a full-width
@@ -147,7 +147,7 @@ abstract contract DisputeGasFixture is XlnFixture {
       }
       console.log("reveal total conservative gas", _submitBudget(beneficiary, reveal));
     }
-    vm.warp(block.timestamp + DISPUTE_WINDOW_SECONDS);
+    vm.warp(block.timestamp + DISPUTE_WINDOW_SECONDS + 1);
     Batch memory finish = XlnHanko.emptyBatch();
     finish.disputeFinalizations = new FinalDisputeProof[](1);
     finish.disputeFinalizations[0] = FinalDisputeProof(entity[0], 1, 1, proposerIsLeft, hash, pb, starter, args, "", entity[0] < entity[1], false);

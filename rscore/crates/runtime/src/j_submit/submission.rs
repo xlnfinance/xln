@@ -492,6 +492,40 @@ impl<'a> JSubmitter<'a> {
         )
     }
 
+    pub fn submit_target_reveal(
+        &self,
+        beneficiary: &Word,
+        registration: &xln_rscore_entity_kernel::j_batch::HashLadderRegistration,
+        reveal_hash: &Word,
+        hanko: &[u8],
+        signer_key: &Word,
+        board_authority: Option<BoardAuthorityValidator<'_>>,
+    ) -> Result<JSubmitOutcome, JSubmitError> {
+        if !registration.target_role
+            || xln_rscore_entity_kernel::j_batch::hash_target_reveal(
+                self.config.chain_id,
+                self.config.depository_address,
+                *beneficiary,
+                registration,
+            ) != *reveal_hash
+        {
+            return Err(JSubmitError::Transaction("target-reveal-hash"));
+        }
+        verify_canonical_hanko(hanko, reveal_hash, Some(beneficiary), board_authority)
+            .map_err(|reason| JSubmitError::Hanko(reason.to_string()))?;
+        self.submit_calldata(
+            self.config.depository_address,
+            xln_rscore_entity_kernel::j_batch::target_reveal_calldata(
+                *beneficiary,
+                registration,
+                hanko,
+            ),
+            signer_key,
+            None,
+            &[],
+        )
+    }
+
     pub fn submit_control_board_proposal(
         &self,
         proposal: ControlBoardProposal<'_>,

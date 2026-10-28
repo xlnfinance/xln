@@ -271,6 +271,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       const route = {
         ...buildPreparedCrossJurisdictionRoute(
           {
+      expiresAt: (env.state.timestamp) + 60_000,
             orderId,
             makerEntityId: sourceUser,
             hubEntityId: sourceHub,
@@ -384,7 +385,7 @@ describe('cross-jurisdiction hashledger swap', () => {
           claimedRatio: 0,
           claimedAmount: 0n,
           fullHash: route.sourcePull!.fullHash,
-          partialRoot: route.sourcePull!.partialRoot,
+          partialRoot: route.sourcePull!.partialRoot, deadline: route.sourcePull!.deadline,
           crossJurisdiction: buildCrossJurisdictionPullBinding(
             { ...route, status: 'clearing', clearingPolicy: 'cancel_and_clear' },
             'source',
@@ -414,7 +415,7 @@ describe('cross-jurisdiction hashledger swap', () => {
           claimedRatio: 0,
           claimedAmount: 0n,
           fullHash: route.targetPull!.fullHash,
-          partialRoot: route.targetPull!.partialRoot,
+          partialRoot: route.targetPull!.partialRoot, deadline: route.targetPull!.deadline,
           crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'target'),
           createdHeight: 0,
           createdTimestamp: env.state.timestamp,
@@ -601,7 +602,7 @@ describe('cross-jurisdiction hashledger swap', () => {
           claimedRatio: 0,
           claimedAmount: 0n,
           fullHash: highRoute.targetPull!.fullHash,
-          partialRoot: highRoute.targetPull!.partialRoot,
+          partialRoot: highRoute.targetPull!.partialRoot, deadline: highRoute.targetPull!.deadline,
           crossJurisdiction: buildCrossJurisdictionPullBinding(highRoute, 'target'),
           createdHeight: 0,
           createdTimestamp: env.state.timestamp,
@@ -701,7 +702,7 @@ describe('cross-jurisdiction hashledger swap', () => {
           claimedRatio: 0,
           claimedAmount: 0n,
           fullHash: targetPull.fullHash,
-          partialRoot: targetPull.partialRoot,
+          partialRoot: targetPull.partialRoot, deadline: targetPull.deadline,
           crossJurisdiction: buildCrossJurisdictionPullBinding(prepared, 'target'),
           createdHeight: 0,
           createdTimestamp: env.state.timestamp,
@@ -796,7 +797,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         claimedRatio: 0,
         claimedAmount: 0n,
         fullHash: sourcePull.fullHash,
-        partialRoot: sourcePull.partialRoot,
+        partialRoot: sourcePull.partialRoot, deadline: sourcePull.deadline,
         crossJurisdiction: buildCrossJurisdictionPullBinding(prepared, 'source'),
         createdHeight: 0,
         createdTimestamp: env.state.timestamp,

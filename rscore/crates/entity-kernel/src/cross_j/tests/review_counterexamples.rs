@@ -9,6 +9,21 @@ fn stored(state: &mut EntityStateSlice, route: CanonicalValue) {
 
 pub(super) use crate::local_financial::test_fixtures::account_view;
 
+fn salvage_authority() -> EntityFrameAuthority {
+    let mut auth = authority(
+        "target-user-signer",
+        2,
+        "0x2222222222222222222222222222222222222222",
+    );
+    set(
+        auth.config.jurisdiction.as_mut().unwrap(),
+        "name",
+        string("Target"),
+    )
+    .unwrap();
+    auth
+}
+
 fn salvage_setup() -> (
     EntityStateSlice,
     BTreeMap<String, crate::local_financial::LocalAccountFinancialView>,
@@ -66,7 +81,7 @@ fn review_3_confirmed_equal_target_ratio_is_not_requeued() {
     )
     .unwrap();
     stored(&mut state, prior);
-    let result = apply_salvage(&mut state, &views, &command).unwrap();
+    let result = apply_salvage(&mut state, &views, &command, &salvage_authority()).unwrap();
     assert!(result.outputs.is_empty());
     assert!(
         state
@@ -77,49 +92,23 @@ fn review_3_confirmed_equal_target_ratio_is_not_requeued() {
 }
 
 #[test]
-fn review_7_full_draft_salvage_emits_broadcast_to_make_room() {
+fn review_7_full_draft_salvage_publishes_independently() {
     let (mut state, views, command) = salvage_setup();
+    let registration = target_registration(&state, 65535);
     let batch = state.j_batch_state.get_or_insert_with(Default::default);
     for i in 0..32 {
-        batch
-            .batch
-            .hash_ladder_registrations
-            .push(crate::j_batch::HashLadderRegistration {
-                counterparty_entity: [i; 32],
-                target_role: true,
-                full_hash: [i; 32],
-                partial_root: [i; 32],
-                witness: crate::j_batch::HashLadderWitness {
-                    fill_ratio: 65535,
-                    full_secret: [i; 32],
-                    reveals: [[0; 32]; 4],
-                },
-            });
+        let mut unrelated = registration.clone();
+        unrelated.full_hash = [i; 32];
+        batch.batch.hash_ladder_registrations.push(unrelated);
     }
-    let result = apply_salvage(&mut state, &views, &command).unwrap();
-    assert_eq!(
-        result.outputs.len(),
-        1,
-        "deferred witness must drain the full draft"
-    );
-    let output = &result.outputs[0];
-    assert_eq!(output.entity_id, state.entity_id);
-    assert_eq!(output.target_signer_id, None);
-    assert_eq!(output.entity_txs.len(), 1);
-    let LocalEntityOutputTx::Projected(command) = &output.entity_txs[0] else {
-        panic!("expected complete j_broadcast payload");
-    };
-    assert_eq!(command.kind, EntityTxKind::JBroadcast);
-    assert_eq!(command.frame_data(), Some(&obj(vec![])));
+    let before = state.j_batch_state.clone();
+    let result = apply_salvage(&mut state, &views, &command, &salvage_authority()).unwrap();
+    assert_eq!(result.j_outputs.len(), 1);
+    assert_eq!(result.hashes_to_sign.len(), 1);
+    assert!(result.outputs.is_empty());
     assert!(result.proposal_work.is_empty());
-    assert_eq!(
-        result.events,
-        vec![EntityFrameEvent::Status {
-            message:
-                "⏳ Cross-j reveal port order-1: deferred until the pending jBatch is acknowledged"
-                    .into(),
-        }]
-    );
+    assert!(result.events.is_empty());
+    assert_eq!(state.j_batch_state, before);
     assert!(
         field(
             state
@@ -462,7 +451,8 @@ fn review_12_forged_salvage_ratio_is_absorbed() {
     )
     .unwrap();
     let before = state.clone();
-    let result = apply_salvage(&mut state, &BTreeMap::new(), &command).unwrap();
+    let result =
+        apply_salvage(&mut state, &BTreeMap::new(), &command, &salvage_authority()).unwrap();
     assert!(result.outputs.is_empty());
     assert_eq!(state, before);
 }
@@ -505,12 +495,73 @@ fn target_registration(
     }
 }
 
+fn source_queue_setup() -> (
+    EntityStateSlice,
+    BTreeMap<String, crate::local_financial::LocalAccountFinancialView>,
+    CanonicalEntityTx,
+) {
+    let (mut state, views, command) = salvage_setup();
+    let mut route = state
+        .cross_jurisdiction_swaps
+        .as_ref()
+        .unwrap()
+        .get("order-1")
+        .unwrap()
+        .clone();
+    let mut source = field(&route, "source").unwrap().clone();
+    set(
+        &mut source,
+        "entityId",
+        string(&format!("0x{}", "11".repeat(32))),
+    )
+    .unwrap();
+    set(
+        &mut source,
+        "counterpartyEntityId",
+        string(&format!("0x{}", "22".repeat(32))),
+    )
+    .unwrap();
+    set(&mut route, "source", source).unwrap();
+    state.entity_id = format!("0x{}", "22".repeat(32));
+    stored(&mut state, route);
+    (state, views, command)
+}
+
+fn source_registration(
+    state: &EntityStateSlice,
+    ratio: u16,
+) -> crate::j_batch::HashLadderRegistration {
+    let route = state
+        .cross_jurisdiction_swaps
+        .as_ref()
+        .unwrap()
+        .get("order-1")
+        .unwrap();
+    let pull = field(route, "sourcePull").unwrap();
+    let mut registration = target_registration(state, ratio);
+    registration.target_role = false;
+    registration.counterparty_entity = [0x11; 32];
+    registration.full_hash = word(
+        text(pull, "fullHash").unwrap(),
+        EntityTxKind::CrossJurisdictionSalvage,
+        "HASH",
+    )
+    .unwrap();
+    registration.partial_root = word(
+        text(pull, "partialRoot").unwrap(),
+        EntityTxKind::CrossJurisdictionSalvage,
+        "ROOT",
+    )
+    .unwrap();
+    registration
+}
+
 #[test]
 fn review_3_amend_membership_precedes_maximum_conflict() {
     for existing in ["confirmed", "queued", "pending"] {
-        let (mut state, _, command) = salvage_setup();
-        let retry = target_registration(&state, 100);
-        let newer = target_registration(&state, 200);
+        let (mut state, _, command) = source_queue_setup();
+        let retry = source_registration(&state, 100);
+        let newer = source_registration(&state, 200);
         let mut prior = state
             .cross_jurisdiction_swaps
             .as_ref()
@@ -521,14 +572,14 @@ fn review_3_amend_membership_precedes_maximum_conflict() {
         if existing == "confirmed" {
             set(
                 &mut prior,
-                "targetRegistryFillRatio",
+                "sourceRegistryFillRatio",
                 number(100, command.kind, "RATIO").unwrap(),
             )
             .unwrap();
         } else if existing == "pending" {
             set(
                 &mut prior,
-                "pendingTargetRegistryReveal",
+                "pendingSourceRegistryReveal",
                 pending_witness_value(&retry.witness, command.kind).unwrap(),
             )
             .unwrap();
@@ -550,7 +601,7 @@ fn review_3_amend_membership_precedes_maximum_conflict() {
             "{existing} 100 must survive queued 200"
         );
         assert_eq!(state, before);
-        let stale = target_registration(&state, 150);
+        let stale = source_registration(&state, 150);
         assert!(queue_hash_ladder_registration(&mut state, stale, command.kind).is_err());
         assert_eq!(state, before);
     }
@@ -558,8 +609,8 @@ fn review_3_amend_membership_precedes_maximum_conflict() {
 
 #[test]
 fn review_3_amend_pending_ratio_prevents_stale_admission() {
-    let (mut state, _, command) = salvage_setup();
-    let pending = target_registration(&state, 200);
+    let (mut state, _, command) = source_queue_setup();
+    let pending = source_registration(&state, 200);
     let mut prior = state
         .cross_jurisdiction_swaps
         .as_ref()
@@ -569,32 +620,23 @@ fn review_3_amend_pending_ratio_prevents_stale_admission() {
         .clone();
     set(
         &mut prior,
-        "pendingTargetRegistryReveal",
+        "pendingSourceRegistryReveal",
         pending_witness_value(&pending.witness, command.kind).unwrap(),
     )
     .unwrap();
     stored(&mut state, prior);
     state.j_batch_state = Some(Default::default());
     let before = state.clone();
-    let stale = target_registration(&state, 150);
+    let stale = source_registration(&state, 150);
     assert!(queue_hash_ladder_registration(&mut state, stale, command.kind).is_err());
     assert_eq!(state, before);
 }
 
 #[test]
-fn q50_salvage_active_dispute_has_exact_status_and_broadcast() {
+fn q50_salvage_preserves_batch_and_retries_immutable_publication() {
     for sent in [false, true] {
         for full in [false, true] {
             let (mut state, views, command) = salvage_setup();
-            let mut route = state
-                .cross_jurisdiction_swaps
-                .as_ref()
-                .unwrap()
-                .get("order-1")
-                .unwrap()
-                .clone();
-            set(&mut route, "status", string("resting")).unwrap();
-            stored(&mut state, route.clone());
             let mut data = command.frame_data().unwrap().clone();
             let binary = text(&data, "binary").unwrap().to_string();
             set(&mut data, "binary", string(&binary.to_uppercase())).unwrap();
@@ -602,23 +644,17 @@ fn q50_salvage_active_dispute_has_exact_status_and_broadcast() {
             let mut registration = target_registration(&state, 65535);
             registration.witness = salvage_witness(&binary, 65535, command.kind).unwrap();
             let batch = state.j_batch_state.get_or_insert_with(Default::default);
-            let mut unrelated = registration.clone();
-            unrelated.full_hash = [0; 32];
             if full {
                 for i in 0..32 {
+                    let mut unrelated = registration.clone();
                     unrelated.full_hash = [i; 32];
-                    batch
-                        .batch
-                        .hash_ladder_registrations
-                        .push(unrelated.clone());
+                    batch.batch.hash_ladder_registrations.push(unrelated);
                 }
             }
             if sent {
-                let mut sent_batch = crate::j_batch::JBatch::default();
-                sent_batch.hash_ladder_registrations.push(unrelated);
                 batch.status = crate::j_batch::JBatchStatus::Sent;
                 batch.sent_batch = Some(crate::j_batch::SentJBatch {
-                    batch: sent_batch,
+                    batch: crate::j_batch::JBatch::default(),
                     batch_hash: [0xab; 32],
                     encoded_batch: vec![],
                     entity_nonce: 1,
@@ -631,71 +667,42 @@ fn q50_salvage_active_dispute_has_exact_status_and_broadcast() {
                     terminal_failure: None,
                 });
             }
-            let before_batch = batch.clone();
-            let result = apply_salvage(&mut state, &views, &command).unwrap();
-            assert_eq!(result.outputs.len(), usize::from(!sent));
-            if !sent {
-                let output = &result.outputs[0];
-                assert_eq!(output.entity_id, state.entity_id);
-                assert_eq!(output.target_signer_id, None);
-                assert_eq!(output.entity_txs.len(), 1);
-                let LocalEntityOutputTx::Projected(tx) = &output.entity_txs[0] else {
-                    panic!("expected complete j_broadcast payload");
-                };
-                assert_eq!(tx.kind, EntityTxKind::JBroadcast);
-                assert_eq!(tx.frame_data(), Some(&obj(vec![])));
-            }
+            let before_batch = state.j_batch_state.clone();
+            let mut expected_route = state
+                .cross_jurisdiction_swaps
+                .as_ref()
+                .unwrap()
+                .get("order-1")
+                .unwrap()
+                .clone();
+            set(
+                &mut expected_route,
+                "pendingTargetRegistryReveal",
+                pending_witness_value(&registration.witness, command.kind).unwrap(),
+            )
+            .unwrap();
+            let result = apply_salvage(&mut state, &views, &command, &salvage_authority()).unwrap();
+            assert!(result.outputs.is_empty());
+            assert!(result.events.is_empty());
             assert!(result.proposal_work.is_empty());
-            let message = if full {
-                "⏳ Cross-j reveal port order-1: deferred until the pending jBatch is acknowledged"
-            } else if sent {
-                "⏳ Cross-j reveal port order-1: queued behind the pending jBatch"
-            } else {
-                "🌉 Cross-j reveal port order-1: registering ratio 65535 on the target chain"
-            };
-            assert_eq!(
-                result.events,
-                vec![EntityFrameEvent::Status {
-                    message: message.into()
-                }],
-                "sent={sent}, full={full}"
+            assert!(
+                matches!(&result.j_outputs[..], [crate::EntityJOutput::TargetReveal { registration: actual, .. }] if actual == &registration)
             );
-            let batch = state.j_batch_state.as_ref().unwrap();
-            assert_eq!(batch.sent_batch, before_batch.sent_batch);
-            assert_eq!(batch.auto_broadcast_draft, sent);
-            assert_eq!(
-                batch.batch.hash_ladder_registrations,
-                if full {
-                    before_batch.batch.hash_ladder_registrations
-                } else {
-                    vec![registration.clone()]
-                }
-            );
-            if full {
-                set(
-                    &mut route,
-                    "pendingTargetRegistryReveal",
-                    pending_witness_value(&registration.witness, command.kind).unwrap(),
-                )
-                .unwrap();
-                set(
-                    &mut route,
-                    "updatedAt",
-                    number(state.timestamp, command.kind, "TIMESTAMP").unwrap(),
-                )
-                .unwrap();
-            }
+            assert_eq!(result.hashes_to_sign.len(), 1);
+            assert_eq!(state.j_batch_state, before_batch);
             assert_eq!(
                 state
                     .cross_jurisdiction_swaps
                     .as_ref()
                     .unwrap()
                     .get("order-1"),
-                Some(&route)
+                Some(&expected_route)
             );
             let before_retry = state.clone();
-            let retry = apply_salvage(&mut state, &views, &command).unwrap();
+            let retry = apply_salvage(&mut state, &views, &command, &salvage_authority()).unwrap();
             assert!(retry.outputs.is_empty());
+            assert!(retry.j_outputs.is_empty());
+            assert!(retry.hashes_to_sign.is_empty());
             assert!(retry.events.is_empty());
             assert!(retry.proposal_work.is_empty());
             assert_eq!(state, before_retry);
@@ -717,7 +724,7 @@ fn q50_salvage_empty_route_id_preserves_status_precedence() {
         .unwrap();
         let command = projected(command.kind, data).unwrap();
         let before = state.clone();
-        let result = apply_salvage(&mut state, &views, &command).unwrap();
+        let result = apply_salvage(&mut state, &views, &command, &salvage_authority()).unwrap();
         assert!(result.outputs.is_empty());
         assert!(result.proposal_work.is_empty());
         assert_eq!(
@@ -762,16 +769,13 @@ fn q50_salvage_partial_ratio_prefix_follows_ts_parse_int() {
         .unwrap();
         let command = projected(command.kind, data).unwrap();
         let witness = salvage_witness(&canonical, 1, command.kind).unwrap();
-        let result = apply_salvage(&mut state, &BTreeMap::new(), &command).unwrap();
+        let result =
+            apply_salvage(&mut state, &BTreeMap::new(), &command, &salvage_authority()).unwrap();
         assert!(result.outputs.is_empty());
         assert!(result.proposal_work.is_empty());
-        assert_eq!(
-            result.events,
-            vec![EntityFrameEvent::Status {
-                message: "⏳ Cross-j reveal port order-1: waiting for the target dispute clock"
-                    .into()
-            }]
-        );
+        assert!(result.events.is_empty());
+        assert_eq!(result.j_outputs.len(), 1);
+        assert_eq!(result.hashes_to_sign.len(), 1);
         assert_eq!(
             field(
                 state
@@ -824,7 +828,7 @@ fn q50_salvage_invalid_evidence_has_exact_status_without_mutation() {
         set(&mut data, "binary", string(&binary)).unwrap();
         let command = projected(command.kind, data).unwrap();
         let before = state.clone();
-        let result = apply_salvage(&mut state, &views, &command).unwrap();
+        let result = apply_salvage(&mut state, &views, &command, &salvage_authority()).unwrap();
         assert_eq!(
             result.events,
             vec![EntityFrameEvent::Status {
@@ -838,7 +842,7 @@ fn q50_salvage_invalid_evidence_has_exact_status_without_mutation() {
 }
 
 #[test]
-fn q48_salvage_uppercase_prefix_full_evidence_waits_for_target_dispute_clock() {
+fn q48_salvage_uppercase_prefix_full_evidence_publishes_before_dispute() {
     let (mut state, _, command) = salvage_setup();
     let mut route = state
         .cross_jurisdiction_swaps
@@ -854,15 +858,13 @@ fn q48_salvage_uppercase_prefix_full_evidence_waits_for_target_dispute_clock() {
     set(&mut data, "binary", string(&binary.to_uppercase())).unwrap();
     let command = projected(command.kind, data).unwrap();
     let before = state.clone();
-    let result = apply_salvage(&mut state, &BTreeMap::new(), &command).unwrap();
+    let result =
+        apply_salvage(&mut state, &BTreeMap::new(), &command, &salvage_authority()).unwrap();
     assert!(result.outputs.is_empty());
     assert!(result.proposal_work.is_empty());
-    assert_eq!(
-        result.events,
-        vec![EntityFrameEvent::Status {
-            message: "⏳ Cross-j reveal port order-1: waiting for the target dispute clock".into(),
-        }]
-    );
+    assert!(result.events.is_empty());
+    assert_eq!(result.j_outputs.len(), 1);
+    assert_eq!(result.hashes_to_sign.len(), 1);
     let pending = obj(vec![
         ("fillRatio", number(65535, command.kind, "RATIO").unwrap()),
         ("fullSecret", string(&binary)),
@@ -899,7 +901,8 @@ fn q48_salvage_raw_uppercase_empty_prefix_is_zero_fill_without_state_mutation() 
     set(&mut data, "binary", string("0X")).unwrap();
     let command = projected(command.kind, data).unwrap();
     let before = state.clone();
-    let result = apply_salvage(&mut state, &BTreeMap::new(), &command).unwrap();
+    let result =
+        apply_salvage(&mut state, &BTreeMap::new(), &command, &salvage_authority()).unwrap();
     assert_eq!(state, before);
     assert!(result.outputs.is_empty());
     assert!(result.proposal_work.is_empty());
@@ -938,7 +941,7 @@ fn q46_salvage_empty_binary_preserves_owned_route_validation_and_finality() {
             .unwrap();
             let command = projected(command.kind, data).unwrap();
             let before = state.clone();
-            let result = apply_salvage(&mut state, &views, &command);
+            let result = apply_salvage(&mut state, &views, &command, &salvage_authority());
             assert_eq!(state, before);
             if missing_pull {
                 assert!(
@@ -1000,8 +1003,8 @@ fn q46_salvage_unowned_positive_claim_is_status_only() {
         .unwrap();
         let command = projected(command.kind, data).unwrap();
         let before = state.clone();
-        let result =
-            apply_salvage(&mut state, &views, &command).expect("unowned evidence cannot halt");
+        let result = apply_salvage(&mut state, &views, &command, &salvage_authority())
+            .expect("unowned evidence cannot halt");
         assert_eq!(state, before);
         assert!(result.outputs.is_empty());
         assert!(result.proposal_work.is_empty());
@@ -1036,8 +1039,8 @@ fn review_12_amend_out_of_range_claim_is_status_not_fatal() {
         .unwrap();
         let command = projected(command.kind, data).unwrap();
         let before = state.clone();
-        let result =
-            apply_salvage(&mut state, &views, &command).expect("untrusted ratio cannot halt");
+        let result = apply_salvage(&mut state, &views, &command, &salvage_authority())
+            .expect("untrusted ratio cannot halt");
         assert!(result.outputs.is_empty());
         assert!(result.proposal_work.is_empty());
         assert_eq!(state, before);
@@ -1079,7 +1082,7 @@ fn review_12_amend_missing_target_pull_stays_fatal() {
         .unwrap();
         let command = projected(command.kind, data).unwrap();
         let before = state.clone();
-        let error = apply_salvage(&mut state, &views, &command).unwrap_err();
+        let error = apply_salvage(&mut state, &views, &command, &salvage_authority()).unwrap_err();
         assert!(
             matches!(error, EntityKernelError::InvalidLocalEntityTx { detail, .. } if detail.contains("TARGET_PULL_MISSING"))
         );
@@ -1088,128 +1091,36 @@ fn review_12_amend_missing_target_pull_stays_fatal() {
 }
 
 #[test]
-fn review_3_reamend_salvage_retry_preserves_deferred_witness_until_flush() {
-    for free_slot in [false, true] {
+fn review_3_reamend_salvage_retry_preserves_pending_publication_across_batch_flush() {
+    for full in [false, true] {
         let (mut state, views, command) = salvage_setup();
-        let mut data = command.frame_data().unwrap().clone();
-        let route = state
-            .cross_jurisdiction_swaps
-            .as_ref()
-            .unwrap()
-            .get("order-1")
-            .unwrap();
-        let proof = hash_ladder_proof("runtime-seed", text(route, "routeHash").unwrap());
-        let binary = reveal_binary(&proof, 100);
-        let mut registration = target_registration(&state, 100);
-        registration.witness = salvage_witness(&binary, 100, command.kind).unwrap();
-        let mut route = route.clone();
-        set(
-            &mut route,
-            "pendingTargetRegistryReveal",
-            pending_witness_value(&registration.witness, command.kind).unwrap(),
-        )
-        .unwrap();
-        stored(&mut state, route);
-        set(&mut data, "binary", string(&binary)).unwrap();
-        set(
-            &mut data,
-            "fillRatio",
-            number(100, command.kind, "RATIO").unwrap(),
-        )
-        .unwrap();
-        let command = projected(command.kind, data).unwrap();
-        let batch = state.j_batch_state.get_or_insert_with(Default::default);
-        for i in 0..32 {
-            let mut unrelated = registration.clone();
-            unrelated.full_hash = [i; 32];
-            batch.batch.hash_ladder_registrations.push(unrelated);
+        let first = apply_salvage(&mut state, &views, &command, &salvage_authority()).unwrap();
+        assert_eq!(first.j_outputs.len(), 1);
+        if full {
+            let registration = target_registration(&state, 65535);
+            let batch = state.j_batch_state.get_or_insert_with(Default::default);
+            for i in 0..32 {
+                let mut unrelated = registration.clone();
+                unrelated.full_hash = [i; 32];
+                batch.batch.hash_ladder_registrations.push(unrelated);
+            }
         }
-        let peer = prefixed_hex(&registration.counterparty_entity);
+        let before = state.clone();
+        let retry = apply_salvage(&mut state, &views, &command, &salvage_authority()).unwrap();
+        assert_eq!(state, before);
+        assert!(retry.j_outputs.is_empty());
+        assert!(retry.hashes_to_sign.is_empty());
+        assert!(retry.outputs.is_empty());
         let mut outputs = Vec::new();
         assert_eq!(
-            flush_pending_target_reveal_for_route(&mut state, "order-1", &peer, &mut outputs)
-                .unwrap(),
+            flush_deferred_hash_ladder_reveals(&mut state, &mut outputs).unwrap(),
             0
         );
         assert!(outputs.is_empty());
         assert_eq!(
-            field(
-                state
-                    .cross_jurisdiction_swaps
-                    .as_ref()
-                    .unwrap()
-                    .get("order-1")
-                    .unwrap(),
-                "pendingTargetRegistryReveal"
-            ),
-            Some(&pending_witness_value(&registration.witness, command.kind).unwrap())
+            state, before,
+            "batch flushing must not consume standalone publication evidence"
         );
-        if free_slot {
-            state
-                .j_batch_state
-                .as_mut()
-                .unwrap()
-                .batch
-                .hash_ladder_registrations
-                .pop();
-        }
-        let before = state.clone();
-        let result = apply_salvage(&mut state, &views, &command).unwrap();
-        assert_eq!(state, before, "salvage must leave a pending retry intact");
-        assert!(result.outputs.is_empty());
-        assert!(result.proposal_work.is_empty());
-        assert!(result.events.is_empty());
-        if !free_slot {
-            state
-                .j_batch_state
-                .as_mut()
-                .unwrap()
-                .batch
-                .hash_ladder_registrations
-                .pop();
-        }
-        assert_eq!(
-            flush_pending_target_reveal_for_route(&mut state, "order-1", &peer, &mut outputs)
-                .unwrap(),
-            1
-        );
-        let mut expected = before
-            .j_batch_state
-            .unwrap()
-            .batch
-            .hash_ladder_registrations;
-        expected.truncate(31);
-        expected.push(registration);
-        assert_eq!(
-            state
-                .j_batch_state
-                .as_ref()
-                .unwrap()
-                .batch
-                .hash_ladder_registrations,
-            expected
-        );
-        assert!(
-            field(
-                state
-                    .cross_jurisdiction_swaps
-                    .as_ref()
-                    .unwrap()
-                    .get("order-1")
-                    .unwrap(),
-                "pendingTargetRegistryReveal"
-            )
-            .is_none()
-        );
-        assert_eq!(outputs.len(), 1);
-        assert_eq!(outputs[0].entity_id, state.entity_id);
-        assert_eq!(outputs[0].target_signer_id, None);
-        assert_eq!(outputs[0].entity_txs.len(), 1);
-        let LocalEntityOutputTx::Projected(command) = &outputs[0].entity_txs[0] else {
-            panic!("expected complete j_broadcast payload");
-        };
-        assert_eq!(command.kind, EntityTxKind::JBroadcast);
-        assert_eq!(command.frame_data(), Some(&obj(vec![])));
     }
 }
 

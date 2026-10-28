@@ -1,3 +1,4 @@
+import { hashTargetReveal } from '../../../../protocol/htlc/target-reveal';
 import { prepareDurableTransaction } from './prepared/durable-transaction';
 import type { Signer } from 'ethers';
 import { compactHankoForChain } from '../../../../hanko/short';
@@ -544,6 +545,25 @@ export const createRpcSubmitTx = (
       jTx,
       options.signerPrivateKey,
     );
+  }
+  if (jTx.type === 'hashLadderReveal') {
+    if (context.watchOnly) return { success: false, error: 'TARGET_REVEAL_WATCH_ONLY' };
+    try {
+      const expected = hashTargetReveal(context.config.chainId, await context.stack.getDepositoryAddress(),
+        jTx.entityId, jTx.data.registration);
+      if (expected !== jTx.data.revealHash || !jTx.data.hankoSignature) throw new Error('TARGET_REVEAL_AUTHORITY_INVALID');
+      const signer = options.signerPrivateKey
+        ? await context.chainIo.signerForPrivateKey(ethers.hexlify(options.signerPrivateKey)) : context.signer;
+      const contract = context.stack.depository.connect(signer);
+      const args = [jTx.entityId, jTx.data.registration,
+        compactHankoForChain(jTx.data.hankoSignature, expected)] as const;
+      const gasLimit = await context.chainIo.estimateGas(() => contract.registerTargetHashLadderReveal.estimateGas(...args));
+      const receipt = await context.sequencer.runFor(signer, () =>
+        context.sequencer.send(signer, 'target-reveal', (nonce, fees) =>
+          contract.registerTargetHashLadderReveal(...args, { gasLimit, nonce, ...fees })));
+      const events = parseReceiptLogsToJEvents(receipt, eventCarriers(context.stack.depository, context.stack.entityProvider));
+      return { success: true, txHash: receipt.hash, blockNumber: receipt.blockNumber, events };
+    } catch (error) { return makeJAdapterFailureResult(error); }
   }
   if (jTx.type === 'batch') return submitBatch(context, jTx, options);
   if (jTx.type === 'mint') {

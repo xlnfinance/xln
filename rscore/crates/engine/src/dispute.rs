@@ -48,6 +48,7 @@ struct Pull {
     delta_index: usize,
     amount: BigInt,
     claimed_ratio: u16,
+    deadline: u64,
     full_hash: [u8; 32],
     partial_root: [u8; 32],
     target_role: bool,
@@ -504,6 +505,7 @@ pub fn build_dispute_proof_body(
             delta_index: index_of(token_id, "pullToken")?,
             amount: canonical_bigint(object_field(value, "amount")?, "amount")?.clone(),
             claimed_ratio,
+            deadline: canonical_u64(object_field(value, "deadline")?, "deadline")?,
             full_hash: canonical_hex32(object_field(value, "fullHash")?, "fullHash")?,
             partial_root: canonical_hex32(object_field(value, "partialRoot")?, "partialRoot")?,
             target_role: pull_target_role(value)?,
@@ -726,6 +728,7 @@ fn encode_batch(
         pull_bytes.extend_from_slice(&word_from_u64(pull.delta_index as u64));
         pull_bytes.extend_from_slice(&words_from_movement(&pull.amount, "pullAmount")?);
         pull_bytes.extend_from_slice(&word_from_u64(u64::from(pull.claimed_ratio)));
+        pull_bytes.extend_from_slice(&word_from_u64(pull.deadline));
         pull_bytes.extend_from_slice(&pull.full_hash);
         pull_bytes.extend_from_slice(&pull.partial_root);
         pull_bytes.extend_from_slice(&word_from_u64(u64::from(pull.target_role)));
@@ -1044,6 +1047,7 @@ mod chunk_parity_tests {
                     delta_index: 0,
                     amount: BigInt::from(if index % 2 == 0 { 1 } else { -1 }),
                     claimed_ratio: u16::from(index),
+                    deadline: 120,
                     full_hash,
                     partial_root: [0x33; 32],
                     target_role: index % 2 == 0,
@@ -1063,12 +1067,12 @@ mod chunk_parity_tests {
                 .iter()
                 .map(|clause| clause.encoded_batch.len() * 2 + 26)
                 .collect::<Vec<_>>(),
-            [9562, 1498]
+            [9818, 2650]
         );
         body.transformers.extend(clauses);
         assert_eq!(
             prefixed_hex(&Keccak256::digest(encode_proof_body(&body).unwrap())),
-            "0x0af26e0daa5e35620695a67d9b7cb4cad0b643b11cbd30a1fc68fe1d75bacfcf"
+            "0xb6629a9d80d27f57313b86769d1dfce129a18e49bba2a6e59d73257047d225b8"
         );
     }
 

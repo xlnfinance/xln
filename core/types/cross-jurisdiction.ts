@@ -26,6 +26,7 @@ export interface CrossJurisdictionPullLeg {
   tokenId: number;
   amount: bigint;
   signedAmount: bigint;
+  deadline: number;
   fullHash: string;
   partialRoot: string;
 }
@@ -73,7 +74,7 @@ export interface CrossJurisdictionTimePolicy {
   settlementClock: 'unix_seconds';
   deadlineConversion: 'floor_ms_to_unix_seconds';
   runtimeExpiresAtMs: number;
-  finalityPolicy: 'independent_beneficiary_windows_pull_sum_finality';
+  finalityPolicy: 'absolute_pull_deadlines';
 }
 
 /** Opening-time binding of a pull to its route; fill progress never reaches it. */
@@ -155,7 +156,7 @@ export interface CrossJurisdictionSwapRoute {
     fullSecret: string;
     reveals: [string, string, string, string];
   };
-  /** Latest target port waiting for the current J-batch to clear. */
+  /** First certified Target witness; the WAL outbox owns standalone publication and retries. */
   pendingTargetRegistryReveal?: {
     fillRatio: number;
     fullSecret: string;

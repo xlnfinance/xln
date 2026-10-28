@@ -239,6 +239,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       const route = {
         ...buildPreparedCrossJurisdictionRoute(
           {
+      expiresAt: (env.state.timestamp) + 60_000,
             orderId,
             makerEntityId: sourceUser,
             hubEntityId: sourceHub,
@@ -316,7 +317,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       claimedRatio: 0,
       claimedAmount: 0n,
       fullHash: route.sourcePull!.fullHash,
-      partialRoot: route.sourcePull!.partialRoot,
+      partialRoot: route.sourcePull!.partialRoot, deadline: route.sourcePull!.deadline,
       crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'source'),
       createdHeight: 1,
       createdTimestamp: 1_000,
@@ -395,7 +396,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       claimedRatio: 0,
       claimedAmount: 0n,
       fullHash: route.sourcePull!.fullHash,
-      partialRoot: route.sourcePull!.partialRoot,
+      partialRoot: route.sourcePull!.partialRoot, deadline: route.sourcePull!.deadline,
       crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'source'),
       createdHeight: 1,
       createdTimestamp: 1_000,
@@ -463,7 +464,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         tokenId: route.sourcePull!.tokenId,
         amount: route.sourcePull!.signedAmount,
         fullHash: route.sourcePull!.fullHash,
-        partialRoot: route.sourcePull!.partialRoot,
+        partialRoot: route.sourcePull!.partialRoot, deadline: route.sourcePull!.deadline,
         crossJurisdiction: forgedOpeningBinding,
         crossJurisdictionRoute: forgedOpeningRoute,
       },

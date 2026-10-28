@@ -19,21 +19,10 @@ import {XlnHanko} from "../helpers/XlnHanko.sol";
 /// - ORDERED PAIR: a registration by A with counterparty B never touches the
 ///   (B, A, ...) slot — the pair is never sorted because the reverse
 ///   participant must not write this slot.
-/// - SOURCE SINGLE-SHOT: first Source write must land inside its signed
-///   account window [S, S+W_owner]; exact retries are sticky no-ops (ratio AND
-///   revealedAt unchanged); different ratios are E12.
-/// - TARGET MONOTONE: lower replays are E12; equal/higher publications may
-///   refresh revealedAt; fillRatio never decreases.
-///
-/// C4-hardening wave 2 (audit A5): the windows are deliberately ASYMMETRIC
-/// (LEFT=50, RIGHT=70). HashLadderRegistry.registerReveal selects the owner
-/// window by entity order (:68-70); with symmetric windows a side-selection
-/// bug (reading the counterparty's window) is unobservable. The ghost always
-/// uses the writer's OWN side, so the over-accepting direction of any swap
-/// fires invariant 5d, and `checkWindowSides` binds the signed windows to the
-/// correct storage fields. `closeDispute` finalizes live disputes so the
-/// "dispute closed → first Source write is E12" branch executes and pairs
-/// can cycle start→reveal→close repeatedly.
+/// - BOTH ROLES SINGLE-SHOT: exact retries preserve ratio and timestamp;
+///   different ratios are E12. Disputes never gate evidence publication.
+/// - ASYMMETRIC CLOCKS: signed Account windows remain correctly stored,
+///   while arbitrary start/close order cannot change registry admission.
 contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
   uint256 public constant ACTORS = 4;
   uint256 public constant PAIRS = 6;
@@ -62,8 +51,8 @@ contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
 
   // ── oracles ──
   uint256 public sourceConflictingRetryAccepted; // different ratio replaced Source
-  uint256 public targetLowerRetryAccepted; // lower ratio replaced Target
-  uint256 public sourceOutsideWindowAccepted; // first Source write outside [S,S+W]
+  uint256 public targetConflictingRetryAccepted; // different ratio replaced Target
+  uint256 public validFirstWriteRejected; // authenticated valid first evidence must be publishable
   /// @dev C4-hardening A5: a registration with an invalid witness (reveals do
   ///      not hash to the declared ratio) was accepted — the E9 branch failed.
   uint256 public invalidWitnessAccepted;
@@ -323,33 +312,13 @@ contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
     uint16 ratio = uint16(bound(uint256(ratioSeed), 1, type(uint16).max));
     uint256 bucket = bucketSeed % 4;
 
-    // A Source write needs a live window. Half the time, self-open the
-    // dispute at the current timestamp (a legal standalone action) so the
-    // in-window accept path is reachable despite other actions warping time.
-    if (!targetRole && warpSeed % 2 == 0) {
-      if (_disputeHash(entityOf[from], entityOf[cp]) == bytes32(0)) {
-        _openDispute(from, cp, warpSeed);
-      }
+    // Exercise arbitrary dispute order and publication times without clamping
+    // to a response window. Signed Pull deadlines govern settlement elsewhere.
+    if (!targetRole && warpSeed % 2 == 0 && _disputeHash(entityOf[from], entityOf[cp]) == bytes32(0)) {
+      _openDispute(from, cp, warpSeed);
     }
-
-    DisputeGhost memory g = disputes[pairIndex(from, cp)];
-    bool disputeLive = g.active && _disputeHash(entityOf[from], entityOf[cp]) != bytes32(0);
-    uint256 ownerWindow = entityOf[from] < entityOf[cp]
-      ? uint256(LEFT_RESPONSE_SECONDS)
-      : uint256(RIGHT_RESPONSE_SECONDS);
-
-    // Time jitter so writes also land outside windows — but never push a
-    // still-open Source window past its end by accident: clamp to the edge.
-    if (warpSeed % 3 == 0) {
-      uint256 jitter = bound(warpSeed, 1, 120);
-      if (!targetRole && disputeLive) {
-        uint256 windowEnd = g.startTimestamp + ownerWindow;
-        if (vm.getBlockTimestamp() <= windowEnd && vm.getBlockTimestamp() + jitter > windowEnd) {
-          jitter = windowEnd - vm.getBlockTimestamp();
-        }
-      }
-      if (jitter > 0) vm.warp(vm.getBlockTimestamp() + jitter);
-    }
+    bool disputeLive = _disputeHash(entityOf[from], entityOf[cp]) != bytes32(0);
+    if (warpSeed % 3 == 0) vm.warp(vm.getBlockTimestamp() + bound(warpSeed, 1, 120));
 
     (bytes32 fullHash, bytes32 partialRoot, HashLadderWitness memory w) =
       _ladderMaterial(bucket, ratio);
@@ -375,9 +344,6 @@ contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
     });
 
     (bool found, uint256 idx) = _findSlot(from, cp, ladder, targetRole);
-    bool insideWindow = disputeLive
-      && vm.getBlockTimestamp() >= g.startTimestamp
-      && vm.getBlockTimestamp() <= g.startTimestamp + ownerWindow;
     if (!targetRole && !disputeLive && !found) closedDisputeSourceAttempts++;
 
     if (_submit(from, b)) {
@@ -388,11 +354,10 @@ contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
       registrationsAccepted++;
       if (targetRole) {
         targetWrites++;
-        if (found && ratio < slots[idx].ratio) targetLowerRetryAccepted++;
+        if (found && ratio != slots[idx].ratio) targetConflictingRetryAccepted++;
       } else {
         sourceWrites++;
         if (found && ratio != slots[idx].ratio) sourceConflictingRetryAccepted++;
-        if (!found && !insideWindow) sourceOutsideWindowAccepted++;
       }
       // Ghost-apply the exact contract admission rules.
       if (!found) {
@@ -405,14 +370,11 @@ contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
           ratio: ratio,
           revealedAt: vm.getBlockTimestamp()
         }));
-      } else if (targetRole) {
-        // equal/higher publication refreshes ratio and timestamp
-        slots[idx].ratio = ratio;
-        slots[idx].revealedAt = vm.getBlockTimestamp();
       }
-      // Source exact retry: contract returned early; ghost stays sticky.
+      // Either role exact retry: ghost evidence stays sticky.
     } else {
       registrationsRejected++;
+      if (!found && !corruptWitness) validFirstWriteRejected++;
     }
   }
 

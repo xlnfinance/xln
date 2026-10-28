@@ -81,28 +81,36 @@ export const validateCrossJurisdictionDisputeRoute = (
  * exactly as Solidity abi.decode would, rather than being misclassified as a
  * pull-free proof eligible for the role-gated non-starter acceptance path.
  */
-export const proofBodyHasPulls = (
+export const proofBodyPullDeadline = (
   proofBody: ProofBodyStruct,
   canonicalDeltaTransformerAddress: string,
-): boolean => {
+): number | undefined => {
   if (!ethers.isAddress(canonicalDeltaTransformerAddress)) {
     throw haltRuntimeFailure("DISPUTE_DELTA_TRANSFORMER_ADDRESS_INVALID", `DISPUTE_DELTA_TRANSFORMER_ADDRESS_INVALID:${canonicalDeltaTransformerAddress}`);
   }
   const canonicalAddress = canonicalDeltaTransformerAddress.toLowerCase();
+  let deadline: number | undefined;
   for (const [transformerIndex, transformer] of proofBody.transformers.entries()) {
     if (String(transformer.transformerAddress).toLowerCase() !== canonicalAddress) continue;
     try {
       const decoded = ABI_CODER.decode([DELTA_BATCH_PARAM], transformer.encodedBatch)[0] as {
-        pull: readonly unknown[];
+        pull: readonly { deadline: bigint }[];
       };
-      if (decoded.pull.length > 0) return true;
+      for (const pull of decoded.pull) {
+        const value = Number(pull.deadline);
+        if (!Number.isSafeInteger(value) || value <= 0) throw new Error('PULL_DEADLINE_INVALID');
+        deadline = Math.max(deadline ?? 0, value);
+      }
     } catch (error) {
       throw haltRuntimeFailure("DISPUTE_CANONICAL_DELTA_BATCH_INVALID", `DISPUTE_CANONICAL_DELTA_BATCH_INVALID:${transformerIndex}:` +
         `${error instanceof Error ? error.message : String(error)}`);
     }
   }
-  return false;
+  return deadline;
 };
+
+export const proofBodyHasPulls = (proofBody: ProofBodyStruct, canonicalAddress: string): boolean =>
+  proofBodyPullDeadline(proofBody, canonicalAddress) !== undefined;
 
 export const assertCrossJurisdictionDisputeProofHasPulls = (
   proofBody: ProofBodyStruct,

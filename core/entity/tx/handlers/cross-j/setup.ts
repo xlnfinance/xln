@@ -427,6 +427,7 @@ const buildSourceRegistrationTxs = (
           amount: sourcePull.signedAmount,
           fullHash: sourcePull.fullHash,
           partialRoot: sourcePull.partialRoot,
+          deadline: sourcePull.deadline,
           crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'source'),
           crossJurisdictionRoute: cloneCrossJurisdictionRoute(route),
         },
@@ -476,6 +477,7 @@ const buildTargetRegistrationTxs = (
         amount: targetPull.signedAmount,
         fullHash: targetPull.fullHash,
         partialRoot: targetPull.partialRoot,
+        deadline: targetPull.deadline,
         crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'target'),
         crossJurisdictionRoute: cloneCrossJurisdictionRoute(route),
       },
@@ -491,6 +493,13 @@ export const handleRegisterCrossJurisdictionSwapEntityTx = (
 ): CrossJSetupResult => {
   let route: CrossJurisdictionSwapRoute;
   const newState = stateForEntityTx(entityState, options);
+  const incoming = entityTx.data.route;
+  const prior = newState.crossJurisdictionSwaps?.get(incoming.orderId);
+  const opening = !prior || prior.status === 'intent' || prior.status === 'target_prepared';
+  // Preserve the typed peer refusal before deadline validation needs both legs.
+  if (opening && incoming.status === 'resting' && (!incoming.sourcePull || !incoming.targetPull)) {
+    throw rejectFailure('CROSS_J_REGISTER_OPENING_PULLS_MISSING', `CROSS_J_REGISTER_OPENING_PULLS_MISSING:${incoming.orderId}`);
+  }
   try {
     route = withCanonicalCrossJurisdictionRouteHash(
       canonicalizeCrossJurisdictionRouteForKnownEntities(env, newState, entityTx.data.route),
@@ -520,10 +529,6 @@ export const handleRegisterCrossJurisdictionSwapEntityTx = (
   }
   const openingTransition =
     !existing || existing.status === 'intent' || existing.status === 'target_prepared';
-  // The sending hub controls the route; refuse before anything is stored.
-  if (openingTransition && route.status === 'resting' && (!route.sourcePull || !route.targetPull)) {
-    throw rejectFailure('CROSS_J_REGISTER_OPENING_PULLS_MISSING', `CROSS_J_REGISTER_OPENING_PULLS_MISSING:${route.orderId}`);
-  }
   if (openingTransition && route.status === 'resting') {
     const localPull = localEntityId === sourceHubEntityId
       ? route.sourcePull

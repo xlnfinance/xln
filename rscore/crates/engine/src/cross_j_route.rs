@@ -8,6 +8,30 @@ use num_bigint::{BigInt, BigUint, Sign};
 use sha3::{Digest as _, Keccak256};
 use xln_rscore_protocol::{CanonicalNumber, CanonicalValue};
 
+// TS cross-j/deadlines.ts: 144s finality + 5s observation + 24s inclusion
+// + 60s relative clock skew. Hub-owned secrets require Source + margin <= Target.
+pub const CROSS_J_LEG_MARGIN: u64 = 12 * 12 + 5 + 2 * 12 + 2 * 30;
+
+pub fn absolute_deadlines(route: &CanonicalValue) -> Result<(u64, u64), String> {
+    let expiry = unsigned(route, "expiresAt")
+        .filter(|value| (1000..=9_007_199_254_740_991).contains(value))
+        .ok_or_else(|| "CROSS_J_DEADLINE_MISSING".to_string())?;
+    let source = expiry / 1000;
+    Ok((source, source + CROSS_J_LEG_MARGIN))
+}
+
+fn validate_deadlines(route: &CanonicalValue) -> Result<(), String> {
+    let (source, target) = absolute_deadlines(route)?;
+    let source_pull = field(route, "sourcePull");
+    let target_pull = field(route, "targetPull");
+    if source_pull.is_none() && target_pull.is_none() { return Ok(()); }
+    if source_pull.and_then(|pull| unsigned(pull, "deadline")) != Some(source)
+        || target_pull.and_then(|pull| unsigned(pull, "deadline")) != Some(target) {
+        return Err("CROSS_J_DEADLINE_ORDER".into());
+    }
+    Ok(())
+}
+
 fn object(value: &CanonicalValue) -> Option<&[(String, CanonicalValue)]> {
     match value {
         CanonicalValue::Object(fields) => Some(fields),
@@ -341,6 +365,7 @@ pub fn canonical_route(route: &CanonicalValue) -> Result<CanonicalValue, String>
     if object(route).is_none() {
         return Err("ROUTE_OBJECT".to_string());
     }
+    validate_deadlines(route)?;
     let mut canonical = route.clone();
     let (default_book_owner, default_venue) = canonical_book_and_venue(&canonical)?;
     let book_owner = text(&canonical, "bookOwnerEntityId")
@@ -456,7 +481,7 @@ pub fn canonical_route(route: &CanonicalValue) -> Result<CanonicalValue, String>
             ),
             (
                 "finalityPolicy".into(),
-                string("independent_beneficiary_windows_pull_sum_finality"),
+                string("absolute_pull_deadlines"),
             ),
         ]),
     )?;

@@ -1,126 +1,86 @@
 # Hash-ladder reveal registry — canonical spec
 
 Cross-j Pull settlement reads authenticated Depository state, never a caller's
-dynamic fill argument. Jurisdiction clocks are unix seconds; runtime stores unix
-milliseconds and converts only at the boundary.
+fill argument. Jurisdiction clocks and Pull deadlines are Unix seconds; runtime
+expiry uses milliseconds and converts only at the boundary.
 
 ## Signed authority and storage
 
-```solidity
-// targetRole is a separate namespace; packed = revealedAt << 16 | fillRatio
-mapping(bytes32 revealerEntity =>
-  mapping(bytes32 counterEntity =>
-    mapping(bytes32 ladderHash =>
-      mapping(bool targetRole => uint256 packed)))) records;
-```
+Each signed Pull commits its absolute `deadline` with its amount, claimed ratio,
+ladder commitments and role in the Account ProofBody. The signed route expiry
+derives `D_source = floor(expiresAt / 1000)` and
+`D_target = D_source + CROSS_J_LEG_MARGIN`. User and hub admission enforce these
+exact derived values in TypeScript and Rust.
 
-The key is `(revealerEntity, counterEntity, ladderHash, targetRole)`. The order
-is consensus-critical and is never sorted: the reverse pair is another slot.
-`revealerEntity` comes only from the outer Hanko-authenticated `processBatch`;
-registration supplies `counterEntity`. A false counterparty creates an inert
-record outside the Pull's exact ordered Account namespace.
+The invariant is `D_source + CROSS_J_LEG_MARGIN <= D_target`, independent of
+both dispute starts. The configured testnet margin is 233 seconds: 144 finality
+(12 confirmations × 12 seconds), 5 observation, 24 Target inclusion (2 × 12),
+and 60 relative clock skew (2 × 30). These are required delivery bounds, not
+measured guarantees. Exceeding them does not authorize extending a signed deadline.
 
-The witness remains independent of ProofBody: `processBatch` authenticates the
-revealer, while the hash-ladder proof authenticates the ratio. A first Source
-write additionally requires an active ordered Account dispute and its signed
-revealer-side window; otherwise an early write could consume the immutable
-slot before `S`. Target remains freely refreshable. No ProofBody or Pull index
-exists in registration calldata.
+The hub retains the ladder secrets. A Source reveal publishes the portable
+witness; the Target beneficiary immediately ports it under its authenticated
+Entity, including before a Target dispute starts. No beneficiary fill signature
+is introduced as authority.
 
-## Write policy
+Registry keys are `(revealerEntity, counterEntity, ladderHash, targetRole)`.
+The pair is ordered, never sorted. `revealerEntity` comes from the authenticated Hanko;
+a false counterparty writes an inert slot. The registry verifies the ladder
+witness without receiving a ProofBody, dispute clock or Pull index.
 
-- Source (`targetRole=false`) is single-shot. An exact retry is a sticky no-op;
-  a different second ratio reverts `E12`.
-- Target (`targetRole=true`) is replaceable. A lower ratio reverts `E12`, an
-  exact or higher ratio refreshes the timestamp, and a higher ratio atomically
-  replaces progress. This permits pre-existing public evidence to be
-  republished inside a newly opened target dispute window.
-- Every successful new record verifies full or partial hash-ladder material and
-  emits the portable witness. Source and Target policy comes from the signed
-  Pull, never caller calldata.
+Target ports use only `Depository.registerTargetHashLadderReveal`. The beneficiary's
+current Hanko binds `keccak256(abi.encode(keccak256("XLN_TARGET_HASH_LADDER_REVEAL"),
+chainId, Depository, beneficiary, registration))`; registration includes the ordered
+counterparty, role, commitments and complete witness. This publication has no Entity
+batch nonce and Target registrations in `processBatch` are rejected. Entity consensus
+certifies the hash; Runtime publishes after WAL commit and retries the immutable
+payload through its durable publication outbox. An unrelated batch ACK cannot delay it.
 
-There is no global ladder guard. Ordered Account scoping makes unrelated-account ladder
-reuse inert; Runtime admission still rejects ambiguous reuse inside one Account.
-The signed Pull binds the exact commitments and role at settlement.
+Bilateral Source `cross_pull_close` rejects frame timestamps whose floored Unix second
+exceeds `D_source`, including zero-fill closes. At D it is accepted; Target cooperative
+closes remain ungated because they pay the user.
 
-## Per-Account reveal window
+## Immutable evidence
 
-For both roles, validity uses the dispute start of the Account being settled:
+Both Source and Target slots preserve their first verified ratio and timestamp.
+An exact retry is a sticky no-op; a different ratio reverts `E12`. Retries after
+the deadline cannot replace timely evidence with a late timestamp. Registration
+may occur before a dispute or after the deadline; the signed Pull alone decides
+whether that evidence has financial effect. There is no dispute-relative reveal
+window or timestamp-refresh path.
 
-```text
-S = disputeStartTimestamp
-W = leftResponseSeconds  when Pull beneficiary is left
-    rightResponseSeconds when Pull beneficiary is right
+Ordered Account scoping isolates unrelated ladder reuse. Runtime admission
+rejects ambiguous reuse within one Account; there is no global ladder guard.
 
-valid = revealedAt >= S && revealedAt <= S + W
-```
+## Settlement and finalization
 
-Both bounds are inclusive. The lower bound rejects a record from an older
-dispute after accidental ladder reuse. A zero window is valid bilateral policy:
-start and registration can execute in one block because Depository processes
-`disputeStarts` before `hashLadderRegistrations`.
+The signed Account clock must satisfy
+`disputeTimeout = disputeStart + leftResponseSeconds + rightResponseSeconds`.
+For each Pull, finalization requires
+`block.timestamp > max(disputeTimeout, pull.deadline)`.
+At the deadline itself evidence remains admissible and finalization is blocked.
+With multiple Pulls the largest deadline governs. TS and Rust schedule the
+finalization continuation at that maximum plus one second.
 
-Source and Target have independent Accounts and independent starts. A Target
-does not wait for a synthetic "second phase"; its window opens at its own `S`.
-Sibling dispute fanout is must-close so every required Account obtains its own
-clock promptly.
-
-## Settlement and finalization barrier
-
-The signed Account clock must satisfy:
-
-```text
-T = S + leftResponseSeconds + rightResponseSeconds
-```
-
-If the final ProofBody contains a Pull, both timeout and counterparty-signed
-finalization paths must wait until `block.timestamp >= T`. This barrier prevents
-one chain settling at zero before evidence can be published on its sibling.
-A Pull-free ProofBody has no registry barrier, but the channel role still
-matters. The non-starter may immediately accept the state selected and signed
-by the starter: its fresh outer Hanko makes the close mutual. The starter has
-no fresh response and must wait until `T`; otherwise an old counterparty
-signature would become an immediate unilateral close.
-
-For a signed Pull with `claimedRatio`, final effective ratio is:
-
-```text
-effective = max(claimedRatio, timelyRegistryRatio)
-timelyRegistryRatio = record.fillRatio when record is inside [S, S+W], else 0
-```
-
+The effective ratio is `max(claimedRatio, timelyRegistryRatio)`, where the
+registry ratio contributes only when `0 < revealedAt <= pull.deadline`.
+Pre-dispute evidence is valid; a record at D is valid and at D+1 is late.
 Delta is `floor(amount * effective / 65535)` minus the already signed claimed
-portion. Runtime terminal accounting must use the exact final ProofBody and the
-timestamped record before retiring active-dispute evidence; a raw late Target
-event must never overwrite `claimedRatio`.
+portion. Runtime finality uses the exact signed Pull and timestamped record
+before retiring the active dispute; queue latches are not settlement authority.
 
-## Runtime parity
+Pull-free finalization retains the Account role rules: the non-starter can
+mutually accept the starter's signed state, while the starter waits for timeout.
 
-- Draft registration dedupe keys by `(revealer, counterparty, ladderHash, role)`.
-- Registration carries no ProofBody authorization. Runtime buffers a verified Target port
-  until the target Account has a draft/observed dispute so the write lands
-  inside the only window where it can affect settlement.
-- Own-slot `sourceRegistryFillRatio/targetRegistryFillRatio` fields are queue
-  latches, not settlement truth. Timestamped Source/Target records mirror chain
-  state for exact finality calculation.
-- Source keeps the first deferred witness. Target keeps the latest monotonic
-  witness. Reveal/finalize co-batching is forbidden unless the reveal is paired
-  with its own exact draft start in Depository's canonical operation order.
+## Adversarial coverage
 
-## Adversarial checklist
+The contract regression starts Target at 100 and Source at 110, then reveals
+Source at 120. Target's old relative window has elapsed, but it cannot finalize
+at zero before D_target. Porting the witness pays both beneficiaries 1000.
+Tests also cover D/D+1, pre-dispute evidence, equal/conflicting late retries,
+insufficient deadline margin, signed ABI binding and TS/Rust settlement vectors.
 
-1. One party writes the other's slot: impossible because `revealerEntity` is
-   taken from processBatch Hanko. Reversing the pair or declaring a false peer
-   selects another inert slot.
-2. Second Source ratio: `E12`; exact retry is sticky and harmless.
-3. First early/late Source: `E12`, no slot and no event. A timely exact retry
-   remains a sticky no-op even after the window.
-4. Late higher Target: stored with a new timestamp, then settles only the signed
-   claimed ratio because the record is outside `[S,S+W]`.
-5. Old-dispute record: lower-bound check makes it ineffective.
-6. Early Pull finalization: `PullRevealWindowActive` until full signed sum.
-7. Pull-free finalization: immediate only for the non-starter's mutual
-   acceptance; the starter still waits until `T`.
-8. Same ladder on unrelated Accounts: isolated by the ordered pair. Ambiguous
-   reuse inside one Account is rejected before signing; no global gas guard.
-9. Quantization: every layer uses `floor(amount * ratio / 65535)`.
+The pending-batch regression reveals Source at 1000, observes it at 1149, and
+ports Target at 1173 before D_target=1233 while an unrelated batch ACK is due
+at 1297. Cooperative Source D+1 rejection, late Target acceptance, signed-domain
+mutation rejection, immutable retries and WAL recovery cover both publication paths.

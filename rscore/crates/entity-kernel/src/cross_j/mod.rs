@@ -5,6 +5,8 @@
 //! outputs; Runtime only binds transport after WAL fsync.
 
 mod committed;
+mod settlement;
+pub(crate) use settlement::terminalize_finalized_routes;
 #[cfg(test)]
 mod group_d_parity;
 mod opening_proposal;
@@ -37,6 +39,8 @@ use crate::swapbook::SameJOutputDelta;
 
 #[derive(Clone, Debug, Default)]
 pub struct CrossJurisdictionApplyResult {
+    pub j_outputs: Vec<crate::EntityJOutput>,
+    pub hashes_to_sign: Vec<crate::HashToSign>,
     pub outputs: Vec<LocalEntityOutput>,
     pub proposal_work: Vec<AccountProposalWork>,
     pub(crate) events: Vec<EntityFrameEvent>,
@@ -467,6 +471,8 @@ fn prepared_route(
     let route_hash = text(&route, "routeHash")
         .ok_or_else(|| invalid(kind, "ROUTE_HASH_MISSING"))?
         .to_string();
+    let deadlines = xln_rscore_engine::cross_j_route::absolute_deadlines(&route)
+        .map_err(|error| invalid(kind, error))?;
     let proof = hash_ladder_proof(runtime_seed, &route_hash);
     let source = field(&route, "source")
         .cloned()
@@ -486,6 +492,18 @@ fn prepared_route(
             text(leg, "entityId").ok_or_else(|| invalid(kind, "PULL_COUNTERPARTY_MISSING"))?;
         Ok(CanonicalValue::Object(vec![
             ("pullId".into(), string(pull_id(&route_hash, leg_name))),
+            (
+                "deadline".into(),
+                number(
+                    if leg_name == "source" {
+                        deadlines.0
+                    } else {
+                        deadlines.1
+                    },
+                    kind,
+                    "DEADLINE",
+                )?,
+            ),
             (
                 "tokenId".into(),
                 field(leg, "tokenId")
@@ -1224,7 +1242,7 @@ fn registry_record(
         })?;
         let next_ratio = u64::from(event.fill_ratio);
         if old_ratio == next_ratio {
-            if !target_role && old_time != event.revealed_at {
+            if old_time != event.revealed_at {
                 return Err(cross_j_event_invalid(format!(
                     "CROSS_J_REGISTRY_RETRY_TIME_CONFLICT:{order_id}"
                 )));
@@ -1234,7 +1252,7 @@ fn registry_record(
                     "CROSS_J_REGISTRY_RECORD_TIME_REGRESSION:{order_id}"
                 )));
             }
-        } else if !target_role || next_ratio < old_ratio || event.revealed_at < old_time {
+        } else {
             return Err(cross_j_event_invalid(format!(
                 "CROSS_J_REGISTRY_RECORD_CONFLICT:{order_id}:{old_ratio}:{next_ratio}"
             )));
@@ -2858,7 +2876,7 @@ fn cross_pull_lock(
     )
     .ok_or_else(|| invalid(kind, format!("{leg_name}:PULL_MISSING")))?;
     let mut data = Vec::new();
-    for name in ["pullId", "tokenId", "fullHash", "partialRoot"] {
+    for name in ["pullId", "tokenId", "fullHash", "partialRoot", "deadline"] {
         let value =
             field(pull, name).ok_or_else(|| invalid(kind, format!("{leg_name}.{name}:MISSING")))?;
         data.push((name.into(), value.clone()));
@@ -2973,6 +2991,28 @@ fn apply_register(
     state: &mut EntityStateSlice,
     tx: &CanonicalEntityTx,
 ) -> Result<CrossJurisdictionApplyResult, EntityKernelError> {
+    let incoming = tx
+        .frame_data()
+        .and_then(|data| field(data, "route"))
+        .ok_or_else(|| invalid(tx.kind, "ROUTE_MISSING"))?;
+    let incoming_id = route_order_id(tx.kind, incoming)?;
+    let prior = state
+        .cross_jurisdiction_swaps
+        .as_ref()
+        .and_then(|routes| routes.get(incoming_id));
+    let opening = prior
+        .is_none_or(|route| matches!(text(route, "status"), Some("intent" | "target_prepared")));
+    // Match TS: missing opening commitments are typed peer refusals, before
+    // canonical deadline validation requires both legs.
+    if opening
+        && text(incoming, "status") == Some("resting")
+        && (field(incoming, "sourcePull").is_none() || field(incoming, "targetPull").is_none())
+    {
+        return Err(rejected(
+            tx.kind,
+            format!("CROSS_J_REGISTER_OPENING_PULLS_MISSING:{incoming_id}"),
+        ));
+    }
     let route = route(tx)?.clone();
     validate_route_identity(tx.kind, &route)?;
     let order_id = route_order_id(tx.kind, &route)?.to_string();
@@ -3024,15 +3064,7 @@ fn apply_register(
     let opening = existing
         .is_none_or(|prior| matches!(text(prior, "status"), Some("intent" | "target_prepared")));
     let proposal_work = if opening && text(&route, "status") == Some("resting") {
-        // Missing opening commitments are a peer rejection for every role.
-        // Only hubs admit signed Account work: user mirrors store the route
-        // without claiming authority to validate the hub's local opening.
-        if field(&route, "sourcePull").is_none() || field(&route, "targetPull").is_none() {
-            return Err(rejected(
-                tx.kind,
-                format!("CROSS_J_REGISTER_OPENING_PULLS_MISSING:{order_id}"),
-            ));
-        }
+        // Only hubs admit signed Account work; users only store the mirror.
         let local_is_hub = [
             nested_text(&route, "source", "counterpartyEntityId"),
             nested_text(&route, "target", "entityId"),
@@ -3209,6 +3241,8 @@ fn apply_admit(
         .filter(|reason| !reason.is_empty());
     let suffix = reason.map_or_else(String::new, |reason| format!(": {reason}"));
     Ok(CrossJurisdictionApplyResult {
+        j_outputs: Vec::new(),
+        hashes_to_sign: Vec::new(),
         outputs: Vec::new(),
         proposal_work: Vec::new(),
         events: vec![EntityFrameEvent::Status {
@@ -3333,6 +3367,8 @@ fn apply_remove_book_order(
             .insert(admission_key, admission)?;
     }
     Ok(CrossJurisdictionApplyResult {
+        j_outputs: Vec::new(),
+        hashes_to_sign: Vec::new(),
         outputs,
         proposal_work: Vec::new(),
         events: vec![EntityFrameEvent::Status {
@@ -3899,6 +3935,7 @@ enum RegistrationQueueResult {
 struct SignedProofPull {
     amount: BigInt,
     claimed_ratio: u16,
+    deadline: u64,
     full_hash: [u8; 32],
     partial_root: [u8; 32],
     target_role: bool,
@@ -3939,9 +3976,22 @@ pub(crate) fn delta_batch_param() -> ParamType {
             ParamType::Uint(256),
             ParamType::Tuple(vec![ParamType::Bool, ParamType::Uint(256)]),
             ParamType::Uint(16),
+            ParamType::Uint(256),
             ParamType::FixedBytes(32),
             ParamType::FixedBytes(32),
             ParamType::Bool,
+        ]))),
+        ParamType::Array(Box::new(ParamType::Tuple(vec![
+            ParamType::Uint(256),
+            ParamType::Bool,
+            ParamType::Uint(256),
+            ParamType::Uint(256),
+            ParamType::Uint(256),
+            ParamType::Uint(256),
+            ParamType::Uint(256),
+            ParamType::Uint(256),
+            ParamType::Uint(256),
+            ParamType::Uint(256),
         ]))),
     ])
 }
@@ -3969,7 +4019,7 @@ fn decode_signed_proof_pulls(
         else {
             return Err(invalid(kind, "CANONICAL_DELTA_BATCH_TUPLE"));
         };
-        if batch.len() != 3 {
+        if batch.len() != 4 {
             return Err(invalid(kind, "CANONICAL_DELTA_BATCH_FIELDS"));
         }
         let Token::Array(rows) = batch.remove(2) else {
@@ -3979,23 +4029,29 @@ fn decode_signed_proof_pulls(
             let Token::Tuple(mut fields) = row else {
                 return Err(invalid(kind, "CANONICAL_DELTA_PULL_TUPLE"));
             };
-            if fields.len() != 6 {
+            if fields.len() != 7 {
                 return Err(invalid(kind, "CANONICAL_DELTA_PULL_FIELDS"));
             }
-            let Token::Bool(target_role) = fields.pop().expect("six fields") else {
+            let Token::Bool(target_role) = fields.pop().expect("seven fields") else {
                 return Err(invalid(kind, "CANONICAL_DELTA_PULL_ROLE"));
             };
-            let Token::FixedBytes(partial_root) = fields.pop().expect("six fields") else {
+            let Token::FixedBytes(partial_root) = fields.pop().expect("seven fields") else {
                 return Err(invalid(kind, "CANONICAL_DELTA_PULL_PARTIAL_ROOT"));
             };
-            let Token::FixedBytes(full_hash) = fields.pop().expect("six fields") else {
+            let Token::FixedBytes(full_hash) = fields.pop().expect("seven fields") else {
                 return Err(invalid(kind, "CANONICAL_DELTA_PULL_FULL_HASH"));
             };
-            let Token::Uint(claimed_ratio) = fields.pop().expect("six fields") else {
+            let Token::Uint(deadline) = fields.pop().expect("seven fields") else {
+                return Err(invalid(kind, "CANONICAL_DELTA_PULL_DEADLINE"));
+            };
+            if deadline.is_zero() || deadline > U256::from(9_007_199_254_740_991_u64) {
+                return Err(invalid(kind, "CANONICAL_DELTA_PULL_DEADLINE"));
+            }
+            let Token::Uint(claimed_ratio) = fields.pop().expect("seven fields") else {
                 return Err(invalid(kind, "CANONICAL_DELTA_PULL_RATIO"));
             };
-            let amount = signed_amount(fields.pop().expect("six fields"), kind)?;
-            let Token::Uint(_) = fields.pop().expect("six fields") else {
+            let amount = signed_amount(fields.pop().expect("seven fields"), kind)?;
+            let Token::Uint(_) = fields.pop().expect("seven fields") else {
                 return Err(invalid(kind, "CANONICAL_DELTA_PULL_INDEX"));
             };
             if claimed_ratio > U256::from(u16::MAX) {
@@ -4007,6 +4063,7 @@ fn decode_signed_proof_pulls(
             pulls.push(SignedProofPull {
                 amount,
                 claimed_ratio: claimed_ratio.as_u32() as u16,
+                deadline: deadline.as_u64(),
                 full_hash: full_hash
                     .try_into()
                     .map_err(|_| invalid(kind, "CANONICAL_DELTA_PULL_FULL_HASH_LENGTH"))?,
@@ -4020,11 +4077,23 @@ fn decode_signed_proof_pulls(
     Ok(pulls)
 }
 
+pub(crate) fn proof_body_pull_deadline(
+    body: &crate::j_batch::ProofBody,
+    delta_transformer: [u8; 20],
+) -> Result<Option<u64>, EntityKernelError> {
+    Ok(
+        decode_signed_proof_pulls(body, delta_transformer, EntityTxKind::DisputeStart)?
+            .iter()
+            .map(|pull| pull.deadline)
+            .max(),
+    )
+}
+
 pub(crate) fn proof_body_has_signed_pulls(
     body: &crate::j_batch::ProofBody,
     delta_transformer: [u8; 20],
 ) -> Result<bool, EntityKernelError> {
-    Ok(!decode_signed_proof_pulls(body, delta_transformer, EntityTxKind::DisputeStart)?.is_empty())
+    Ok(proof_body_pull_deadline(body, delta_transformer)?.is_some())
 }
 
 fn exact_signed_pull(
@@ -4047,7 +4116,8 @@ fn exact_signed_pull(
     let matching = pulls
         .iter()
         .filter(|pull| {
-            pull.target_role == target_role
+            pull.deadline == unsigned(expected, "deadline").unwrap_or(0)
+                && pull.target_role == target_role
                 && pull.amount == amount
                 && pull.full_hash == full_hash
                 && pull.partial_root == partial_root
@@ -4065,9 +4135,14 @@ fn queue_hash_ladder_registration(
     registration: crate::j_batch::HashLadderRegistration,
     kind: EntityTxKind,
 ) -> Result<RegistrationQueueResult, EntityKernelError> {
-    // Exact membership precedes monotonicity across confirmed, queued and
-    // pending evidence: confirmed 100 + queued 200 must absorb retry 100.
-    // A new 150 still conflicts; retries cannot refresh revealedAt.
+    if registration.target_role {
+        return Err(invalid(
+            kind,
+            "TARGET_REVEAL_REQUIRES_STANDALONE_PUBLICATION",
+        ));
+    }
+    // Exact membership precedes conflict checks across confirmed, pending and
+    // batched evidence: a retry must never refresh the first revealedAt.
     let mut ratios = BTreeSet::new();
     for (_, route) in state
         .cross_jurisdiction_swaps
@@ -4076,42 +4151,30 @@ fn queue_hash_ladder_registration(
         .transpose()?
         .unwrap_or_default()
     {
-        let (pull_name, leg, peer, ratio_name) = if registration.target_role {
-            (
-                "targetPull",
-                "target",
-                "entityId",
-                "targetRegistryFillRatio",
-            )
-        } else {
-            (
-                "sourcePull",
-                "source",
-                "entityId",
-                "sourceRegistryFillRatio",
-            )
-        };
-        let Some(pull) = field(&route, pull_name) else {
+        let Some(pull) = field(&route, "sourcePull") else {
             continue;
         };
-        if nested_text(&route, leg, peer).map(normalized).as_deref()
-            == Some(prefixed_hex(&registration.counterparty_entity).as_str())
-            && text(pull, "fullHash") == Some(prefixed_hex(&registration.full_hash).as_str())
-            && text(pull, "partialRoot") == Some(prefixed_hex(&registration.partial_root).as_str())
+        let Some(peer) = route_leg_counterparty(state, &route, "source", kind)? else {
+            continue;
+        };
+        if word(&peer, kind, "REGISTRY_PEER")? != registration.counterparty_entity
+            || word(text(pull, "fullHash").unwrap_or(""), kind, "REGISTRY_HASH")?
+                != registration.full_hash
+            || word(
+                text(pull, "partialRoot").unwrap_or(""),
+                kind,
+                "REGISTRY_ROOT",
+            )? != registration.partial_root
         {
-            if let Some(ratio) = unsigned(&route, ratio_name) {
-                ratios.insert(
-                    u16::try_from(ratio).map_err(|_| invalid(kind, "CONFIRMED_RATIO_INVALID"))?,
-                );
-            }
-            let pending_name = if registration.target_role {
-                "pendingTargetRegistryReveal"
-            } else {
-                "pendingSourceRegistryReveal"
-            };
-            if let Some(pending) = field(&route, pending_name) {
-                ratios.insert(pending_witness(pending, kind)?.fill_ratio);
-            }
+            continue;
+        }
+        if let Some(ratio) = unsigned(&route, "sourceRegistryFillRatio") {
+            ratios.insert(
+                u16::try_from(ratio).map_err(|_| invalid(kind, "CONFIRMED_RATIO_INVALID"))?,
+            );
+        }
+        if let Some(pending) = field(&route, "pendingSourceRegistryReveal") {
+            ratios.insert(pending_witness(pending, kind)?.fill_ratio);
         }
     }
     let j_state = state.j_batch_state.get_or_insert_with(Default::default);
@@ -4145,7 +4208,7 @@ fn queue_hash_ladder_registration(
         return Ok(RegistrationQueueResult::AlreadyQueued);
     }
     if let Some(ratio) = ratios.last()
-        && (!registration.target_role || registration.witness.fill_ratio < *ratio)
+        && registration.witness.fill_ratio != *ratio
     {
         return Err(invalid(
             kind,
@@ -4222,8 +4285,8 @@ pub(crate) fn queue_source_hub_claim_registrations(
     runtime_seed: &str,
     body: &crate::j_batch::ProofBody,
     delta_transformer: [u8; 20],
-    owner_is_left: bool,
-    active_dispute: Option<&CanonicalValue>,
+    _owner_is_left: bool,
+    _active_dispute: Option<&CanonicalValue>,
     outputs: &mut Vec<LocalEntityOutput>,
 ) -> Result<usize, EntityKernelError> {
     let kind = EntityTxKind::DisputeStart;
@@ -4275,26 +4338,10 @@ pub(crate) fn queue_source_hub_claim_registrations(
                 format!("SOURCE_REGISTRY_RATIO_CONFLICT:{route_id}:{confirmed}:{ratio}"),
             ));
         }
-        if let Some(active) = active_dispute
-            && canonical_bool(active, "observedOnChain")
+        if state.timestamp / 1_000
+            > unsigned(pull, "deadline").ok_or_else(|| invalid(kind, "PULL_DEADLINE_MISSING"))?
         {
-            let start = unsigned(active, "disputeStartTimestamp")
-                .ok_or_else(|| invalid(kind, "SOURCE_DISPUTE_START_MISSING"))?;
-            let now = state.timestamp / 1_000;
-            if now < start {
-                return Err(invalid(
-                    kind,
-                    format!("SOURCE_WINDOW_NOT_OPEN:{now}:{start}"),
-                ));
-            }
-            let window = if owner_is_left {
-                u64::from(body.left_response_seconds)
-            } else {
-                u64::from(body.right_response_seconds)
-            };
-            if now > start.saturating_add(window) {
-                continue;
-            }
+            continue;
         }
         if trim_runtime_seed(runtime_seed).is_empty() {
             return Err(invalid(kind, "RUNTIME_SEED_MISSING"));
@@ -4345,93 +4392,6 @@ pub(crate) fn queue_source_hub_claim_registrations(
 /// Move one Target witness from its canonical route into the writable jBatch
 /// after that exact Account dispute has become active. The route remains the
 /// only deferred source of truth; capacity failure restores the same field.
-pub(crate) fn flush_pending_target_reveal_for_route(
-    state: &mut EntityStateSlice,
-    route_id: &str,
-    account_counterparty: &str,
-    outputs: &mut Vec<LocalEntityOutput>,
-) -> Result<usize, EntityKernelError> {
-    let kind = EntityTxKind::DisputeStart;
-    let Some(mut route) = state
-        .cross_jurisdiction_swaps
-        .as_ref()
-        .and_then(|routes| routes.get(route_id))
-        .cloned()
-    else {
-        return Err(invalid(kind, format!("CROSS_J_ROUTE_MISSING:{route_id}")));
-    };
-    let Some(pending) = field(&route, "pendingTargetRegistryReveal").cloned() else {
-        return Ok(0);
-    };
-    let local = normalized(&state.entity_id);
-    let counterparty = normalized(account_counterparty);
-    let target_entity = nested_text(&route, "target", "entityId")
-        .map(normalized)
-        .ok_or_else(|| invalid(kind, "TARGET_ENTITY_MISSING"))?;
-    let target_counterparty = nested_text(&route, "target", "counterpartyEntityId")
-        .map(normalized)
-        .ok_or_else(|| invalid(kind, "TARGET_COUNTERPARTY_MISSING"))?;
-    if !((target_entity == local && target_counterparty == counterparty)
-        || (target_counterparty == local && target_entity == counterparty))
-    {
-        return Ok(0);
-    }
-    let pull = field(&route, "targetPull")
-        .ok_or_else(|| invalid(kind, format!("TARGET_PULL_MISSING:{route_id}")))?;
-    let registration = crate::j_batch::HashLadderRegistration {
-        counterparty_entity: word(&counterparty, kind, "TARGET_COUNTERPARTY")?,
-        target_role: true,
-        full_hash: word(
-            text(pull, "fullHash").ok_or_else(|| invalid(kind, "TARGET_PULL_FULL_HASH"))?,
-            kind,
-            "TARGET_PULL_FULL_HASH",
-        )?,
-        partial_root: word(
-            text(pull, "partialRoot").ok_or_else(|| invalid(kind, "TARGET_PULL_PARTIAL_ROOT"))?,
-            kind,
-            "TARGET_PULL_PARTIAL_ROOT",
-        )?,
-        witness: pending_witness(&pending, kind)?,
-    };
-    remove(&mut route, "pendingTargetRegistryReveal")?;
-    collection(&mut state.cross_jurisdiction_swaps).insert(route_id.to_string(), route.clone())?;
-    match queue_hash_ladder_registration(state, registration.clone(), kind)? {
-        RegistrationQueueResult::Deferred => {
-            set(
-                &mut route,
-                "pendingTargetRegistryReveal",
-                pending_witness_value(&registration.witness, kind)?,
-            )?;
-            collection(&mut state.cross_jurisdiction_swaps).insert(route_id.to_string(), route)?;
-            Ok(0)
-        }
-        RegistrationQueueResult::AlreadyQueued => Ok(0),
-        RegistrationQueueResult::Queued { broadcast_now } => {
-            let broadcast_present = outputs.iter().any(|output| {
-                output.entity_id == local
-                    && output.entity_txs.iter().any(|tx| {
-                        matches!(
-                            tx,
-                            LocalEntityOutputTx::Projected(tx)
-                                if tx.kind == EntityTxKind::JBroadcast
-                        )
-                    })
-            });
-            if broadcast_now && !broadcast_present {
-                outputs.push(routed(
-                    &local,
-                    None,
-                    vec![projected(
-                        EntityTxKind::JBroadcast,
-                        CanonicalValue::Object(Vec::new()),
-                    )?],
-                ));
-            }
-            Ok(1)
-        }
-    }
-}
-
 fn route_leg_counterparty(
     state: &EntityStateSlice,
     route: &CanonicalValue,
@@ -4479,11 +4439,6 @@ pub(crate) fn pending_registry_reveal_account_ids(
         {
             accounts.insert(account);
         }
-        if field(&route, "pendingTargetRegistryReveal").is_some()
-            && let Some(account) = route_leg_counterparty(state, &route, "target", kind)?
-        {
-            accounts.insert(account);
-        }
     }
     Ok(accounts)
 }
@@ -4492,7 +4447,6 @@ fn flush_pending_source_reveal_for_route(
     state: &mut EntityStateSlice,
     route_id: &str,
     account_counterparty: &str,
-    dispute: &xln_rscore_batch::ResidentAccountDisputeView,
     outputs: &mut Vec<LocalEntityOutput>,
 ) -> Result<usize, EntityKernelError> {
     let kind = EntityTxKind::DisputeStart;
@@ -4507,9 +4461,6 @@ fn flush_pending_source_reveal_for_route(
     let Some(pending) = field(&route, "pendingSourceRegistryReveal").cloned() else {
         return Ok(0);
     };
-    if dispute.active_dispute.is_none() {
-        return Ok(0);
-    }
     let Some(expected_counterparty) = route_leg_counterparty(state, &route, "source", kind)? else {
         return Ok(0);
     };
@@ -4531,34 +4482,15 @@ fn flush_pending_source_reveal_for_route(
         collection(&mut state.cross_jurisdiction_swaps).insert(route_id.to_string(), route)?;
         return Ok(0);
     }
-    let active = dispute
-        .active_dispute
-        .as_ref()
-        .expect("checked active dispute");
-    if canonical_bool(active, "observedOnChain") {
-        let start = unsigned(active, "disputeStartTimestamp")
-            .ok_or_else(|| invalid(kind, "SOURCE_DISPUTE_START_MISSING"))?;
-        let window = if dispute.owner_is_left {
-            dispute
-                .proof_body
-                .as_ref()
-                .map(|body| u64::from(body.left_response_seconds))
-        } else {
-            dispute
-                .proof_body
-                .as_ref()
-                .map(|body| u64::from(body.right_response_seconds))
-        }
-        .map_err(|error| invalid(kind, error.clone()))?;
-        let now = state.timestamp / 1_000;
-        if now > start.saturating_add(window) {
-            remove(&mut route, "pendingSourceRegistryReveal")?;
-            collection(&mut state.cross_jurisdiction_swaps).insert(route_id.to_string(), route)?;
-            return Ok(0);
-        }
-    }
     let pull = field(&route, "sourcePull")
         .ok_or_else(|| invalid(kind, format!("SOURCE_PULL_MISSING:{route_id}")))?;
+    if state.timestamp / 1_000
+        > unsigned(pull, "deadline").ok_or_else(|| invalid(kind, "PULL_DEADLINE_MISSING"))?
+    {
+        remove(&mut route, "pendingSourceRegistryReveal")?;
+        collection(&mut state.cross_jurisdiction_swaps).insert(route_id.to_string(), route)?;
+        return Ok(0);
+    }
     let registration = crate::j_batch::HashLadderRegistration {
         counterparty_entity: word(account_counterparty, kind, "SOURCE_COUNTERPARTY")?,
         target_role: false,
@@ -4598,7 +4530,6 @@ fn flush_pending_source_reveal_for_route(
 
 pub(crate) fn flush_deferred_hash_ladder_reveals(
     state: &mut EntityStateSlice,
-    dispute_views: &BTreeMap<String, xln_rscore_batch::ResidentAccountDisputeView>,
     outputs: &mut Vec<LocalEntityOutput>,
 ) -> Result<usize, EntityKernelError> {
     if state
@@ -4619,25 +4550,9 @@ pub(crate) fn flush_deferred_hash_ladder_reveals(
         if field(&route, "pendingSourceRegistryReveal").is_some()
             && let Some(counterparty) =
                 route_leg_counterparty(state, &route, "source", EntityTxKind::DisputeStart)?
-            && let Some(dispute) = dispute_views.get(&counterparty)
-        {
-            flushed += flush_pending_source_reveal_for_route(
-                state,
-                &route_id,
-                &counterparty,
-                dispute,
-                outputs,
-            )?;
-        }
-        if field(&route, "pendingTargetRegistryReveal").is_some()
-            && let Some(counterparty) =
-                route_leg_counterparty(state, &route, "target", EntityTxKind::DisputeStart)?
-            && dispute_views
-                .get(&counterparty)
-                .is_some_and(|view| view.active_dispute.is_some())
         {
             flushed +=
-                flush_pending_target_reveal_for_route(state, &route_id, &counterparty, outputs)?;
+                flush_pending_source_reveal_for_route(state, &route_id, &counterparty, outputs)?;
         }
     }
     Ok(flushed)
@@ -4645,11 +4560,12 @@ pub(crate) fn flush_deferred_hash_ladder_reveals(
 
 fn apply_salvage(
     state: &mut EntityStateSlice,
-    account_views: &std::collections::BTreeMap<
+    _account_views: &std::collections::BTreeMap<
         String,
         crate::local_financial::LocalAccountFinancialView,
     >,
     tx: &CanonicalEntityTx,
+    authority: &EntityFrameAuthority,
 ) -> Result<CrossJurisdictionApplyResult, EntityKernelError> {
     let data = tx
         .frame_data()
@@ -4765,32 +4681,6 @@ fn apply_salvage(
         });
     }
     let witness = salvage_witness(&binary, verified, tx.kind)?;
-    let active_dispute = account_views
-        .get(&target_hub)
-        .and_then(|view| view.dispute.as_ref())
-        .and_then(|view| view.active_dispute.as_ref())
-        .is_some();
-    if !active_dispute {
-        set(
-            &mut route,
-            "pendingTargetRegistryReveal",
-            pending_witness_value(&witness, tx.kind)?,
-        )?;
-        set(
-            &mut route,
-            "updatedAt",
-            number(state.timestamp, tx.kind, "TIMESTAMP")?,
-        )?;
-        collection(&mut state.cross_jurisdiction_swaps).insert(route_id.clone(), route)?;
-        return Ok(CrossJurisdictionApplyResult {
-            events: vec![EntityFrameEvent::Status {
-                message: format!(
-                    "⏳ Cross-j reveal port {route_id}: waiting for the target dispute clock"
-                ),
-            }],
-            ..CrossJurisdictionApplyResult::default()
-        });
-    }
     let registration = crate::j_batch::HashLadderRegistration {
         counterparty_entity: word(&target_hub, tx.kind, "TARGET_COUNTERPARTY")?,
         target_role: true,
@@ -4798,76 +4688,56 @@ fn apply_salvage(
         partial_root: word(partial_root, tx.kind, "PARTIAL_ROOT")?,
         witness,
     };
-    // Salvage retries leave pending evidence intact for every queue outcome.
-    // Only the dispute/ACK flush removes it while moving it into a batch; a
-    // retry must not bypass membership or emit a redundant broadcast.
-    let queued = queue_hash_ladder_registration(state, registration.clone(), tx.kind)?;
-    if queued == RegistrationQueueResult::Deferred {
-        set(
-            &mut route,
-            "pendingTargetRegistryReveal",
-            pending_witness_value(&registration.witness, tx.kind)?,
-        )?;
-        set(
-            &mut route,
-            "updatedAt",
-            number(state.timestamp, tx.kind, "TIMESTAMP")?,
-        )?;
-        collection(&mut state.cross_jurisdiction_swaps).insert(route_id.clone(), route)?;
-        // With no sent batch, draining the full draft is the only continuation
-        // that makes room for this durable deferred witness (TS salvage parity).
-        let broadcast = state.j_batch_state.as_ref().is_some_and(|batch| {
-            batch.sent_batch.is_none() && !crate::j_batch::batch_is_empty(&batch.batch)
-        });
-        return Ok(CrossJurisdictionApplyResult {
-            outputs: if broadcast {
-                vec![routed(
-                    &local,
-                    None,
-                    vec![projected(
-                        EntityTxKind::JBroadcast,
-                        CanonicalValue::Object(Vec::new()),
-                    )?],
-                )]
-            } else {
-                Vec::new()
-            },
-            events: vec![EntityFrameEvent::Status {
-                message: format!(
-                    "⏳ Cross-j reveal port {route_id}: deferred until the pending jBatch is acknowledged"
-                ),
-            }],
-            ..Default::default()
-        });
+    let existing = field(&route, "pendingTargetRegistryReveal")
+        .and_then(|pending| unsigned(pending, "fillRatio"))
+        .or_else(|| unsigned(&route, "targetRegistryFillRatio"));
+    if let Some(existing) = existing.filter(|ratio| *ratio > 0) {
+        if existing != verified {
+            return Err(invalid(tx.kind, "J_HASH_LADDER_REGISTRATION_CONFLICT"));
+        }
+        return Ok(CrossJurisdictionApplyResult::default());
     }
-    match queued {
-        RegistrationQueueResult::Queued { broadcast_now } => Ok(CrossJurisdictionApplyResult {
-            outputs: if broadcast_now {
-                vec![routed(
-                    &local,
-                    None,
-                    vec![projected(
-                        EntityTxKind::JBroadcast,
-                        CanonicalValue::Object(Vec::new()),
-                    )?],
-                )]
-            } else {
-                Vec::new()
-            },
-            events: vec![EntityFrameEvent::Status {
-                message: if broadcast_now {
-                    format!(
-                        "🌉 Cross-j reveal port {route_id}: registering ratio {verified} on the target chain"
-                    )
-                } else {
-                    format!("⏳ Cross-j reveal port {route_id}: queued behind the pending jBatch")
-                },
-            }],
-            ..Default::default()
-        }),
-        RegistrationQueueResult::AlreadyQueued => Ok(CrossJurisdictionApplyResult::default()),
-        RegistrationQueueResult::Deferred => unreachable!("deferred salvage returned above"),
-    }
+    let jurisdiction = authority
+        .config
+        .jurisdiction
+        .as_ref()
+        .ok_or_else(|| invalid(tx.kind, "JURISDICTION_MISSING"))?;
+    let name =
+        text(jurisdiction, "name").ok_or_else(|| invalid(tx.kind, "JURISDICTION_NAME_MISSING"))?;
+    let signer = &authority.leader_state.active_validator_id;
+    let (chain, address) = parse_stack(
+        nested_text(&route, "target", "jurisdiction")
+            .ok_or_else(|| invalid(tx.kind, "TARGET_JURISDICTION_MISSING"))?,
+        tx.kind,
+    )?;
+    let address: [u8; 20] = hex::decode(address.trim_start_matches("0x"))
+        .map_err(|_| invalid(tx.kind, "DEPOSITORY"))?
+        .try_into()
+        .map_err(|_| invalid(tx.kind, "DEPOSITORY"))?;
+    let entity_id = word(&local, tx.kind, "BENEFICIARY")?;
+    let reveal_hash = crate::j_batch::hash_target_reveal(chain, address, entity_id, &registration);
+    set(
+        &mut route,
+        "pendingTargetRegistryReveal",
+        pending_witness_value(&registration.witness, tx.kind)?,
+    )?;
+    collection(&mut state.cross_jurisdiction_swaps).insert(route_id.clone(), route)?;
+    Ok(CrossJurisdictionApplyResult {
+        j_outputs: vec![crate::EntityJOutput::TargetReveal {
+            jurisdiction_name: name.into(),
+            entity_id,
+            registration,
+            reveal_hash,
+            signer_id: signer.clone(),
+            timestamp: state.timestamp,
+        }],
+        hashes_to_sign: vec![crate::HashToSign {
+            hash: format!("0x{}", hex::encode(reveal_hash)),
+            kind: crate::HashType::HashLadderReveal,
+            context: format!("targetReveal:{route_id}"),
+        }],
+        ..Default::default()
+    })
 }
 
 fn queue_target_close(
@@ -5161,6 +5031,8 @@ fn extend_cross_jurisdiction_result(
     target: &mut CrossJurisdictionApplyResult,
     next: CrossJurisdictionApplyResult,
 ) {
+    target.j_outputs.extend(next.j_outputs);
+    target.hashes_to_sign.extend(next.hashes_to_sign);
     target.outputs.extend(next.outputs);
     target.proposal_work.extend(next.proposal_work);
     target.events.extend(next.events);
@@ -5729,7 +5601,9 @@ pub fn apply_cross_jurisdiction_entity_txs(
             }
             EntityTxKind::RegisterCrossJurisdictionSwap => apply_register(state, tx)?,
             EntityTxKind::CrossPullClose => apply_cross_pull_close(state, tx)?,
-            EntityTxKind::CrossJurisdictionSalvage => apply_salvage(state, account_views, tx)?,
+            EntityTxKind::CrossJurisdictionSalvage => {
+                apply_salvage(state, account_views, tx, authority)?
+            }
             EntityTxKind::RequestCrossJurisdictionClear => {
                 apply_clear_request(state, account_views, tx)?
             }
@@ -5753,6 +5627,99 @@ mod tests {
     mod review_counterexamples;
     mod sub_step;
     use super::*;
+
+    #[test]
+    fn target_port_bypasses_pending_batch_at_1149() {
+        let kind = EntityTxKind::CrossJurisdictionSalvage;
+        let user = format!("0x{}", "44".repeat(32));
+        let hub = format!("0x{}", "33".repeat(32));
+        let mut raw = route("resting", false);
+        let mut target = field(&raw, "target").unwrap().clone();
+        set(&mut target, "entityId", string(&hub)).unwrap();
+        set(&mut target, "counterpartyEntityId", string(&user)).unwrap();
+        set(&mut raw, "target", target).unwrap();
+        set(
+            &mut raw,
+            "expiresAt",
+            number(1_000_000, kind, "EXPIRY").unwrap(),
+        )
+        .unwrap();
+        let prepared = prepared_route(&raw, "pending-batch", 1000).unwrap();
+        let proof = hash_ladder_proof("pending-batch", text(&prepared, "routeHash").unwrap());
+        let binary = reveal_binary(&proof, 65535);
+        let mut state = EntityStateSlice::empty(user, 1_149_000);
+        collection(&mut state.cross_jurisdiction_swaps)
+            .insert("order-1".into(), prepared)
+            .unwrap();
+        let batch = crate::j_batch::JBatch::default();
+        state.j_batch_state = Some(crate::JBatchState {
+            sent_batch: Some(crate::j_batch::SentJBatch {
+                batch,
+                batch_hash: [1; 32],
+                encoded_batch: Vec::new(),
+                entity_nonce: 1,
+                first_submitted_at: 1_148_000,
+                last_submitted_at: 1_148_000,
+                submit_attempts: 1,
+                fee_overrides: None,
+                transaction_hash: None,
+                last_failure: None,
+                terminal_failure: None,
+            }),
+            ..Default::default()
+        });
+        let before = state.j_batch_state.clone();
+        let tx = CanonicalEntityTx::from_frame_projection(
+            kind,
+            obj(vec![
+                ("routeId", string("order-1")),
+                ("binary", string(&binary)),
+                ("fillRatio", number(65535, kind, "RATIO").unwrap()),
+            ]),
+        )
+        .unwrap();
+        let mut authority = authority(
+            "target-signer",
+            2,
+            "0x2222222222222222222222222222222222222222",
+        );
+        set(
+            authority.config.jurisdiction.as_mut().unwrap(),
+            "name",
+            string("Target"),
+        )
+        .unwrap();
+        authority
+            .config
+            .validators
+            .insert(0, "previous-signer".into());
+        let result = apply_salvage(&mut state, &BTreeMap::new(), &tx, &authority).unwrap();
+        assert!(
+            matches!(&result.j_outputs[..], [crate::EntityJOutput::TargetReveal { signer_id, .. }] if signer_id == "target-signer")
+        );
+        assert_eq!(result.hashes_to_sign.len(), 1);
+        assert_eq!(state.j_batch_state, before);
+        assert!(result.outputs.is_empty());
+    }
+
+    #[test]
+    fn absolute_deadline_admission_rejects_missing_and_reversed_authority() {
+        let kind = EntityTxKind::PrepareCrossJurisdictionSwap;
+        let mut missing = route("intent", false);
+        remove(&mut missing, "expiresAt").unwrap();
+        assert!(canonical_route(&missing, kind).is_err());
+        let mut prepared =
+            prepared_route(&route("intent", false), "deadline-vector", 1000).unwrap();
+        let mut target = field(&prepared, "targetPull").unwrap().clone();
+        set(
+            &mut target,
+            "deadline",
+            number(61 + 232, kind, "DEADLINE").unwrap(),
+        )
+        .unwrap();
+        set(&mut prepared, "targetPull", target).unwrap();
+        assert!(canonical_route(&prepared, kind).is_err());
+    }
 
     #[test]
     fn opening_account_ids_read_nothing_without_committed_routes() {
@@ -5938,13 +5905,26 @@ mod tests {
             set(
                 &mut route,
                 "sourcePull",
-                obj(vec![("pullId", string("source-pull"))]),
+                obj(vec![
+                    ("pullId", string("source-pull")),
+                    (
+                        "deadline",
+                        number(61, EntityTxKind::PrepareCrossJurisdictionSwap, "DEADLINE").unwrap(),
+                    ),
+                ]),
             )
             .expect("source pull");
             set(
                 &mut route,
                 "targetPull",
-                obj(vec![("pullId", string("target-pull"))]),
+                obj(vec![
+                    ("pullId", string("target-pull")),
+                    (
+                        "deadline",
+                        number(294, EntityTxKind::PrepareCrossJurisdictionSwap, "DEADLINE")
+                            .unwrap(),
+                    ),
+                ]),
             )
             .expect("target pull");
         }
@@ -6360,7 +6340,7 @@ mod tests {
         .expect("canonical route");
         assert_eq!(
             text(&canonical, "routeHash"),
-            Some("0xc7256dc31e315883c77c1743527b1a8b5b4966db203cecb91cfbfeab7c444f03")
+            Some("0x25d85d1a0fe2a866e331e7d0d3511478f5c9aa15f38d54b344492f6a77681aa7")
         );
         assert_eq!(text(&canonical, "bookOwnerEntityId"), Some("source-hub"));
         assert_eq!(
@@ -6742,20 +6722,20 @@ mod tests {
         let target_pull = field(route, "targetPull").expect("target pull");
         assert_eq!(
             text(source_pull, "pullId"),
-            Some("0x726bfbdb8921187a8d5a33f8a5c02e4267d00d287943de0b7289f9bc873fec8a")
+            Some("0x761e25b6d075b20ac9f7bac2b4e0b05bd55c92df1fa8b2bbf19eea39188774e1")
         );
         assert_eq!(
             text(target_pull, "pullId"),
-            Some("0x3a364f50b40a101154c0c5487d11780c13963e41898aea48b21d96a128cb78fb")
+            Some("0xb5dbea471955eb045c02f9c1911605e8d8feac9e6fe37bc35077c1fd1e99cae1")
         );
         for pull in [source_pull, target_pull] {
             assert_eq!(
                 text(pull, "fullHash"),
-                Some("0x85d1f23053fcbb6ff75ec137614a65cc3e69bf653f8ed825e0a8c64f0dd05820")
+                Some("0x6673e874ee9b4a6577ff374cca390cc744a2951f293934053c8ff9f9284675db")
             );
             assert_eq!(
                 text(pull, "partialRoot"),
-                Some("0xd689b6ea1a3d07594be5a117f83838ab198c34bff673b43b67164420c51cf188")
+                Some("0xb07ef6dd135d4a1218c4ec76a8529ea4bf104b2fd281e0aec4661497436b1d66")
             );
         }
     }
@@ -6821,10 +6801,12 @@ mod tests {
                     Token::Uint(U256::from_big_endian(&amount_bytes)),
                 ]),
                 Token::Uint(U256::from(0)),
+                Token::Uint(U256::from(unsigned(source_pull, "deadline").unwrap())),
                 Token::FixedBytes(full_hash.to_vec()),
                 Token::FixedBytes(partial_root.to_vec()),
                 Token::Bool(false),
             ])]),
+            Token::Array(Vec::new()),
         ])]);
         let body = crate::j_batch::ProofBody {
             watch_seed: [0; 32],

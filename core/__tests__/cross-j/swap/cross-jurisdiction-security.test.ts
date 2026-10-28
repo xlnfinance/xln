@@ -178,6 +178,12 @@ describe('cross-jurisdiction security invariants', () => {
     expect(admit.skippedError).toContain('CROSS_J_BOOK_ADMIT_WRONG_OWNER');
 
     const sourceHub = makeState(entity('02'), addr('33'), eth, entity('01'));
+    if (!route.targetPull) throw new Error('test target Pull missing');
+    const badDeadline = await applyEntityTx(env, sourceHub, {
+      type: 'admitCrossJurisdictionBookOrder',
+      data: { route: { ...route, targetPull: { ...route.targetPull, deadline: route.targetPull.deadline - 1 } } },
+    });
+    expect(badDeadline.skippedError).toContain('CROSS_J_DEADLINE_ORDER');
     const ack = await applyEntityTx(env, sourceHub, {
       type: 'crossJurisdictionBookOrderRemoved',
       data: {
@@ -219,7 +225,7 @@ describe('cross-jurisdiction security invariants', () => {
     await expect(applyEntityTx(env, state, {
       type: 'requestCrossJurisdictionClear',
       data: { orderId: route.orderId, cancelRemainder: true },
-    })).rejects.toThrow('CROSS_J_CLEAR_CORRUPT_ROUTE');
+    })).rejects.toThrow('CROSS_J_DEADLINE_ORDER');
   });
 
   test('target-side prepareDispute drafts through exact hanko preflight when optional pull arguments are unavailable', async () => {
@@ -237,7 +243,7 @@ describe('cross-jurisdiction security invariants', () => {
       claimedRatio: 0,
       claimedAmount: 0n,
       fullHash: route.targetPull!.fullHash,
-      partialRoot: route.targetPull!.partialRoot,
+      partialRoot: route.targetPull!.partialRoot, deadline: route.targetPull!.deadline,
       crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'target'),
       createdHeight: 1,
       createdTimestamp: 1_000,
@@ -268,7 +274,7 @@ describe('cross-jurisdiction security invariants', () => {
       claimedRatio: 0,
       claimedAmount: 0n,
       fullHash: route.targetPull!.fullHash,
-      partialRoot: route.targetPull!.partialRoot,
+      partialRoot: route.targetPull!.partialRoot, deadline: route.targetPull!.deadline,
       crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'target'),
       createdHeight: 1,
       createdTimestamp: 1_000,

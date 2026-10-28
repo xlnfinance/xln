@@ -41,6 +41,7 @@ const pull = (pullId: string, amount: bigint, byte: string): PullCommitment => (
   tokenId: 2,
   amount,
   claimedRatio: 0,
+  deadline: 120,
   claimedAmount: 0n,
   fullHash: entity(`${byte}1`),
   partialRoot: entity(`${byte}2`),

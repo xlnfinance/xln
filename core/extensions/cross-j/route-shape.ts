@@ -72,11 +72,12 @@ const validatePull = (value: unknown, code: string): void => {
   const pull = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(
     pull,
-    ['pullId', 'tokenId', 'amount', 'signedAmount', 'fullHash', 'partialRoot'],
+    ['pullId', 'tokenId', 'amount', 'signedAmount', 'fullHash', 'partialRoot', 'deadline'],
     [],
     `${code}_FIELDS`,
   );
   for (const field of ['pullId', 'fullHash', 'partialRoot']) requireString(pull[field], `${code}_${field}`);
+  requireBoundaryInteger(pull['deadline'], `${code}_DEADLINE`, 1);
   requireBoundaryInteger(pull['tokenId'], `${code}_TOKEN`, 1);
   requireBigInt(pull['amount'], `${code}_AMOUNT`, 0n);
   requireBigInt(pull['signedAmount'], `${code}_SIGNED_AMOUNT`);
@@ -120,7 +121,7 @@ const validateTimePolicy = (value: unknown, code: string): void => {
   requireLiteral(policy['runtimeClock'], ['unix_ms'], `${code}_RUNTIME_CLOCK`);
   requireLiteral(policy['settlementClock'], ['unix_seconds'], `${code}_SETTLEMENT_CLOCK`);
   requireLiteral(policy['deadlineConversion'], ['floor_ms_to_unix_seconds'], `${code}_CONVERSION`);
-  requireLiteral(policy['finalityPolicy'], ['independent_beneficiary_windows_pull_sum_finality'], `${code}_FINALITY`);
+  requireLiteral(policy['finalityPolicy'], ['absolute_pull_deadlines'], `${code}_FINALITY`);
   requireBoundaryInteger(policy['runtimeExpiresAtMs'], `${code}_EXPIRES`, 0);
 };
 

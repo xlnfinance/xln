@@ -50,6 +50,7 @@ export const HASHABLE_CROSS_J_PULL_LEG_FIELDS = [
   'signedAmount',
   'fullHash',
   'partialRoot',
+  'deadline',
 ] as const satisfies readonly (keyof CrossJurisdictionPullLeg)[];
 
 export const HASHABLE_CROSS_J_CLOSE_PROOF_FIELDS = [

@@ -183,7 +183,7 @@ const crossJWorkerFixture = (reciprocal: boolean) => {
       if (!pull) throw new Error('WORKER_CROSS_J_PULL_MISSING');
       const tx: AccountTx = { type: 'cross_pull_lock', data: {
         pullId: pull.pullId, tokenId: pull.tokenId, amount: pull.signedAmount,
-        fullHash: pull.fullHash, partialRoot: pull.partialRoot,
+        fullHash: pull.fullHash, partialRoot: pull.partialRoot, deadline: pull.deadline,
         crossJurisdiction: buildCrossJurisdictionPullBinding(route, leg), crossJurisdictionRoute: route,
       } };
       if (leg === 'target') txs.push(tx);

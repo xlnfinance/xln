@@ -45,6 +45,7 @@ test('authenticated J finality retires the Account dispute epoch', () => {
       tokenId: 1,
       amount: -1n,
       claimedRatio: 0,
+      deadline: 120,
       claimedAmount: 0n,
       fullHash: `0x${'aa'.repeat(32)}`,
       partialRoot: `0x${'bb'.repeat(32)}`,

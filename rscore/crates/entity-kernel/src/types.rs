@@ -757,6 +757,14 @@ impl EntityKernelOutput {
 /// outbox row and does not duplicate the committed JBatch state.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EntityJOutput {
+    TargetReveal {
+        jurisdiction_name: String,
+        entity_id: [u8; 32],
+        registration: crate::j_batch::HashLadderRegistration,
+        reveal_hash: [u8; 32],
+        signer_id: String,
+        timestamp: u64,
+    },
     BatchIntent {
         jurisdiction_name: String,
         batch_hash: [u8; 32],

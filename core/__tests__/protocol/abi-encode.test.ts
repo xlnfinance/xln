@@ -63,6 +63,7 @@ const randBatch = () => ({
     deltaIndex: BigInt(randInt(10)),
     amount: encodeSignedAmount(randInt256()),
     claimedRatio: randUint(16),
+    deadline: randUint(32) + 1n,
     fullHash: randHex(32),
     partialRoot: randHex(32),
     targetRole: rand() < 0.5,

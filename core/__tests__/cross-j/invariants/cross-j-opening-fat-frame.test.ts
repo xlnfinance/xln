@@ -69,6 +69,7 @@ const buildRoute = (
   },
   sourcePull: {
     pullId: `${orderId}-source`,
+    deadline: 20,
     tokenId: 1,
     amount: 10n,
     signedAmount: -10n,
@@ -77,6 +78,7 @@ const buildRoute = (
   },
   targetPull: {
     pullId: `${orderId}-target`,
+    deadline: 253,
     tokenId: 2,
     amount: 20n,
     signedAmount: -20n,
@@ -266,6 +268,7 @@ describe('cross-j fat-frame opening admission', () => {
         tokenId: 1,
         amount: -10n,
         claimedRatio: 0,
+        deadline: 120,
         claimedAmount: 0n,
         fullHash: secret('yy'),
         partialRoot: liveRoot,
@@ -322,6 +325,7 @@ describe('cross-j pull hash material durability', () => {
         tokenId: 1,
         amount: -10n,
         claimedRatio: 0,
+        deadline: 120,
         claimedAmount: 0n,
         fullHash: secret('aa'),
         partialRoot: secret('bb'),
@@ -357,6 +361,7 @@ describe('cross-j pull hash material durability', () => {
       },
       sourcePull: {
         pullId: 'order-b-source',
+        deadline: 20,
         tokenId: 1,
         amount: 10n,
         signedAmount: -10n,
@@ -365,6 +370,7 @@ describe('cross-j pull hash material durability', () => {
       },
       targetPull: {
         pullId: 'order-b-target',
+        deadline: 253,
         tokenId: 2,
         amount: 20n,
         signedAmount: -20n,
@@ -382,7 +388,7 @@ describe('cross-j pull hash material durability', () => {
         tokenId: collidingRoute.sourcePull!.tokenId,
         amount: collidingRoute.sourcePull!.signedAmount,
         fullHash: collidingRoute.sourcePull!.fullHash,
-        partialRoot: collidingRoute.sourcePull!.partialRoot,
+        partialRoot: collidingRoute.sourcePull!.partialRoot, deadline: collidingRoute.sourcePull!.deadline,
         crossJurisdiction: buildCrossJurisdictionPullBinding(collidingRoute, 'source'),
         crossJurisdictionRoute: collidingRoute,
       },
@@ -397,6 +403,7 @@ describe('cross-j pull hash material durability', () => {
       routeHash: undefined,
       sourcePull: {
         pullId: 'order-c-source',
+        deadline: 20,
         tokenId: 1,
         amount: 10n,
         signedAmount: -10n,
@@ -420,7 +427,7 @@ describe('cross-j pull hash material durability', () => {
         tokenId: collidePartialRoute.sourcePull!.tokenId,
         amount: collidePartialRoute.sourcePull!.signedAmount,
         fullHash: collidePartialRoute.sourcePull!.fullHash,
-        partialRoot: collidePartialRoute.sourcePull!.partialRoot,
+        partialRoot: collidePartialRoute.sourcePull!.partialRoot, deadline: collidePartialRoute.sourcePull!.deadline,
         crossJurisdiction: buildCrossJurisdictionPullBinding(collidePartialRoute, 'source'),
         crossJurisdictionRoute: collidePartialRoute,
       },

@@ -96,8 +96,8 @@ const committedCrossJTargetResponseWindowMs = (
 
 /**
  * Validate the local leg's exact signed Account clock. Source and Target use
- * independent dispute starts and beneficiary windows; no cross-route minimum,
- * equality rule, or invented relay margin is protocol authority.
+ * independent dispute clocks. Route admission separately enforces the signed
+ * absolute deadlines and the bounded Source-to-Target delivery margin.
  */
 const assertLocalCrossJDisputeClock = (
   state: EntityState,

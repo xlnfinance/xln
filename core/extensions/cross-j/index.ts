@@ -1,3 +1,4 @@
+import { assertCrossJDeadlines, crossJDeadlines } from './deadlines';
 import { rejectFailure, haltRuntimeFailure } from '../../protocol/errors/failure-taxonomy';
 
 import { ethers } from 'ethers';
@@ -29,7 +30,6 @@ export {
 } from './market';
 
 /** Book TTL default only — not a sealed pull/settlement reveal window. */
-const CROSS_J_DEFAULT_BOOK_TTL_MS = 60_000;
 export const CROSS_J_MAX_FILL_RATIO = 65_535;
 
 export function cooperativeCrossJurisdictionSourceSpend(
@@ -322,7 +322,7 @@ const normalizeCrossJurisdictionTimePolicy = (
     settlementClock: 'unix_seconds',
     deadlineConversion: 'floor_ms_to_unix_seconds',
     runtimeExpiresAtMs,
-    finalityPolicy: 'independent_beneficiary_windows_pull_sum_finality',
+    finalityPolicy: 'absolute_pull_deadlines',
   };
 };
 
@@ -572,6 +572,7 @@ const cloneCrossJurisdictionPullLeg = (value: CrossJurisdictionPullLeg | undefin
     tokenId: Number(value.tokenId),
     amount: BigInt(value.amount),
     signedAmount: BigInt(value.signedAmount),
+    deadline: Number(value.deadline),
     fullHash: String(value.fullHash || ''),
     partialRoot: String(value.partialRoot || ''),
   };
@@ -693,7 +694,7 @@ const cloneCrossJurisdictionTimePolicy = (
     settlementClock: 'unix_seconds',
     deadlineConversion: 'floor_ms_to_unix_seconds',
     runtimeExpiresAtMs: Number(policy.runtimeExpiresAtMs || 0),
-    finalityPolicy: 'independent_beneficiary_windows_pull_sum_finality',
+    finalityPolicy: 'absolute_pull_deadlines',
   };
 };
 
@@ -936,6 +937,7 @@ function withCrossJurisdictionVenueDefaults(route: CrossJurisdictionSwapRoute): 
 export function withCanonicalCrossJurisdictionRouteHash(route: CrossJurisdictionSwapRoute): CrossJurisdictionSwapRoute {
   const withDefaults = withCrossJurisdictionPolicyDefaults(withCrossJurisdictionVenueDefaults(route));
   assertCrossJurisdictionRiskPolicy(withDefaults);
+  assertCrossJDeadlines(withDefaults);
   const routeHash = deriveCrossJurisdictionRouteHash(withDefaults);
   if (withDefaults.routeHash && String(withDefaults.routeHash).toLowerCase() !== routeHash.toLowerCase()) {
     throw haltRuntimeFailure("CROSS_J_ROUTE_HASH_MISMATCH", `CROSS_J_ROUTE_HASH_MISMATCH:${route.orderId}`);
@@ -989,30 +991,26 @@ export function buildPreparedCrossJurisdictionRoute(
 ): CrossJurisdictionSwapRoute {
   const now = Math.floor(Number(options.now || 0));
   if (!Number.isFinite(now) || now <= 0) throw haltRuntimeFailure("CROSS_J_NOW_INVALID", `CROSS_J_NOW_INVALID:${options.now}`);
-  // Book TTL only. Settlement clocks are dispute-relative seconds on L1:
-  // Source and Target each use their own beneficiary-side signed window. The
-  // full left+right sum is exclusively the Account finalization barrier.
-  // No sealed route reveal deadline, no market expiry for swap finality,
-  // no cross-j margin — event-driven sibling fanout owns clocks.
-  const marketExpiresAt = Math.floor(Number(route.expiresAt ?? (now + CROSS_J_DEFAULT_BOOK_TTL_MS)));
+  // The signed route expiry deterministically seals both Pull deadlines. The
+  // route hash already commits expiry; no hub-selected clock can replace it.
+  const canonicalRoute = withCanonicalCrossJurisdictionRouteHash(route);
+  const marketExpiresAt = Number(canonicalRoute.expiresAt);
   if (!Number.isFinite(marketExpiresAt) || marketExpiresAt <= now) {
     throw haltRuntimeFailure("CROSS_J_EXPIRES_AT_INVALID", `CROSS_J_EXPIRES_AT_INVALID:${route.orderId}`);
   }
-  const canonicalRoute = withCanonicalCrossJurisdictionRouteHash({
-    ...route,
-    expiresAt: marketExpiresAt,
-  });
   assertCrossJurisdictionAssetRouteIsUseful(canonicalRoute);
   const privateSeed = deriveCrossJurisdictionPrivateSeed(options.runtimeSeed, canonicalRoute);
   const proof = deriveCrossJurisdictionHashLadderProof(canonicalRoute, privateSeed);
   const sourceAmount = BigInt(canonicalRoute.source.amount);
   const targetAmount = BigInt(canonicalRoute.target.amount);
+  const deadlines = crossJDeadlines(canonicalRoute);
   const sourcePullId = deriveCrossJurisdictionPullId(canonicalRoute, 'source');
   const targetPullId = deriveCrossJurisdictionPullId(canonicalRoute, 'target');
   return {
     ...canonicalRoute,
     sourcePull: {
       pullId: sourcePullId,
+      deadline: deadlines.source,
       tokenId: Number(route.source.tokenId),
       amount: sourceAmount,
       signedAmount: signedCrossJurisdictionAmountForBeneficiary(
@@ -1025,6 +1023,7 @@ export function buildPreparedCrossJurisdictionRoute(
     },
     targetPull: {
       pullId: targetPullId,
+      deadline: deadlines.target,
       tokenId: Number(route.target.tokenId),
       amount: targetAmount,
       signedAmount: signedCrossJurisdictionAmountForBeneficiary(

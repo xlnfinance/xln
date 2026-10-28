@@ -45,9 +45,8 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
   // Shared E2..E10 / transformer errors: Types.sol.
   // Depository-only codes stay here — not used by the Account library.
   error E11(); // UnsupportedToken
-  // Registry conflict: a Source retry changed ratio, a Target retry lowered
-  // ratio, the signed role mismatched, or a first Source write missed its
-  // beneficiary window. Exact retries remain idempotent.
+  // Either namespace rejects a conflicting ratio; exact retries preserve
+  // first-seen evidence, including before disputes and after Pull deadlines.
   error E12();
 
   // Immutable EntityProvider (set in constructor, gas-efficient static calls)
@@ -238,6 +237,23 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
       ladderHash,
       targetRole
     );
+  }
+
+  /// @notice Target witness publication has no processBatch nonce dependency.
+  /// @dev The beneficiary's current Hanko binds chain, Depository, ordered pair,
+  /// role and all witness bytes. Replay is safe because registry records are immutable.
+  function registerTargetHashLadderReveal(
+    bytes32 beneficiary,
+    HashLadderRegistration calldata registration,
+    bytes calldata hankoData
+  ) external nonReentrant {
+    if (!registration.targetRole) revert E1();
+    bytes32 digest = keccak256(abi.encode(
+      keccak256("XLN_TARGET_HASH_LADDER_REVEAL"), block.chainid, address(this), beneficiary, registration
+    ));
+    (bytes32 signerEntity, bool valid) = EntityProvider(entityProvider).verifyCurrentHankoSignature(hankoData, digest);
+    if (!valid || beneficiary == bytes32(0) || signerEntity != beneficiary) revert E4();
+    HashLadderRegistry.registerReveal(hashLadderReveals, beneficiary, registration);
   }
 
   function getTokensLength() external view returns (uint) {
@@ -548,15 +564,13 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
 
     // Reveals are Sprites-like public evidence authenticated by this batch's
     // outer Entity Hanko. The witness itself is proof-independent, but a first
-    // Source write is useful only for the currently active bilateral dispute.
-    // Enforcing its signed owner window here prevents an early write from
-    // consuming the immutable Source slot before S. Target stays refreshable:
-    // an early/late port is harmless and can be republished for a later clock.
+    // publication is independent of dispute start. Signed Pull deadlines alone
+    // decide timeliness; both namespaces preserve the first witness.
     for (uint i = 0; i < batch.hashLadderRegistrations.length; i++) {
       HashLadderRegistration memory registration = batch.hashLadderRegistrations[i];
+      if (registration.targetRole) revert E1();
       HashLadderRegistry.registerReveal(
         hashLadderReveals,
-        _accounts,
         entityId,
         registration
       );

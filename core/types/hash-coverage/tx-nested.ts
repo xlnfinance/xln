@@ -33,7 +33,7 @@ export const HASHABLE_ACCOUNT_TX_DATA_FIELDS = {
   ],
   htlc_resolve: ['lockId', 'outcome', 'secret', 'reason'],
   cross_pull_lock: [
-    'pullId', 'tokenId', 'amount', 'fullHash', 'partialRoot',
+    'pullId', 'tokenId', 'amount', 'fullHash', 'partialRoot', 'deadline',
     'crossJurisdiction', 'crossJurisdictionRoute',
   ],
   cross_pull_close: ['pullId', 'binary', 'proof', 'executionAmount'],

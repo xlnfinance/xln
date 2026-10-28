@@ -38,6 +38,7 @@ export const HASHABLE_RUNTIME_PULL_FIELDS = [
   'deltaIndex',
   'amount',
   'claimedRatio',
+  'deadline',
   'fullHash',
   'partialRoot',
   'targetRole',

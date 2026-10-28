@@ -708,6 +708,7 @@ describe('Depository', () => {
           deltaIndex: 1,
           amount: encodeSignedAmount(-MAX_FILL_RATIO),
           claimedRatio: 0,
+          deadline: (await time.latest()) + 100,
           fullHash: pullProof.fullHash,
           partialRoot: pullProof.partialRoot,
           targetRole: false,

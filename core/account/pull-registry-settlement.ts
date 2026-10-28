@@ -24,6 +24,7 @@ type FinalizedRouteProjection = Readonly<{
 type SignedProofBodyPull = Readonly<{
   amount: bigint;
   claimedRatio: number;
+  deadline: number;
   targetRole: boolean;
   fullHash: string;
   partialRoot: string;
@@ -65,6 +66,8 @@ const decodeSignedProofBodyPulls = (
     }
     const decodedPulls = Array.from(decoded['pull'] ?? []) as ethers.Result[];
     for (const [pullIndex, raw] of decodedPulls.entries()) {
+      const deadline = safeUint(raw['deadline'], Number.MAX_SAFE_INTEGER, 'CROSS_J_FINAL_DEADLINE');
+      if (deadline === 0) throw new Error('CROSS_J_FINAL_DEADLINE_ZERO');
       pulls.push({
         amount: decodeSignedAmount(raw['amount']),
         claimedRatio: safeUint(
@@ -72,6 +75,7 @@ const decodeSignedProofBodyPulls = (
           MAX_FILL_RATIO,
           `CROSS_J_FINAL_PULL_RATIO_${transformerIndex}_${pullIndex}`,
         ),
+        deadline,
         targetRole: raw['targetRole'] === true,
         fullHash: String(raw['fullHash']).toLowerCase(),
         partialRoot: String(raw['partialRoot']).toLowerCase(),
@@ -92,6 +96,7 @@ export const findExactSignedProofBodyPull = (
   const matches = decodeSignedProofBodyPulls(proofbody, canonicalDeltaTransformerAddress).filter(
     pull =>
       pull.targetRole === targetRole &&
+      pull.deadline === expected.deadline &&
       pull.fullHash === expected.fullHash.toLowerCase() &&
       pull.partialRoot === expected.partialRoot.toLowerCase() &&
       pull.amount === expected.signedAmount,
@@ -121,7 +126,7 @@ const requireExactSignedPull = (
   return pull;
 };
 
-const beneficiaryWindowSeconds = (account: AccountReplica, proofbody: ProofBodyStruct, amount: bigint): number => {
+const validateDisputeClock = (account: AccountReplica, proofbody: ProofBodyStruct): void => {
   const leftWindow = safeUint(proofbody.leftResponseSeconds, 0xffff_ffff, 'CROSS_J_FINAL_LEFT_WINDOW');
   const rightWindow = safeUint(proofbody.rightResponseSeconds, 0xffff_ffff, 'CROSS_J_FINAL_RIGHT_WINDOW');
   const active = account.activeDispute;
@@ -133,7 +138,6 @@ const beneficiaryWindowSeconds = (account: AccountReplica, proofbody: ProofBodyS
       `CROSS_J_FINAL_CLOCK_MISMATCH:${start}:${timeout}:${leftWindow}:${rightWindow}`,
     );
   }
-  return amount > 0n ? leftWindow : rightWindow;
 };
 
 const bilateralPairMatches = (self: string, counterparty: string, leg: CrossJurisdictionSwapLeg): boolean => {
@@ -196,12 +200,11 @@ export const resolveFinalizedPullFillRatio = (input: {
     input.targetRole,
     input.canonicalDeltaTransformerAddress,
   );
-  const beneficiaryWindow = beneficiaryWindowSeconds(input.account, input.proofbody, pull.amount);
-  const start = Number(input.account.activeDispute!.disputeStartTimestamp);
+  validateDisputeClock(input.account, input.proofbody);
   const record = input.record;
   if (!record) return pull.claimedRatio;
   const ratio = safeUint(record.fillRatio, MAX_FILL_RATIO, 'CROSS_J_REGISTRY_RECORD_RATIO');
   const revealedAt = safeUint(record.revealedAt, Number.MAX_SAFE_INTEGER, 'CROSS_J_REGISTRY_RECORD_TIME');
-  const timely = revealedAt >= start && revealedAt <= start + beneficiaryWindow;
+  const timely = revealedAt > 0 && revealedAt <= pull.deadline;
   return timely && ratio > pull.claimedRatio ? ratio : pull.claimedRatio;
 };

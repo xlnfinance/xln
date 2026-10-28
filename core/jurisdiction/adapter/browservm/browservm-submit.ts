@@ -1,3 +1,4 @@
+import { hashTargetReveal } from '../../../protocol/htlc/target-reveal';
 import { normalizeEntityId } from '../../../entity/id';
 import { compactHankoForChain } from '../../../hanko/short';
 import { batchOpCount, isBatchEmpty } from '../../machine/batch';
@@ -193,6 +194,15 @@ export const createBrowserVmSubmitTx =
       } catch (error) {
         return makeJAdapterFailureResult(error);
       }
+    }
+    if (jTx.type === 'hashLadderReveal') {
+      try {
+        const expected = hashTargetReveal(context.chainId, context.addresses.depository, jTx.entityId, jTx.data.registration);
+        if (expected !== jTx.data.revealHash || !jTx.data.hankoSignature) throw new Error('TARGET_REVEAL_AUTHORITY_INVALID');
+        const result = await context.browserVM.submitTargetReveal(jTx.entityId, jTx.data.registration,
+          compactHankoForChain(jTx.data.hankoSignature, expected));
+        return { success: true, ...result };
+      } catch (error) { return makeJAdapterFailureResult(error); }
     }
     if (jTx.type === 'batch') return submitBatch(context, jTx, options);
     const unhandled: never = jTx;

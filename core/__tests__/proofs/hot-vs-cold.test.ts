@@ -79,6 +79,7 @@ import {
   withCanonicalCrossJurisdictionRouteHash,
 } from '../../extensions/cross-j';
 import { getJurisdictionStackId } from '../../jurisdiction/machine/jurisdiction-stack';
+import { crossJDeadlines } from '../../extensions/cross-j/deadlines';
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import { LIMITS } from '../../config/constants';
 import type { AccountInput, AccountReplica, AccountTx } from '../../types/account';
@@ -442,6 +443,8 @@ class BilateralHarness {
     const partialRoot = `0x${((orderNum * 29 + 7) & 0xff).toString(16).padStart(2, '0').repeat(32)}`;
     const left = account.state.leftEntity;
     const right = account.state.rightEntity;
+    const expiresAt = 20_000;
+    const deadlines = crossJDeadlines({ expiresAt });
     const route: CrossJurisdictionSwapRoute = withCanonicalCrossJurisdictionRouteHash({
       orderId,
       makerEntityId: left,
@@ -462,12 +465,12 @@ class BilateralHarness {
         tokenId,
         amount,
       },
-      sourcePull: { pullId: `${orderId}s`, tokenId, amount, signedAmount: -amount, fullHash, partialRoot },
-      targetPull: { pullId: `${orderId}t`, tokenId, amount, signedAmount: -amount, fullHash, partialRoot },
+      sourcePull: { pullId: `${orderId}s`, tokenId, amount, signedAmount: -amount, fullHash, partialRoot, deadline: deadlines.source },
+      targetPull: { pullId: `${orderId}t`, tokenId, amount, signedAmount: -amount, fullHash, partialRoot, deadline: deadlines.target },
       status: 'resting',
       createdAt: 1,
       updatedAt: 1,
-      expiresAt: 20_000,
+      expiresAt,
     });
     if (!route.sourcePull || !route.targetPull) throw new Error('HARNESS_PULLS_MISSING');
     route.sourcePull.pullId = deriveCrossJurisdictionPullId(route, 'source');
@@ -480,6 +483,7 @@ class BilateralHarness {
         amount: -amount,
         fullHash,
         partialRoot,
+        deadline: deadlines.source,
         crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'source'),
         crossJurisdictionRoute: cloneCrossJurisdictionRoute(route),
       },

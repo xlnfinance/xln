@@ -1573,6 +1573,26 @@ export class BrowserVMProvider {
     return events;
   }
 
+  async submitTargetReveal(
+    beneficiary: string,
+    registration: import('../../machine/batch').HashLadderRegistration,
+    hankoData: string,
+  ): Promise<{ txHash: string; blockNumber: number; events: JEvent[] }> {
+    if (!this.depositoryAddress || !this.depositoryInterface) throw new Error('Depository not deployed');
+    const depository = this.depositoryAddress;
+    const callData = this.depositoryInterface.encodeFunctionData('registerTargetHashLadderReveal',
+      [beneficiary, registration, hankoData]);
+    const { tx, result } = await this.runTxWithNonce(this.deployerAddress, nonce => createLegacyTx({
+      to: depository, gasLimit: 3_000_000n, gasPrice: 10n,
+      data: hexToBytes(callData as `0x${string}`), nonce,
+    }, { common: this.common }).sign(this.deployerPrivKey));
+    if (result.execResult.exceptionError) throw new Error(
+      `TARGET_REVEAL_SUBMIT_FAILED:${result.execResult.exceptionError}:${bytesToHex(result.execResult.returnValue)}`);
+    const txHash = bytesToHex(tx.hash());
+    const events = await this.emitEvents(result.execResult.logs || [], txHash);
+    return { txHash, blockNumber: Number(this.getBlockNumber()), events };
+  }
+
   /** Execute one already quorum-certified EntityProvider action. */
   async submitEntityProviderAction(
     intent: EntityProviderActionIntent,

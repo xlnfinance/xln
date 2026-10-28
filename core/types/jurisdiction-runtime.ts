@@ -110,6 +110,18 @@ export interface JReplica {
 /** J-Machine transaction (settlement layer) */
 export type JTx =
   | {
+      type: 'hashLadderReveal';
+      entityId: string;
+      data: {
+        registration: JBatch['hashLadderRegistrations'][number];
+        revealHash: string;
+        hankoSignature?: string;
+        signerId: string;
+        runtimeSubmitAttempt?: { attemptId: string; attemptNumber: number; attemptedAt: number; eligibleAt: number };
+      };
+      timestamp: number;
+    }
+  | {
       type: 'batch'; // ALL J-operations go through batch (matches Depository.processBatch)
       entityId: string;
       data: {

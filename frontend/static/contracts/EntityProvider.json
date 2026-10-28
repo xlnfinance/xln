@@ -2404,7 +2404,7 @@
     }
   },
   "immutableReferences": {
-    "25066": [
+    "25134": [
       {
         "length": 32,
         "start": 5944
@@ -2416,5 +2416,5 @@
     ]
   },
   "inputSourceName": "project/contracts/EntityProvider.sol",
-  "buildInfoId": "solc-0_8_37-34b410a20cc95dc6d771cc886238443379f63434"
+  "buildInfoId": "solc-0_8_37-a051d23f63633d494dff89ae0153bdffe05523ec"
 }

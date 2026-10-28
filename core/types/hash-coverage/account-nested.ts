@@ -50,6 +50,7 @@ export const HASHABLE_PULL_COMMITMENT_FIELDS = [
   'claimedAmount',
   'fullHash',
   'partialRoot',
+  'deadline',
   'crossJurisdiction',
   'createdHeight',
   'createdTimestamp',

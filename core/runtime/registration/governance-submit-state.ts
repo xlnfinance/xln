@@ -7,15 +7,22 @@ import type { JInput } from '../../jurisdiction/machine/input';
 import type { JAdapterFailure, JTx } from '../../types/jurisdiction-runtime';
 import type { RuntimeReplica, RuntimeTx } from '../types';
 
-export type GovernanceJTx = Extract<JTx, { type: 'entityProviderProposeControlBoard' }>;
+export type GovernanceJTx = Extract<JTx, { type: 'entityProviderProposeControlBoard' | 'hashLadderReveal' }>;
 type GovernanceResultTx = Extract<RuntimeTx, { type: 'recordGovernanceJSubmitResult' }>;
 
 const LOCAL_GOVERNANCE_RESULT = Symbol.for('xln.runtime.governance-submit-result.local');
 
 export const isGovernanceJTx = (jTx: JTx): jTx is GovernanceJTx =>
-  jTx.type === 'entityProviderProposeControlBoard';
+  jTx.type === 'entityProviderProposeControlBoard' || jTx.type === 'hashLadderReveal';
 
-const unsignedGovernancePayload = (jTx: GovernanceJTx) => ({
+// Both publications carry immutable signed payloads in the WAL outbox and
+// require no mutable Entity nonce state for retry/recovery.
+const unsignedGovernancePayload = (jTx: GovernanceJTx) => jTx.type === 'hashLadderReveal' ? ({
+  type: jTx.type, entityId: jTx.entityId,
+  data: { registration: jTx.data.registration, revealHash: jTx.data.revealHash,
+    hankoSignature: jTx.data.hankoSignature, signerId: jTx.data.signerId },
+  timestamp: jTx.timestamp,
+}) : ({
   type: jTx.type,
   entityId: jTx.entityId,
   data: {
@@ -72,7 +79,7 @@ const attemptIdentity = (jurisdictionName: string, jTx: GovernanceJTx) => {
     jurisdictionName,
     entityId: jTx.entityId,
     signerId,
-    proposalHash: jTx.data.proposalHash,
+    proposalHash: jTx.type === 'hashLadderReveal' ? jTx.data.revealHash : jTx.data.proposalHash,
     payloadHash: governancePayloadHash(jTx),
   };
 };
@@ -86,18 +93,12 @@ export const materializeInitialGovernanceAttempt = (
     return jTx;
   }
   const identity = attemptIdentity(jurisdictionName, jTx);
-  return {
-    ...jTx,
-    data: {
-      ...jTx.data,
-      runtimeSubmitAttempt: {
-        attemptId: buildGovernanceAttemptId({ ...identity, attemptNumber: 1 }),
-        attemptNumber: 1,
-        attemptedAt: jTx.timestamp,
-        eligibleAt: jTx.timestamp,
-      },
-    },
+  const result = structuredClone(jTx);
+  result.data.runtimeSubmitAttempt = {
+    attemptId: buildGovernanceAttemptId({ ...identity, attemptNumber: 1 }),
+    attemptNumber: 1, attemptedAt: jTx.timestamp, eligibleAt: jTx.timestamp,
   };
+  return result;
 };
 
 export const requireCanonicalGovernanceAttempt = (

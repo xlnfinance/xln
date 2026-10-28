@@ -4,10 +4,13 @@ import {
   decodeHashLadderBinary,
   verifyHashLadderBinary,
 } from '../../../../protocol/htlc/hash-ladder';
-import {
-  queueHashLadderRevealRegistration,
-  stashPendingRegistryReveal,
-} from '../../j-events-htlc';
+import { hashTargetReveal } from '../../../../protocol/htlc/target-reveal';
+import { parseJurisdictionStackIdentity } from '../../../../jurisdiction/machine/jurisdiction-stack';
+import { getJurisdictionConfigName } from '../../../../jurisdiction/machine/jurisdiction-runtime';
+import type { EntityTxReducerResult } from '../../apply';
+import type { HashLadderRegistration } from '../../../../jurisdiction/machine/batch';
+import { getEntityCollectionValueForWrite } from '../../../state/persistent-collection-map';
+import { getEntityLeaderState } from '../../../consensus/leader';
 import { prepareEntityTxState } from '../../../state-clone';
 import { addMessage } from '../../../frame-events';
 import type { EntityInput, EntityState } from '../../../types';
@@ -15,28 +18,8 @@ import type { EntityTx } from '../../../../types/entity-tx';
 import { normalizeEntityRef } from '../../account-key';
 import { isCrossJurisdictionTerminalStatus } from '../../../../extensions/cross-j';
 import type { CrossJurisdictionSwapRoute } from '../../../../types/cross-jurisdiction';
-import { isBatchEmpty } from '../../../../jurisdiction/machine/batch';
 
 type CrossJurisdictionSalvageTx = Extract<EntityTx, { type: 'crossJurisdictionSalvage' }>;
-
-type CrossJurisdictionSalvageResult = {
-  newState: EntityState;
-  outputs: EntityInput[];
-};
-
-const queueSalvageJBatchBroadcast = (
-  state: EntityState,
-  outputs: EntityInput[],
-  routeId: string,
-): void => {
-  const firstValidator = state.config.validators?.[0];
-  if (!firstValidator) throw haltRuntimeFailure("CROSS_J_REVEAL_PORT_SIGNER_MISSING", `CROSS_J_REVEAL_PORT_SIGNER_MISSING:${routeId}`);
-  outputs.push({
-    entityId: state.entityId,
-    signerId: firstValidator,
-    entityTxs: [{ type: 'j_broadcast', data: {} }],
-  });
-};
 
 /**
  * Verify the ported reveal against the route's target-leg ladder commitment.
@@ -92,7 +75,7 @@ export const handleCrossJurisdictionSalvageEntityTx = async (
   entityState: EntityState,
   entityTx: CrossJurisdictionSalvageTx,
   mutableFrameState = false,
-): Promise<CrossJurisdictionSalvageResult> => {
+): Promise<EntityTxReducerResult> => {
   const { routeId, binary, fillRatio } = entityTx.data;
   const newState = prepareEntityTxState(entityState, mutableFrameState);
   const outputs: EntityInput[] = [];
@@ -104,8 +87,9 @@ export const handleCrossJurisdictionSalvageEntityTx = async (
 
   // This handler serves exactly one role: the target user of the named route.
   const self = normalizeEntityRef(newState.entityId);
-  const route = newState.crossJurisdictionSwaps?.get(routeId);
-  if (!route || normalizeEntityRef(route.target?.counterpartyEntityId) !== self) {
+  const routes = newState.crossJurisdictionSwaps;
+  const route = routes?.get(routeId);
+  if (!routes || !route || normalizeEntityRef(route.target?.counterpartyEntityId) !== self) {
     addMessage(newState, `🌉 Cross-j reveal port ${routeId} skipped: route not owned here`);
     return { newState, outputs };
   }
@@ -123,62 +107,32 @@ export const handleCrossJurisdictionSalvageEntityTx = async (
   const verifiedFillRatio = verifySalvageFillRatio(newState, route, routeId, binary, claimedFillRatio);
   if (verifiedFillRatio === null) return { newState, outputs };
 
-  // No active-dispute gate exists here. This is independent Sprites-like
-  // evidence; the later signed Pull alone decides whether the stored timestamp
-  // falls inside its dispute window.
-
-  const decoded = decodeHashLadderBinary(binary);
-  const targetAccount = newState.accounts.get(normalizeEntityRef(route.target.entityId));
-  if (!targetAccount?.activeDispute) {
-    // Public registry evidence is independent of disputes on-chain, but a
-    // Target Pull accepts it only inside the target beneficiary's signed
-    // window. Publishing before S wastes gas and can settle as zero. Buffer
-    // the verified witness until a local draft or observed dispute installs
-    // the exact clock; the start path then co-bundles it when possible.
-    stashPendingRegistryReveal(newState, route.target.entityId, route.targetPull, decoded, true);
-    addMessage(
-      newState,
-      `⏳ Cross-j reveal port ${routeId}: waiting for the target dispute clock`,
-    );
+  // A pending batch ACK may arrive after D_target. The beneficiary certifies
+  // this immutable witness directly; the Runtime WAL outbox owns its retries.
+  const existing = route.pendingTargetRegistryReveal?.fillRatio ?? route.targetRegistryFillRatio;
+  if (existing !== undefined && existing > 0) {
+    if (existing !== verifiedFillRatio) throw new Error('J_HASH_LADDER_REGISTRATION_CONFLICT');
     return { newState, outputs };
   }
-  const queued = queueHashLadderRevealRegistration(
-    newState,
-    route.target.entityId,
-    route.targetPull,
-    decoded,
-    true,
-  );
-  if (queued === 'queued') {
-    if (!newState.jBatchState?.sentBatch) {
-      queueSalvageJBatchBroadcast(newState, outputs, routeId);
-    }
-    // A registration queued behind an immutable sentBatch is already durable:
-    // queueHashLadderRevealRegistration latches autoBroadcastDraft, and the
-    // exact Hanko ACK emits the one replacement continuation. Emitting here as
-    // well would race that ACK and fail-stop on `sentBatch pending`.
-    addMessage(
-      newState,
-      newState.jBatchState?.sentBatch
-        ? `⏳ Cross-j reveal port ${routeId}: queued behind the pending jBatch`
-        : `🌉 Cross-j reveal port ${routeId}: registering ratio ${verifiedFillRatio} on the target chain`,
-    );
-  } else if (queued === 'deferred-batch-pending') {
-    // Only capacity can defer a verified witness here. The pending record stays
-    // intact until a later bounded flush can place it in a contract-valid batch.
-    // With no immutable sentBatch, this continuation must drain the full draft;
-    // its exact ACK then flushes the pending witness and owns the successor.
-    if (
-      !newState.jBatchState?.sentBatch
-      && newState.jBatchState
-      && !isBatchEmpty(newState.jBatchState.batch)
-    ) {
-      queueSalvageJBatchBroadcast(newState, outputs, routeId);
-    }
-    addMessage(
-      newState,
-      `⏳ Cross-j reveal port ${routeId}: deferred until the pending jBatch is acknowledged`,
-    );
-  }
-  return { newState, outputs };
+  const decoded = decodeHashLadderBinary(binary);
+  const zero = `0x${'00'.repeat(32)}`;
+  const registration: HashLadderRegistration = {
+    counterpartyEntity: route.target.entityId.toLowerCase(), targetRole: true,
+    fullHash: route.targetPull.fullHash, partialRoot: route.targetPull.partialRoot,
+    witness: { fillRatio: verifiedFillRatio, fullSecret: decoded.fullSecret ?? zero,
+      reveals: decoded.reveals ?? [zero, zero, zero, zero] },
+  };
+  const domain = parseJurisdictionStackIdentity(route.target.jurisdiction);
+  const jurisdictionName = getJurisdictionConfigName(newState.config.jurisdiction);
+  const signerId = getEntityLeaderState(newState).activeValidatorId;
+  if (!domain || !jurisdictionName || !signerId) throw new Error('CROSS_J_REVEAL_PORT_DOMAIN_MISSING');
+  const revealHash = hashTargetReveal(domain.chainId, domain.depositoryAddress, self, registration);
+  const writableRoute = getEntityCollectionValueForWrite(routes, routeId);
+  if (!writableRoute) throw new Error('CROSS_J_REVEAL_PORT_ROUTE_MISSING');
+  writableRoute.pendingTargetRegistryReveal = registration.witness;
+  return { newState, outputs,
+    jOutputs: [{ jurisdictionName, jTxs: [{ type: 'hashLadderReveal', entityId: self,
+      data: { registration, revealHash, signerId }, timestamp: newState.timestamp }] }],
+    hashesToSign: [{ hash: revealHash, type: 'hashLadderReveal', context: `targetReveal:${routeId}` }],
+  };
 };

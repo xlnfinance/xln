@@ -235,7 +235,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       tokenId: pull.tokenId,
       amount: pull.signedAmount,
       fullHash: pull.fullHash,
-      partialRoot: pull.partialRoot,
+      partialRoot: pull.partialRoot, deadline: pull.deadline,
       crossJurisdiction: buildCrossJurisdictionPullBinding(route, role),
       createdHeight: 1,
       createdTimestamp: state.timestamp,
@@ -286,6 +286,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     alternateTargetState.prevFrameHash = 'genesis';
     const route = buildPreparedCrossJurisdictionRoute(
       {
+      expiresAt: (env.state.timestamp) + 60_000,
         orderId: `${scenario}-route`,
         makerEntityId: sourceUser,
         hubEntityId: sourceHub,
@@ -335,7 +336,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       tokenId: route.sourcePull!.tokenId,
       amount: route.sourcePull!.signedAmount,
       fullHash: route.sourcePull!.fullHash,
-      partialRoot: route.sourcePull!.partialRoot,
+      partialRoot: route.sourcePull!.partialRoot, deadline: route.sourcePull!.deadline,
       crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'source'),
       createdHeight: 1,
       createdTimestamp: env.state.timestamp,
@@ -346,7 +347,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       tokenId: route.targetPull!.tokenId,
       amount: route.targetPull!.signedAmount,
       fullHash: route.targetPull!.fullHash,
-      partialRoot: route.targetPull!.partialRoot,
+      partialRoot: route.targetPull!.partialRoot, deadline: route.targetPull!.deadline,
       crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'target'),
       createdHeight: 1,
       createdTimestamp: env.state.timestamp,
@@ -448,7 +449,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     };
   };
 
-  test('crossJurisdictionSalvage queues a target-chain registry write and broadcasts', async () => {
+  test('crossJurisdictionSalvage certifies one standalone target-chain registry write', async () => {
     const env = createEmptyEnv('cross-salvage-action');
     env.scenarioMode = true;
     env.state.timestamp = 40_000;
@@ -465,6 +466,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const state = makeState(targetUser, signer, base, targetHub);
     const route = buildPreparedCrossJurisdictionRoute(
       {
+      expiresAt: (env.state.timestamp) + 60_000,
         orderId: 'cross-salvage-action',
         makerEntityId: sourceUser,
         hubEntityId: sourceHub,
@@ -513,13 +515,10 @@ describe('cross-jurisdiction hashledger swap', () => {
       },
     });
 
-    // The port is one self-lane flush: a registry write plus its broadcast.
-    // No dispute start, no argument injection, no source mirror.
-    expect(result.outputs).toHaveLength(1);
-    const flush = result.outputs[0]!;
-    expect(flush.entityId).toBe(targetUser);
-    expect(flush.entityTxs?.map(tx => tx.type)).toEqual(['j_broadcast']);
-    const queued = result.newState.jBatchState?.batch.hashLadderRegistrations ?? [];
+    // Target publication is independent of every batch and its Entity nonce.
+    expect(result.outputs).toEqual([]);
+    const queued = result.jOutputs?.flatMap(input => input.jTxs)
+      .flatMap(tx => tx.type === 'hashLadderReveal' ? [tx.data.registration] : []) ?? [];
     expect(queued).toHaveLength(1);
     expect(queued[0]).toMatchObject({
       targetRole: true,
@@ -541,105 +540,22 @@ describe('cross-jurisdiction hashledger swap', () => {
       },
     });
     expect(replay.outputs).toEqual([]);
-    expect(replay.newState.jBatchState?.batch.hashLadderRegistrations).toHaveLength(1);
+    expect(replay.jOutputs ?? []).toEqual([]);
+    expect(replay.newState.crossJurisdictionSwaps?.get(route.orderId)?.pendingTargetRegistryReveal?.fillRatio).toBe(0x1234);
 
-    // Once that registration is sealed, a higher Target witness enters the
-    // next mutable draft immediately. Its exact Hanko ACK owns the single
-    // replacement continuation; no premature broadcast may collide with the
-    // immutable sentBatch.
-    const deferredState = replay.newState;
-    const pendingBatchHash = secret('7d');
-    const pendingBatch = cloneJBatch(deferredState.jBatchState!.batch);
-    deferredState.jBatchState!.batch = createEmptyBatch();
-    deferredState.jBatchState!.sentBatch = {
-      batch: pendingBatch,
-      batchHash: pendingBatchHash,
-      encodedBatch: '0x',
-      entityNonce: 1,
-      firstSubmittedAt: deferredState.timestamp,
-      lastSubmittedAt: deferredState.timestamp,
-      submitAttempts: 1,
-    };
-    deferredState.jBatchState!.status = 'sent';
+    // A different ratio cannot overwrite the immutable Source witness's port.
     const higherRatio = 0x2345;
-    const higherBinary = buildCrossJurisdictionPullReveal(
-      route,
-      higherRatio,
-      deriveCrossJurisdictionPrivateSeed('test-seed', route),
-    ).binary;
-    const deferred = await applyEntityTx(env, deferredState, {
-      type: 'crossJurisdictionSalvage',
-      data: {
-        routeId: route.orderId,
-        binary: higherBinary,
-        fillRatio: higherRatio,
-        sourceEntityId: sourceUser,
-        sourceCounterpartyEntityId: sourceHub,
-        observedAt: 12,
-      },
-    });
-    expect(deferred.outputs).toEqual([]);
-    expect(deferred.newState.crossJurisdictionSwaps?.get(route.orderId)?.pendingTargetRegistryReveal).toBeUndefined();
-    expect(deferred.newState.jBatchState?.batch.hashLadderRegistrations[0]?.witness.fillRatio).toBe(higherRatio);
-    expect(deferred.newState.jBatchState?.autoBroadcastDraft).toBe(true);
+    const higherBinary = buildCrossJurisdictionPullReveal(route, higherRatio,
+      deriveCrossJurisdictionPrivateSeed('test-seed', route)).binary;
+    await expect(applyEntityTx(env, replay.newState, {
+      type: 'crossJurisdictionSalvage', data: { routeId: route.orderId,
+        binary: higherBinary, fillRatio: higherRatio, sourceEntityId: sourceUser,
+        sourceCounterpartyEntityId: sourceHub, observedAt: 12 },
+    })).rejects.toThrow('J_HASH_LADDER_REGISTRATION_CONFLICT');
 
-    const ackOutputs: EntityInput[] = [];
-    await applyHankoBatchProcessedEvent({
-      newState: deferred.newState,
-      event: {
-        type: 'HankoBatchProcessed',
-        data: {
-          entityId: targetUser,
-          batchHash: pendingBatchHash,
-          nonce: 1,
-        },
-      },
-      blockNumber: 10,
-      outputs: ackOutputs,
-    });
-    expect(deferred.newState.crossJurisdictionSwaps?.get(route.orderId)?.pendingTargetRegistryReveal).toBeUndefined();
-    expect(deferred.newState.jBatchState?.batch.hashLadderRegistrations[0]?.witness.fillRatio).toBe(higherRatio);
-    expect(ackOutputs.filter(output => output.entityTxs?.some(tx => tx.type === 'j_broadcast'))).toHaveLength(1);
-
-    // Capacity deferral without an immutable sentBatch must still own one
-    // durable continuation. It drains the current full draft; that batch's ACK
-    // later flushes the retained Target witness into its successor.
-    const fullDraftState = deferred.newState;
-    const existing = fullDraftState.jBatchState!.batch.hashLadderRegistrations[0]!;
-    fullDraftState.jBatchState!.batch.hashLadderRegistrations = Array.from(
-      { length: 32 },
-      (_, index) => ({
-        ...existing,
-        targetRole: false,
-        fullHash: ethers.zeroPadValue(ethers.toBeHex(index + 1000), 32),
-        partialRoot: ethers.zeroPadValue(ethers.toBeHex(index + 2000), 32),
-      }),
-    );
-    const capacityRatio = 0x3456;
-    const capacityBinary = buildCrossJurisdictionPullReveal(
-      route,
-      capacityRatio,
-      deriveCrossJurisdictionPrivateSeed('test-seed', route),
-    ).binary;
-    const capacityDeferred = await applyEntityTx(env, fullDraftState, {
-      type: 'crossJurisdictionSalvage',
-      data: {
-        routeId: route.orderId,
-        binary: capacityBinary,
-        fillRatio: capacityRatio,
-        sourceEntityId: sourceUser,
-        sourceCounterpartyEntityId: sourceHub,
-        observedAt: 13,
-      },
-    });
-    expect(capacityDeferred.outputs.filter(
-      output => output.entityTxs?.some(tx => tx.type === 'j_broadcast'),
-    )).toHaveLength(1);
-    expect(capacityDeferred.newState.crossJurisdictionSwaps
-      ?.get(route.orderId)?.pendingTargetRegistryReveal?.fillRatio).toBe(capacityRatio);
   });
 
-  test('verified target reveal waits for and then enters the target dispute window', async () => {
+  test('verified target reveal publishes before a dispute and never waits for its start', async () => {
     const env = createEmptyEnv('cross-salvage-prebinding');
     env.scenarioMode = true;
     env.state.timestamp = 40_000;
@@ -655,6 +571,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     installJurisdictions(env, sourceJ, targetJ);
     const route = buildPreparedCrossJurisdictionRoute(
       {
+      expiresAt: (env.state.timestamp) + 60_000,
         orderId: 'cross-salvage-prebinding',
         makerEntityId: sourceUser,
         hubEntityId: sourceHub,
@@ -698,22 +615,20 @@ describe('cross-jurisdiction hashledger swap', () => {
         observedAt: 1,
       },
     });
-    expect(buffered.outputs.filter(output => output.entityTxs?.some(tx => tx.type === 'j_broadcast'))).toHaveLength(0);
+    expect(buffered.jOutputs?.flatMap(input => input.jTxs).map(tx => tx.type)).toEqual(['hashLadderReveal']);
     expect(buffered.newState.crossJurisdictionSwaps?.get(route.orderId)?.pendingTargetRegistryReveal?.fillRatio).toBe(0x1234);
-    expect(buffered.newState.jBatchState?.batch.hashLadderRegistrations ?? []).toHaveLength(0);
+    expect(buffered.newState.jBatchState?.batch.hashLadderRegistrations ?? []).toEqual([]);
     expect(countDeferredHashLadderReveals(buffered.newState)).toBe(0);
     expect(flushDeferredHashLadderReveals(buffered.newState)).toBe(0);
 
     installActivePullRegistrationProof(buffered.newState, targetHub, route, 'target');
-    expect(countDeferredHashLadderReveals(buffered.newState)).toBe(1);
-    expect(flushDeferredHashLadderReveals(buffered.newState)).toBe(1);
-    expect(buffered.newState.crossJurisdictionSwaps?.get(route.orderId)?.pendingTargetRegistryReveal).toBeUndefined();
-    expect(buffered.newState.jBatchState?.batch.hashLadderRegistrations).toHaveLength(1);
+    expect(flushDeferredHashLadderReveals(buffered.newState)).toBe(0);
+    expect(buffered.newState.jBatchState?.batch.hashLadderRegistrations ?? []).toEqual([]);
 
     const terminalRoute = buffered.newState.crossJurisdictionSwaps?.get(route.orderId);
     expect(terminalRoute).toBeDefined();
     if (!terminalRoute) throw new Error('expected buffered cross-jurisdiction route');
-    terminalRoute.status = 'settled';
+    buffered.newState.crossJurisdictionSwaps?.set(route.orderId, { ...terminalRoute, status: 'settled' });
     const delayed = await applyEntityTx(env, buffered.newState, {
       type: 'crossJurisdictionSalvage',
       data: {
@@ -725,10 +640,10 @@ describe('cross-jurisdiction hashledger swap', () => {
         observedAt: 2,
       },
     });
-    expect(delayed.newState.crossJurisdictionSwaps?.get(route.orderId)?.pendingTargetRegistryReveal).toBeUndefined();
+    expect(delayed.jOutputs ?? []).toEqual([]);
   });
 
-  test('crossJurisdictionSalvage still queues after off-chain target deadline', async () => {
+  test('crossJurisdictionSalvage still publishes evidence after off-chain target deadline', async () => {
     const env = createEmptyEnv('cross-salvage-past-wallclock');
     env.scenarioMode = true;
     env.state.timestamp = 40_000;
@@ -745,6 +660,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const state = makeState(targetUser, signer, base, targetHub);
     const route = buildPreparedCrossJurisdictionRoute(
       {
+      expiresAt: (env.state.timestamp) + 60_000,
         orderId: 'cross-salvage-past-wallclock',
         makerEntityId: sourceUser,
         hubEntityId: sourceHub,
@@ -792,7 +708,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         observedAt: env.state.timestamp,
       },
     });
-    expect(result.newState.jBatchState?.batch.hashLadderRegistrations ?? []).toHaveLength(1);
+    expect(result.jOutputs?.flatMap(input => input.jTxs).map(tx => tx.type)).toEqual(['hashLadderReveal']);
   });
 
   test('a self-registered reveal confirms the pending port result', async () => {
@@ -810,6 +726,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const state = makeState(targetUser, targetSigner, base, targetHub);
     const route = buildPreparedCrossJurisdictionRoute(
       {
+      expiresAt: (env.state.timestamp) + 60_000,
         orderId: 'cross-port-confirm',
         makerEntityId: sourceUser,
         hubEntityId: sourceHub,
@@ -898,6 +815,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const state = makeState(targetUser, signer, base, targetHub);
     const route = buildPreparedCrossJurisdictionRoute(
       {
+      expiresAt: (env.state.timestamp) + 60_000,
         orderId: 'cross-salvage-forged-binary',
         makerEntityId: sourceUser,
         hubEntityId: sourceHub,
@@ -963,6 +881,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     installJurisdictions(env, eth, base);
     const route = buildPreparedCrossJurisdictionRoute(
       {
+      expiresAt: (env.state.timestamp) + 60_000,
         orderId: 'cross-target-dispute-force-source',
         makerEntityId: sourceUser,
         hubEntityId: sourceHub,
@@ -996,7 +915,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       tokenId: route.targetPull!.tokenId,
       amount: route.targetPull!.signedAmount,
       fullHash: route.targetPull!.fullHash,
-      partialRoot: route.targetPull!.partialRoot,
+      partialRoot: route.targetPull!.partialRoot, deadline: route.targetPull!.deadline,
       crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'target'),
       createdHeight: 1,
       createdTimestamp: env.state.timestamp,
