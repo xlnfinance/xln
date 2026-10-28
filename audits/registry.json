@@ -4,6 +4,9 @@
   "scope": {
     "sourceGlobs": [
       "core/**/*.ts",
+      "jurisdictions/hardhat.config.ts",
+      "jurisdictions/scripts/compiler/local-solc.ts",
+      "scripts/sync-contract-artifacts.sh",
       "jurisdictions/contracts/**/*.sol",
       "custody/**/*.ts",
       "frontend/src/lib/components/Entity/**/*",
@@ -451,6 +454,9 @@
       "structuralDebt": 2,
       "sourceGlobs": [
         "scripts/release/**/*.ts",
+        "scripts/sync-contract-artifacts.sh",
+        "jurisdictions/hardhat.config.ts",
+        "jurisdictions/scripts/compiler/local-solc.ts",
         "core/qa/**/*.ts",
         "core/scripts/**/*.ts",
         "tools/audit.ts",
@@ -1146,6 +1152,9 @@
       ],
       "sourceGlobs": [
         "scripts/release/**/*.ts",
+        "scripts/sync-contract-artifacts.sh",
+        "jurisdictions/hardhat.config.ts",
+        "jurisdictions/scripts/compiler/local-solc.ts",
         "core/qa/**/*.ts",
         "core/scripts/**/*.ts",
         "tools/audit.ts",

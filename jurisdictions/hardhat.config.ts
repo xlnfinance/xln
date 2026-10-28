@@ -18,7 +18,7 @@ const stackManagerChainId = Number(process.env.XLN_STACK_MANAGER_CHAIN_ID || 0);
 const config = defineConfig({
   plugins: [hardhatToolboxMochaEthers, {
     id: 'xln-local-solc',
-    hookHandlers: { solidity: () => import('./scripts/local-solc.ts') },
+    hookHandlers: { solidity: () => import('./scripts/compiler/local-solc.ts') },
   }],
   // test/foundry/**/*.sol is a Foundry-native suite (run via `forge test`), not
   // Hardhat's own Solidity-test feature. Hardhat 3 defaults `tests.solidity` to

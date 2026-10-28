@@ -52,7 +52,10 @@ try {
   build(root);
   build(clone);
   const ids = buildIds(root);
-  if (JSON.stringify(ids) !== JSON.stringify(buildIds(clone))) throw new Error('CONTRACT_BUILD_INFO_ID_DRIFT');
+  const cloneIds = buildIds(clone);
+  if (ids.length !== cloneIds.length || ids.some((id, index) => id !== cloneIds[index])) {
+    throw new Error('CONTRACT_BUILD_INFO_ID_DRIFT');
+  }
   for (const path of artifacts) run(['diff', '-qr', join(root, path), join(clone, path)]);
   console.log(`CONTRACT_ARTIFACT_REPRODUCIBILITY_OK checkouts=2 trees=${artifacts.length} ids=${ids.join(',')}`);
 } finally {
