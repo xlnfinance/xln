@@ -1651,7 +1651,9 @@ const applyHashLadderRevealRegisteredJEvent = (context: FinalizedJEventContext):
 
   const routes = newState.crossJurisdictionSwaps;
   for (const found of routes?.values?.() ?? []) {
-    if (isCrossJurisdictionTerminalStatus(found.status)) continue;
+    // A bilateral close may settle before this finalized event arrives. Keep
+    // its authenticated slot evidence so Runtime can retire the signed reveal;
+    // queueCrossJurisdictionRevealPorts still excludes terminal financial work.
     const rolePull = data.targetRole ? found.targetPull : found.sourcePull;
     const roleLeg = data.targetRole ? found.target : found.source;
     const matches = Boolean(

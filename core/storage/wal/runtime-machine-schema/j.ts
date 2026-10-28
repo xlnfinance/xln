@@ -1,4 +1,5 @@
 import { validateDisputeReferences } from '../../../jurisdiction/adapter/events/dispute/reference-state';
+import { validateTargetRevealData } from './target-reveal';
 import type { JInput } from '../../../jurisdiction/machine/input';
 import type { JReplica , JTx } from '../../../types/jurisdiction-runtime';
 import {
@@ -174,6 +175,9 @@ function assertJTx(value: unknown, code: string): asserts value is DecodedJTx {
     }
     if (data['feeOverrides'] !== undefined) validateFeeOverrides(data['feeOverrides'], `${code}_DATA_FEES`);
     if (data['runtimeSubmitAttempt'] !== undefined) validateAttempt(data['runtimeSubmitAttempt'], `${code}_DATA_ATTEMPT`);
+  } else if (tx['type'] === 'hashLadderReveal') {
+    validateTargetRevealData(data, `${code}_DATA`);
+    if (data['runtimeSubmitAttempt'] !== undefined) validateGovernanceAttempt(data['runtimeSubmitAttempt'], `${code}_DATA_ATTEMPT`);
   } else if (tx['type'] === 'mint') {
     requireExactBoundaryKeys(data, ['entityId', 'tokenId', 'amount'], [], `${code}_DATA_FIELDS`);
     requireString(data['entityId'], `${code}_DATA_ENTITY`);

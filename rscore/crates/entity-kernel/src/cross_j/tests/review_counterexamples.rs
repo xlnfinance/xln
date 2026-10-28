@@ -65,6 +65,147 @@ fn salvage_setup() -> (
 }
 
 #[test]
+fn finalized_reveal_after_bilateral_target_close_records_evidence_without_followups() {
+    let (mut state, views, command) = salvage_setup();
+    let publication = apply_salvage(&mut state, &views, &command, &salvage_authority()).unwrap();
+    assert_eq!(publication.j_outputs.len(), 1);
+    let binary = text(command.frame_data().unwrap(), "binary").unwrap();
+    let witness = salvage_witness(binary, 65535, command.kind).unwrap();
+    let mut route = state
+        .cross_jurisdiction_swaps
+        .as_ref()
+        .unwrap()
+        .get("order-1")
+        .unwrap()
+        .clone();
+    for (key, value) in [
+        (
+            "cumulativeFillRatio",
+            number(65535, command.kind, "RATIO").unwrap(),
+        ),
+        ("fillNumerator", CanonicalValue::BigInt(65535.into())),
+        ("fillDenominator", CanonicalValue::BigInt(65535.into())),
+        (
+            "filledSourceAmount",
+            field(field(&route, "source").unwrap(), "amount")
+                .unwrap()
+                .clone(),
+        ),
+        (
+            "filledTargetAmount",
+            field(field(&route, "target").unwrap(), "amount")
+                .unwrap()
+                .clone(),
+        ),
+    ] {
+        set(&mut route, key, value).unwrap();
+    }
+    let proof = build_close_proof(&route, binary, EntityTxKind::CrossPullClose).unwrap();
+    let hub = nested_text(&route, "target", "entityId")
+        .unwrap()
+        .to_string();
+    let close = AccountTx::CrossPullClose {
+        data: obj(vec![
+            (
+                "pullId",
+                field(field(&route, "targetPull").unwrap(), "pullId")
+                    .unwrap()
+                    .clone(),
+            ),
+            ("binary", string(binary)),
+            ("proof", proof),
+        ]),
+    };
+    stored(&mut state, route);
+    let closed = apply_committed_account_tx_followup(&mut state, &hub, 1000, &close)
+        .unwrap()
+        .unwrap();
+    assert!(closed.outputs.is_empty());
+    let before = state
+        .cross_jurisdiction_swaps
+        .as_ref()
+        .unwrap()
+        .get("order-1")
+        .unwrap()
+        .clone();
+    assert_eq!(text(&before, "status"), Some("settled"));
+    let event = HashLadderRevealRegisteredEvent {
+        metadata: Default::default(),
+        entity: state.entity_id.clone(),
+        counterparty_entity: hub,
+        ladder_hash: pull_ladder_hash(field(&before, "targetPull").unwrap()).unwrap(),
+        fill_ratio: 65535,
+        full_secret: witness.full_secret,
+        reveals: witness.reveals,
+        target_role: true,
+        revealed_at: 1,
+    };
+    let applied = apply_hash_ladder_reveal_registered(&mut state, &event).unwrap();
+    let projected = state
+        .cross_jurisdiction_swaps
+        .as_ref()
+        .unwrap()
+        .get("order-1")
+        .unwrap();
+    assert_eq!(unsigned(projected, "targetRegistryFillRatio"), Some(65535));
+    assert_eq!(
+        unsigned(
+            field(projected, "targetRegistryRecord").unwrap(),
+            "revealedAt"
+        ),
+        Some(1)
+    );
+    let mut expected = before;
+    set(
+        &mut expected,
+        "targetRegistryFillRatio",
+        number(65535, command.kind, "RATIO").unwrap(),
+    )
+    .unwrap();
+    let record = registry_record(&expected, &event, true, "order-1").unwrap();
+    set(&mut expected, "targetRegistryRecord", record).unwrap();
+    assert_eq!(projected, &expected);
+    assert!(applied.outputs.is_empty());
+    assert_eq!(applied.port_lane_count, 0);
+    let again = apply_hash_ladder_reveal_registered(&mut state, &event).unwrap();
+    assert!(again.outputs.is_empty());
+    assert_eq!(
+        state
+            .cross_jurisdiction_swaps
+            .as_ref()
+            .unwrap()
+            .get("order-1"),
+        Some(&expected)
+    );
+    // A delayed foreign Source event is still observed, but must not port
+    // another claim or latch this observer's own registry slot after close.
+    let mut observer = state.clone();
+    observer.entity_id = nested_text(&expected, "source", "entityId").unwrap().into();
+    let source_event = HashLadderRevealRegisteredEvent {
+        entity: nested_text(&expected, "source", "counterpartyEntityId")
+            .unwrap()
+            .into(),
+        counterparty_entity: observer.entity_id.clone(),
+        target_role: false,
+        ..event
+    };
+    let observed = apply_hash_ladder_reveal_registered(&mut observer, &source_event).unwrap();
+    assert!(observed.outputs.is_empty());
+    assert_eq!(observed.port_lane_count, 0);
+    let mirror = observer
+        .cross_jurisdiction_swaps
+        .as_ref()
+        .unwrap()
+        .get("order-1")
+        .unwrap();
+    assert!(field(mirror, "sourceRegistryFillRatio").is_none());
+    assert_eq!(
+        unsigned(field(mirror, "sourceRegistryRecord").unwrap(), "fillRatio"),
+        Some(65535)
+    );
+}
+
+#[test]
 fn review_3_confirmed_equal_target_ratio_is_not_requeued() {
     let (mut state, views, command) = salvage_setup();
     let mut prior = state

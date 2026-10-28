@@ -1305,11 +1305,11 @@ pub(crate) fn apply_hash_ladder_reveal_registered(
             recovery_pull_ids.push(pull_id.to_string());
         }
 
-        if terminal_route(&found) {
-            continue;
-        }
-
-        if let Some(binary) = binary.as_ref()
+        // Bilateral close can precede registry finality. Project the slot even
+        // on terminal routes to release Runtime's retained signed reveal, but
+        // never generate new financial work or ports from a terminal route.
+        if !terminal_route(&found)
+            && let Some(binary) = binary.as_ref()
             && nested_text(&found, "source", "entityId")
                 .is_some_and(|value| normalized(value) == self_id)
             && nested_text(&found, "source", "counterpartyEntityId")

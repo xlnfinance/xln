@@ -1,6 +1,13 @@
 import { finalizedTargetReveal } from '../../../runtime/registration/target-reveal-finality';
+import { submitRuntimeJOutbox } from '../../../runtime/j-submit/j-submit';
 import { registerPendingCommittedJOutbox, splitJOutboxForDurableSubmit } from '../../../runtime/j-submit/j-submit-state';
-import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../../../storage/wal/snapshot';
+import { buildDurableRuntimeMachineSnapshot, buildRuntimeRecoveryCheckpointSnapshot, restoreDurableRuntimeSnapshot } from '../../../storage/wal/snapshot';
+import { createJReplica } from '../../../scenarios/harness/boot';
+import { pinScenarioJurisdictionUnix } from '../../../scenarios/harness/helpers';
+import { createJAdapter } from '../../../jurisdiction/adapter';
+import { provisionEntityEncryptionKey } from '../../../entity/auth/crypto';
+import { deriveEntityEncryptionPrivateKey } from '../../../runtime/registration/entity-creation/crypto';
+import { validateJInputs } from '../../../storage/wal/runtime-machine-schema/j';
 import { applyGovernanceSubmitResultRuntimeTx, makeGovernanceSubmitResultRuntimeTx, requireCanonicalGovernanceAttempt } from '../../../runtime/registration/governance-submit-state';
 import { describe, expect, test } from 'bun:test';
 import { readEntityFrameEventMessages } from '../../../entity/frame-events';
@@ -35,6 +42,7 @@ import { prepareLocallyAuthoredEntityTxs } from '../../../entity/command';
 
 import {
   createEmptyEnv,
+  restoreEnvFromCheckpointSnapshot,
   handleInboundP2PEntityInputs,
   admitAtomicCrossJAccountInputs,
   submitCrossJurisdictionIntent,
@@ -48,7 +56,7 @@ import { hashHtlcSecret } from '../../../protocol/htlc/utils';
 import type { AccountTx } from '../../../types/account';
 import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdiction';
 import type { EntityInput, EntityReplica, EntityState } from '../../../entity/types';
-import type { RuntimeEntityInputsEnvelope, RoutedEntityInput } from '../../../runtime/types';
+import type { RuntimeEntityInputsEnvelope, RoutedEntityInput, RuntimeTx } from '../../../runtime/types';
 import type { EntityTx } from '../../../types/entity-tx';
 import type { JurisdictionEvent } from '../../../types/jurisdiction-events';
 
@@ -281,13 +289,14 @@ describe('cross-jurisdiction hashledger swap', () => {
     return account;
   };
 
-  const makeBidirectionalSalvageRuntimeFixture = (scenario: string, expiresAt = 90_000) => {
+  const makeBidirectionalSalvageRuntimeFixture = (scenario: string, expiresAt = 90_000,
+    targetJurisdiction?: EntityState['config']['jurisdiction']) => {
     const env = createEmptyEnv(scenario);
     env.scenarioMode = true;
     env.state.timestamp = 30_000;
     env.quietRuntimeLogs = true;
     const sourceJ = makeJurisdiction('Ethereum', 1, '11', '12');
-    const targetJ = makeJurisdiction('Base', 8453, '21', '22');
+    const targetJ = targetJurisdiction ?? makeJurisdiction('Base', 8453, '21', '22');
     const sourceHub = entity('32');
     const targetHub = entity('33');
     const sourceSigner = registerTestSigner(env, scenario, '1');
@@ -1143,6 +1152,153 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(ackOutputs.flatMap(output => output.entityTxs ?? []).map(tx => tx.type)).toEqual([
       'j_broadcast',
     ]);
+  });
+
+  test('finalized reveal after bilateral Target close retires retained publication across restart', async () => {
+    const adapter = await createJAdapter({ mode: 'browservm', chainId: 31337 });
+    try {
+      const { env, sourceUser, sourceSigner, targetUser, targetSigner, route, binary, fillRatio,
+        buildSourceRevealRange } = makeBidirectionalSalvageRuntimeFixture('terminal-reveal-restart', 90_000, {
+          ...makeJurisdiction('Base', 31337, '21', '22'),
+          depositoryAddress: adapter.addresses.depository,
+          entityProviderAddress: adapter.addresses.entityProvider,
+        });
+      env.infrastructure!.entityEncryptionSeeds = new Map();
+      env.infrastructure!.entityEncryptionPrivateKeys = new Map();
+      for (const replica of env.state.eReplicas.values()) {
+        const seed = `0x${'51'.repeat(64)}`;
+        env.infrastructure!.entityEncryptionSeeds.set(replica.entityId, seed);
+        replica.state.entityEncryptionPublicKey = provisionEntityEncryptionKey(env, replica.entityId,
+          deriveEntityEncryptionPrivateKey(ethers.getBytes(seed), replica.entityId));
+      }
+      const result = await applyMergedEntityInputs(env, [{ entityId: sourceUser, signerId: sourceSigner,
+        entityTxs: [{ type: 'j_event', data: buildSourceRevealRange() }] }], [],
+      { isReplay: false, routingDeps: makeLocalCrossJRoutingDeps() });
+      registerPendingCommittedJOutbox(env, splitJOutboxForDurableSubmit(result.jOutbox).durable);
+      const input = env.infrastructure!.pendingCommittedJOutbox![0]!;
+      const publication = input.jTxs[0]!;
+      if (publication.type !== 'hashLadderReveal') throw new Error('TEST_TARGET_REVEAL_MISSING');
+      expect(validateJInputs([input], 'TEST_RETAINED_REVEAL')).toEqual([input]);
+      const registration = publication.data.registration;
+      for (const invalid of [
+        { ...publication.data, unexpected: true },
+        { ...publication.data, signerId: '' },
+        { ...publication.data, revealHash: '0x12' },
+        { ...publication.data, hankoSignature: '0x1' },
+        { ...publication.data, runtimeSubmitAttempt: { attemptNumber: 1 } },
+        ...[
+          { ...registration, targetRole: false },
+          { ...registration, fullHash: '0x12' },
+          { ...registration, counterpartyEntity: 'invalid' },
+          ...[0, 65536, 1.5].map(fillRatio => ({ ...registration,
+            witness: { ...registration.witness, fillRatio } })),
+          { ...registration, witness: { ...registration.witness, reveals: [] } },
+          { ...registration, witness: { ...registration.witness, fullSecret: '0x12' } },
+        ].map(registration => ({ ...publication.data, registration })),
+      ]) {
+        expect(() => validateJInputs([{ ...input, jTxs: [{ ...publication, data: invalid }] }],
+          'TEST_RETAINED_REVEAL')).toThrow();
+      }
+      await pinScenarioJurisdictionUnix(env, adapter, 30);
+      const mined = await adapter.submitTx(publication, { env, timestamp: env.state.timestamp });
+      expect(mined.success, mined.error).toBe(true);
+      const txHash = mined.txHash;
+      expect(txHash).toMatch(/^0x[0-9a-f]{64}$/);
+      if (!txHash) throw new Error('TEST_MINED_REVEAL_HASH_MISSING');
+      const onChain = await adapter.depository.getHashLadderReveal(targetUser, registration.counterpartyEntity,
+        ethers.keccak256(ethers.concat([registration.fullHash, registration.partialRoot])), true);
+      expect(onChain[0]).toBe(BigInt(fillRatio));
+      expect(onChain[1]).toBe(30n);
+      // Mining commits only a submit result; the signed reveal remains the retry source.
+      applyGovernanceSubmitResultRuntimeTx(env,
+        makeGovernanceSubmitResultRuntimeTx(input.jurisdictionName, publication, 'submitted', { txHash }));
+      expect(env.infrastructure!.pendingCommittedJOutbox).toHaveLength(1);
+      const state = createEntityFrameCandidateState(env.state.eReplicas.get(`${targetUser}:${targetSigner}`)!.state);
+      const close: AccountTx = { type: 'cross_pull_close', data: {
+        pullId: route.targetPull!.pullId, binary, proof: buildCrossJurisdictionCloseProof(route, binary),
+      } };
+      const account = getTestAccountForWrite(state, route.target.entityId);
+      account.status = 'active';
+      delete account.activeDispute;
+      delete account.counterpartyDisputeProofBodyHash;
+      const pull = route.targetPull!;
+      const delta = { ...account.state.deltas.get(pull.tokenId)! };
+      if (pull.signedAmount > 0n) delta.rightHold = pull.signedAmount;
+      else delta.leftHold = -pull.signedAmount;
+      account.state.deltas = account.state.deltas.updated(pull.tokenId, delta);
+      const settled = await applyAccountTx(account, close, route.target.entityId < targetUser,
+        env.state.timestamp, 2);
+      expect(settled.ok, settled.ok ? '' : settled.rejection.message).toBe(true);
+      expect(account.state.pulls.has(pull.pullId)).toBe(false);
+      const closeOutputs: EntityInput[] = [];
+      expect(applyCommittedCrossJurisdictionAccountTxFollowup(env, state, route.target.entityId,
+        close, closeOutputs, env.state.timestamp, [], [])).toBe(true);
+      expect(state.crossJurisdictionSwaps!.get(route.orderId)!.status).toBe('settled');
+      expect(finalizedTargetReveal(env, input.jurisdictionName, publication)).toBe(false);
+      const before = cloneCrossJurisdictionRoute(state.crossJurisdictionSwaps!.get(route.orderId)!);
+      const finalized = await applyJEventRange(state, {
+        from: targetSigner, observedAt: env.state.timestamp, blockNumber: 2,
+        blockHash: secret('e1'), transactionHash: secret('e2'),
+        event: { type: 'HashLadderRevealRegistered', data: {
+          entity: targetUser, counterpartyEntity: registration.counterpartyEntity,
+          ladderHash: ethers.keccak256(ethers.concat([registration.fullHash, registration.partialRoot])),
+          targetRole: true, ...registration.witness, revealedAt: 30,
+        } },
+      }, env);
+      const projected = finalized.newState.crossJurisdictionSwaps!.get(route.orderId)!;
+      expect(projected.targetRegistryRecord).toEqual({ fillRatio, revealedAt: 30 });
+      expect(projected.targetRegistryFillRatio).toBe(fillRatio);
+      expect(projected).toEqual({ ...before, targetRegistryRecord: { fillRatio, revealedAt: 30 },
+        targetRegistryFillRatio: fillRatio });
+      expect(finalized.outputs).toEqual([]);
+      expect(finalized.accountTxs).toEqual([]);
+      env.state.eReplicas.get(`${targetUser}:${targetSigner}`)!.state = finalized.newState;
+      for (const [name, jurisdiction] of env.state.jReplicas) {
+        const complete = createJReplica(env, name, jurisdiction.contracts!.depository);
+        complete.chainId = jurisdiction.chainId;
+        complete.contracts = jurisdiction.contracts;
+        complete.rpcs = jurisdiction.rpcs;
+      }
+      const restarted = await restoreEnvFromCheckpointSnapshot(buildRuntimeRecoveryCheckpointSnapshot(env), { readOnly: true });
+      restarted.scenarioMode = true;
+      expect(finalizedTargetReveal(restarted, input.jurisdictionName, publication)).toBe(true);
+      restarted.state.timestamp += 10_000;
+      const results: RuntimeTx[] = [];
+      const deps = { enqueueRuntimeInputs: (_env: unknown, _inputs?: EntityInput[], txs?: RuntimeTx[]) => {
+        results.push(...(txs ?? []));
+      } };
+      // Reconciliation precedes adapter lookup: any attempted submission would fail here.
+      await submitRuntimeJOutbox(restarted, restarted.infrastructure!.pendingCommittedJOutbox!, deps);
+      expect(results).toHaveLength(1);
+      const [reconciled] = results;
+      if (reconciled?.type !== 'recordGovernanceJSubmitResult') throw new Error('TEST_RECONCILE_MISSING');
+      expect(reconciled.data.outcome).toBe('reconciled');
+      applyGovernanceSubmitResultRuntimeTx(restarted, reconciled);
+      expect(restarted.infrastructure!.pendingCommittedJOutbox).toEqual([]);
+      await submitRuntimeJOutbox(restarted, restarted.infrastructure!.pendingCommittedJOutbox!, deps);
+      expect(results).toHaveLength(1);
+    } finally { await adapter.close(); }
+  });
+
+  test('terminal Source mirrors retain registry evidence without generating reveal ports', async () => {
+    const { env, sourceUser, sourceSigner, sourceState, route, fillRatio, buildSourceRevealRange } =
+      makeBidirectionalSalvageRuntimeFixture('terminal-source-reveal');
+    const event = buildSourceRevealRange().blocks[0]!.events[0]!;
+    for (const status of ['settled', 'cancelled', 'expired'] as const) {
+      const state = createEntityFrameCandidateState(sourceState);
+      state.crossJurisdictionSwaps!.set(route.orderId, { ...cloneCrossJurisdictionRoute(route), status });
+      const finalized = await applyJEventRange(state, {
+        from: sourceSigner, observedAt: env.state.timestamp, blockNumber: 1,
+        blockHash: secret('8b'), transactionHash: secret('8c'), event,
+      }, env);
+      const observed = finalized.newState.crossJurisdictionSwaps!.get(route.orderId)!;
+      expect(finalized.newState.entityId).toBe(sourceUser);
+      expect(observed.status).toBe(status);
+      expect(observed.sourceRegistryRecord).toEqual({ fillRatio, revealedAt: 30 });
+      expect(observed.sourceRegistryFillRatio).toBeUndefined();
+      expect(finalized.outputs).toEqual([]);
+      expect(finalized.accountTxs).toEqual([]);
+    }
   });
 
   test('source registry reveal ports to the target user lane deterministically', async () => {
