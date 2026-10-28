@@ -1101,10 +1101,10 @@ fn local_financial_view_requests(
                     .and_then(|v| string(v).ok());
                 if let Some(peer) = peer.filter(|peer| state.known_accounts.contains(*peer)) {
                     let request = requested.entry(account_id(peer)?).or_default();
-                    if let Ok(token) = number(&tx.wire_data, "tokenId").and_then(|n| {
-                        xln_rscore_engine::TokenId::new(n as u32)
-                            .map_err(|e| crate::lendbook::state::err(e.to_string()))
-                    }) {
+                    if let Some(token) = number(&tx.wire_data, "tokenId")
+                        .ok()
+                        .and_then(crate::lendbook::state::account_token)
+                    {
                         request.token_ids.insert(token);
                     }
                 }
@@ -1884,8 +1884,11 @@ fn local_account_views(
         for (_, position) in &book.savings {
             if matches!(text(position, "status")?, "open" | "queued") {
                 let id = account_id(text(position, "lenderEntityId")?)?;
-                let token = xln_rscore_engine::TokenId::new(number(position, "tokenId")? as u32)
-                    .map_err(|e| crate::lendbook::state::err(e.to_string()))?;
+                let Some(token) =
+                    crate::lendbook::state::account_token(number(position, "tokenId")?)
+                else {
+                    continue;
+                };
                 if let Some((_, request)) = requests.iter_mut().find(|(key, _)| *key == id) {
                     if !request.token_ids.contains(&token) {
                         request.token_ids.push(token);
@@ -4120,6 +4123,47 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn lending_view_requests_never_truncate_peer_tokens() {
+        use crate::{CanonicalEntityTx, EntityTxKind};
+        let peer = format!("0x{}", "22".repeat(32));
+        let mut state = EntityStateSlice::empty(format!("0x{}", "11".repeat(32)), 1000);
+        state.known_accounts.insert(peer.clone());
+        for kind in [
+            EntityTxKind::LendingOffer,
+            EntityTxKind::LendingApprove,
+            EntityTxKind::LendingRepay,
+        ] {
+            for raw in [1, 65535, 65536, 65537, 4294967297, 9007199254740991] {
+                let key = if kind == EntityTxKind::LendingApprove {
+                    "borrowerEntityId"
+                } else {
+                    "hubEntityId"
+                };
+                let tx = CanonicalEntityTx::from_frame_projection(
+                    kind,
+                    crate::lendbook::state::obj(vec![
+                        (key, crate::lendbook::state::s(&peer)),
+                        ("tokenId", crate::lendbook::state::n(raw)),
+                    ]),
+                )
+                .unwrap();
+                let requests = local_financial_view_requests(
+                    &state,
+                    &[LocalEntityFinancialTx::LendingCommand(tx)],
+                    &[],
+                    &DeterministicContext::hlt_default(),
+                )
+                .unwrap();
+                assert_eq!(requests.len(), 1);
+                let expected = crate::lendbook::state::account_token(raw)
+                    .into_iter()
+                    .collect::<Vec<_>>();
+                assert_eq!(requests[0].1.token_ids, expected, "{kind:?} token {raw}");
+            }
+        }
+    }
 
     #[test]
     fn cross_j_r6_h69_scheduled_collective_partition_preserves_external_and_mixed_outputs() {

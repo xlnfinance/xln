@@ -54,6 +54,12 @@ pub fn number(v: &V, key: &str) -> Result<u64, E> {
     }
     Err(err("LENDING_INTEGER_INVALID"))
 }
+/// Never alias an untrusted JS integer to an enabled Account token.
+pub fn account_token(raw: u64) -> Option<xln_rscore_engine::TokenId> {
+    u32::try_from(raw)
+        .ok()
+        .and_then(|n| xln_rscore_engine::TokenId::new(n).ok())
+}
 pub fn big(v: &V, key: &str) -> Result<BigInt, E> {
     if let V::BigInt(v) = get(v, key)? {
         Ok(v.clone())
@@ -110,7 +116,8 @@ pub fn canonical_lending_state(book: &LendingState) -> Result<V, E> {
 pub fn loan_clock(v: &V) -> Result<LendingCovenant, E> {
     Ok(LendingCovenant {
         kind: "loan".into(),
-        token_id: number(v, "tokenId")? as u32,
+        token_id: u32::try_from(number(v, "tokenId")?)
+            .map_err(|_| err("LENDING_COVENANT_TOKEN"))?,
         creditor_is_left: true,
         principal: big(v, "principalAmount")?,
         interest_bps: number(v, "interestBps")?,

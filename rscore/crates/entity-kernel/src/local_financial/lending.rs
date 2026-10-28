@@ -5,7 +5,7 @@ use crate::{
     CanonicalEntityTx, EntityFrameEvent, EntityKernelError as E, EntityStateSlice, EntityTxKind,
 };
 use std::collections::BTreeMap;
-use xln_rscore_engine::{AccountTx, TokenId};
+use xln_rscore_engine::AccountTx;
 use xln_rscore_protocol::CanonicalValue as V;
 fn reject(kind: &'static str, detail: impl Into<String>) -> E {
     E::RejectedEntityTx {
@@ -110,7 +110,8 @@ fn prepare(
             "LENDING_POLICY_INPUT",
         )?;
         let borrower = text(d, "borrowerEntityId")?;
-        let token = TokenId::new(number(d, "tokenId")? as u32).map_err(|e| err(e.to_string()))?;
+        let token = account_token(number(d, "tokenId")?)
+            .ok_or_else(|| reject(kind, "LENDING_FACILITY_ACCOUNT_UNAVAILABLE"))?;
         let view = views
             .get(borrower)
             .filter(|v| v.active && v.owner_out_capacity.contains_key(&token))
@@ -193,18 +194,19 @@ fn prepare(
     let raw_token = number(d, "tokenId")?;
     let tx = match tx.kind {
         EntityTxKind::LendingOffer => {
-            let token = TokenId::new(raw_token as u32).map_err(|e| err(e.to_string()))?;
             let term_id = term(text(d, "termId")?)?;
             let bps = number(d, "interestBps")?;
             if bps > 10000 {
                 return Err(err("LENDING_INVALID_INTEREST_BPS"));
             }
-            if !view.owner_out_capacity.contains_key(&token) {
+            let token =
+                account_token(raw_token).filter(|t| view.owner_out_capacity.contains_key(t));
+            let Some(token) = token else {
                 return Err(reject(
                     kind,
                     format!("LENDING_TOKEN_NOT_ENABLED:{raw_token}"),
                 ));
-            }
+            };
             AccountTx::LendingFund {
                 position_id: id,
                 hub_entity_id: hub.clone(),
@@ -242,7 +244,9 @@ fn prepare(
                 loan_id: id,
                 hub_entity_id: hub.clone(),
                 borrower_entity_id: owner,
-                token_id: TokenId::new(raw_token as u32).map_err(|e| err(e.to_string()))?,
+                // TS Account admission binds the exact original token to the claim.
+                token_id: account_token(raw_token)
+                    .ok_or_else(|| reject(kind, "LENDING_REPAY_COVENANT_MISMATCH"))?,
                 amount: amount.clone(),
                 claim_hash: claim.hash(),
             }

@@ -102,6 +102,8 @@ pub(crate) fn apply_committed_lending_followup(
                     return Ok(true);
                 }
             };
+            let draw_token = account_token(*token_id)
+                .ok_or_else(|| err(format!("ACCOUNT_DELTA_TOKEN_INVALID:{token_id}")))?;
             let hash = hex::encode(Keccak256::digest(
                 format!(
                     "loan|{}|{}|{token_id}|{amount}|{}|{now}|{request_id}",
@@ -150,8 +152,7 @@ pub(crate) fn apply_committed_lending_followup(
                     loan_id: id,
                     hub_entity_id: hub.clone(),
                     borrower_entity_id: borrower_entity_id.clone(),
-                    token_id: xln_rscore_engine::TokenId::new(*token_id as u32)
-                        .map_err(|e| err(e.to_string()))?,
+                    token_id: draw_token,
                     amount: amount.clone(),
                     term_id: *term_id,
                     interest_bps: bps as i64,

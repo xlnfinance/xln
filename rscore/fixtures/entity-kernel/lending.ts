@@ -7,6 +7,13 @@ import { summarizeLendingState } from '../../../core/lendbook/state';
 import { lendingTermsKey, lendingFacilityKey } from '../../../core/lendbook/policy';
 import { entitySnapshotWire } from '../../../core/rscore/entity/snapshot-wire';
 import { safeStringify } from '../../../core/protocol/serialization';
+import { computeAccountStateRootCold } from '../../../core/account/commitment/state-root';
+import { applyAccountTxToMutableReplica } from '../../../core/account/tx/apply';
+import {
+  handleLendingOfferEntityTx,
+  handleLendingRepayEntityTx,
+} from '../../../core/entity/tx/handlers/payments/lending';
+import { MalformedEntityFrameInputError } from '../../../core/entity/tx/processing/invariant-errors';
 import { readEntityFrameEvents } from '../../../core/entity/frame-events';
 import type { EntityTx } from '../../../core/types/entity-tx';
 import type { AccountTx } from '../../../core/types/account';
@@ -204,7 +211,7 @@ export async function executeLendingBookVectors() {
     172802000,
   );
   return {
-    defaults: buildDefaultBankTermsTxs({chainId:31337,depositoryAddress:terms.depositoryAddress},[1,2,3],1000),
+    defaults: buildDefaultBankTermsTxs({ chainId: 31337, depositoryAddress: terms.depositoryAddress }, [1, 2, 3], 1000),
     version: 1,
     commands: (await executeSameJFinancialEntitySemanticVector()).cases.filter(c => c.name.startsWith('lending')),
     policies,
@@ -214,5 +221,74 @@ export async function executeLendingBookVectors() {
     snapshot: s.lending,
   };
 }
+// Token 1 must never authorize token 2^32+1 through a narrowing conversion.
+export async function executeLendingTokenVectors() {
+  const rows = [];
+  for (const kind of ['lendingOffer', 'lendingApprove', 'lendingRepay'] as const) {
+    const s = base();
+    s.profile!.isHub = true;
+    s.config.jurisdiction = {
+      chainId: terms.chainId,
+      depositoryAddress: terms.depositoryAddress,
+      entityProviderAddress: `0x${'77'.repeat(20)}`,
+    };
+    const original = s.accounts.get(peer)!;
+    const account = { ...original, state: { ...original.state, deltas: original.state.deltas.removed(2) } };
+    if (kind === 'lendingRepay') {
+      const id = 'loan-0327fd9035d42518';
+      const claim = account.state.subcontracts!.get(id)!;
+      account.state.subcontracts = account.state.subcontracts!.updated(id, { ...claim, creditorIsLeft: false });
+    }
+    s.accounts = s.accounts.updated(peer, account);
+    const tokenId = 4294967297;
+    const tx: EntityTx =
+      kind === 'lendingOffer'
+        ? {
+            type: kind,
+            data: {
+              hubEntityId: peer,
+              positionId: 'lend-1111111111111111',
+              tokenId,
+              amount: 100n,
+              termId: '1d',
+              interestBps: 100,
+            },
+          }
+        : kind === 'lendingApprove'
+          ? {
+              type: kind,
+              data: { borrowerEntityId: peer, tokenId, termId: '1d', maxPrincipal: 10000n, expiresAt: 200000000 },
+            }
+          : { type: kind, data: { hubEntityId: peer, loanId: 'loan-0327fd9035d42518', tokenId, amount: 100n } };
+    const snapshot = () =>
+      safeStringify({
+        entity: s,
+        wire: entitySnapshotWire(s),
+        accountRoot: computeAccountStateRootCold(account.state),
+      });
+    const before = snapshot();
+    let error = '';
+    try {
+      if (tx.type === 'lendingOffer') handleLendingOfferEntityTx(s, tx);
+      else if (tx.type === 'lendingApprove') handleLendingPolicy(s, tx);
+      else if (tx.type === 'lendingRepay') {
+        const queued = handleLendingRepayEntityTx(s, tx).accountTxs![0]!.tx;
+        const result = await applyAccountTxToMutableReplica(account, queued, true, s.timestamp);
+        if (result.ok) throw new Error('OVERSIZED_TOKEN_ACCEPTED');
+        error = result.rejection.message;
+      }
+    } catch (e) {
+      error = e instanceof MalformedEntityFrameInputError ? e.rejection : e instanceof Error ? e.message : String(e);
+    }
+    if (!error || snapshot() !== before) throw new Error(`REJECT_MUTATED_STATE:${kind}`);
+    rows.push({ tx, error });
+  }
+  return rows;
+}
 if (import.meta.main)
-  process.stdout.write(safeStringify(await executeLendingBookVectors(), 2) + '\n');
+  process.stdout.write(
+    safeStringify(
+      await (process.argv.includes('--tokens') ? executeLendingTokenVectors() : executeLendingBookVectors()),
+      2,
+    ) + '\n',
+  );

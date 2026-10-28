@@ -1,7 +1,7 @@
 use super::state::*;
 use crate::{EntityKernelError as E, EntityStateSlice, LocalAccountFinancialView};
 use std::collections::{BTreeMap, BTreeSet};
-use xln_rscore_engine::{AccountTx, TokenId};
+use xln_rscore_engine::AccountTx;
 fn claim<'a>(
     v: &xln_rscore_protocol::CanonicalValue,
     view: &'a LocalAccountFinancialView,
@@ -45,7 +45,10 @@ pub(crate) fn withdrawals(
     let mut out = Vec::new();
     for (_, _, v) in pending {
         let peer = text(v, "lenderEntityId")?;
-        let token = TokenId::new(number(v, "tokenId")? as u32).map_err(|e| err(e.to_string()))?;
+        let Some(token) = account_token(number(v, "tokenId")?) else {
+            // TS sees no delta for this exact token, hence zero payout capacity.
+            continue;
+        };
         if seen.contains(peer) || !lanes.insert((peer, token)) {
             continue;
         }
@@ -145,7 +148,10 @@ pub(crate) fn renewals(
         let capacity = view
             .lending
             .coupon_capacity
-            .get(&(token as u16, !c.creditor_is_left))
+            .get(&(
+                u16::try_from(token).map_err(|_| err("LENDING_DEMAND_RISK_MISSING"))?,
+                !c.creditor_is_left,
+            ))
             .ok_or_else(|| err("LENDING_DEMAND_RISK_MISSING"))?;
         if extra > 0.into() && &extra > capacity {
             continue;
@@ -160,7 +166,7 @@ pub(crate) fn renewals(
                 position_id: text(v, "positionId")?.into(),
                 hub_entity_id: state.entity_id.clone(),
                 lender_entity_id: peer.into(),
-                token_id: TokenId::new(token as u32).map_err(|e| err(e.to_string()))?,
+                token_id: account_token(token).ok_or_else(|| err("LENDING_DEMAND_RISK_MISSING"))?,
                 claim_hash: c.hash(),
                 interest_bps: bps as i64,
             },
@@ -179,10 +185,8 @@ pub(crate) fn overdue(state: &EntityStateSlice) -> Result<Vec<super::OverdueLend
                 super::OverdueLendingLoan {
                     loan_id: id.clone(),
                     borrower_entity_id: text(v, "borrowerEntityId")?.into(),
-                    token_id: TokenId::new(
-                        u32::try_from(number(v, "tokenId")?).map_err(|_| err("LENDING_TOKEN"))?,
-                    )
-                    .map_err(|e| err(e.to_string()))?,
+                    token_id: account_token(number(v, "tokenId")?)
+                        .ok_or_else(|| err("LENDING_COVENANT_TOKEN"))?,
                     committed_credit_limit: 0.into(),
                 },
             ));

@@ -142,7 +142,7 @@ fn account_tx(value: &Value) -> AccountTx {
     let id = |k| text(&d, k).unwrap().to_owned();
     let num = |k| number(&d, k).unwrap();
     let amount = || big(&d, "amount").unwrap();
-    let token = || TokenId::new(num("tokenId") as u32).unwrap();
+    let token = || TokenId::new(u32::try_from(num("tokenId")).unwrap()).unwrap();
     let term = || codec::term(text(&d, "termId").unwrap()).unwrap();
     match kind {
         "lending_rate" => AccountTx::LendingRate {
@@ -443,4 +443,59 @@ fn default_terms_match_typescript_governance_commands() {
         assert_eq!(tx.kind.as_str(), expected["type"].as_str().unwrap());
         equal(&tx.wire_data, &canonical(&expected["data"]));
     }
+}
+
+fn oversized_token_reject(kind: &str, expected: &str) {
+    let fixture = lending_oracle::lending_oracle("entity-kernel/lending-tokens");
+    let row = fixture
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["tx"]["type"] == kind)
+        .unwrap();
+    assert_eq!(row["error"], expected, "canonical TS rejection");
+    let mut state = EntityStateSlice::empty(HUB, 1000);
+    state.profile.is_hub = true;
+    state.known_accounts.insert(PEER.into());
+    let before = state.clone();
+    let mut view = view();
+    view.lending
+        .claims
+        .get_mut("loan-0327fd9035d42518")
+        .unwrap()
+        .creditor_is_left = false;
+    let tx = CanonicalEntityTx::from_frame_projection(
+        EntityTxKind::parse(kind).unwrap(),
+        canonical(&row["tx"]["data"]),
+    )
+    .unwrap();
+    let result = crate::local_financial::apply_local_entity_financial_txs(
+        &mut state,
+        &mut crate::paybook::PaybookChanges::default(),
+        vec![crate::LocalEntityFinancialTx::LendingCommand(tx)],
+        &DeterministicContext::hlt_default(),
+        &BTreeMap::from([(PEER.into(), view)]),
+        None,
+        None,
+    );
+    assert!(
+        matches!(result, Err(crate::EntityKernelError::RejectedEntityTx { detail, .. }) if detail == expected),
+        "{kind} must reject {expected}"
+    );
+    assert_eq!(
+        state, before,
+        "rejection must preserve the entire Entity state"
+    );
+}
+#[test]
+fn oversized_token_offer_matches_ts_rejection_without_mutation() {
+    oversized_token_reject("lendingOffer", "LENDING_TOKEN_NOT_ENABLED:4294967297");
+}
+#[test]
+fn oversized_token_approval_matches_ts_rejection_without_mutation() {
+    oversized_token_reject("lendingApprove", "LENDING_FACILITY_ACCOUNT_UNAVAILABLE");
+}
+#[test]
+fn oversized_token_repayment_matches_ts_rejection_without_mutation() {
+    oversized_token_reject("lendingRepay", "LENDING_REPAY_COVENANT_MISMATCH");
 }
