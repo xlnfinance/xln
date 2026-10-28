@@ -2762,7 +2762,7 @@ impl From<DurableRuntimeProcessorError> for ResidentRuntimeServiceError {
 }
 
 #[cfg(test)]
-#[path = "live_replacement_tests.rs"]
+#[path = "tests/j_submit/replacement.rs"]
 mod replacement_tests;
 
 #[cfg(test)]
