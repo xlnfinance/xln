@@ -1,8 +1,7 @@
-import { toEntityId } from '../../../protocol/identity';
 import { RuntimeAdapterError } from '../errors';
 
 import { compactAccountDocForView } from './compact-view';
-import { envHeight, findReplica, readAtHeight, type RuntimeAdapterResolveContext } from './context';
+import { envHeight, findReplica, readAtHeight, readEntityIdParam, type RuntimeAdapterResolveContext } from './context';
 import type { RuntimeAdapterReadQuery } from '../types';
 
 /** One committed-read lease binds policy, account and loan evidence together.
@@ -14,7 +13,7 @@ export function readLendingEvidence(
 ) {
   if (readAtHeight(query) !== null)
     throw new RuntimeAdapterError('E_BAD_QUERY', 'lending evidence is a current committed read');
-  const borrower = toEntityId(query?.accountId ?? '');
+  const borrower = readEntityIdParam(query?.accountId, 'E_BAD_QUERY', 'borrower accountId');
   if (!borrower) throw new RuntimeAdapterError('E_BAD_QUERY', 'borrower accountId is required');
   const replica = findReplica(ctx.env, entityId);
   if (!replica) throw new RuntimeAdapterError('E_NOT_FOUND', 'bank entity unavailable');

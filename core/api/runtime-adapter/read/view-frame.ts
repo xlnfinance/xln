@@ -15,6 +15,7 @@ import {
   readAtHeight,
   readBestHead,
   readBoundedLimit,
+  readEntityIdParam,
   type RuntimeAdapterResolveContext,
 } from './context';
 import {
@@ -126,7 +127,7 @@ export const projectViewFrame = async (
   const head = persistedHead ?? await readBestHead(ctx);
   const height = requestedHeight ?? currentEnvHeight;
   const heightQuery = requestedHeight !== null && height > 0 ? { ...query, atHeight: height } : query;
-  const requestedEntityId = (query?.entityId ? toEntityId(query.entityId) : '');
+  const requestedEntityId = readEntityIdParam(query?.entityId, 'E_BAD_QUERY', 'entityId');
   const entities = await listEntitySummaries(ctx, heightQuery, {
     allowPartial: !isCurrentHeight || Boolean(requestedEntityId),
   });

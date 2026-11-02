@@ -1,4 +1,5 @@
 import { toEntityId } from '../../../protocol/identity';
+import { safeStringify } from '../../../protocol/serialization';
 import type { RuntimeAdapterCrossOrder } from '../../../api/runtime-adapter/read/cross-order';
 import { acquireRuntimeFrameWriter } from '../../../runtime/frame/lifecycle/writer-lock';
 import { createEmptyEnv, saveEnvToDB, closeRuntimeDb, closeInfraDb } from '../../../runtime';
@@ -2937,3 +2938,25 @@ test('cross-order waits for the Runtime writer and refuses uncommitted state aft
   env.infrastructure!.stateMutationInFlight = true;
   await expect(read()).rejects.toThrow('RUNTIME_COMMITTED_STATE_UNAVAILABLE_RELOAD_REQUIRED');
 });
+
+for (const row of [
+  { path: `entity/${entityId}/lending`, code: 'E_BAD_QUERY' },
+  { path: `entity/${entityId}/account//frames`, code: 'E_BAD_PATH' },
+  { path: `entity/${entityId}/accounts`, query: { accountId: `0x${'AB'.repeat(32)}` }, code: 'E_BAD_QUERY' },
+  { path: `entity/${entityId}/accounts`, query: { cursor: '0x1' }, code: 'E_BAD_QUERY' },
+  { path: 'view-frame', query: { accountsCursor: '0x1' }, code: 'E_BAD_QUERY' },
+  { path: `entity/${entityId}/accounts`, query: { cursor: '0x1', atHeight: 1 }, code: 'E_BAD_QUERY' },
+  { path: 'view-frame', query: { entityId: '0x1' }, code: 'E_BAD_QUERY' },
+  { path: `entity/${entityId}/account/0x1/frames`, code: 'E_BAD_PATH' },
+  { path: 'entity/0x1/accounts', code: 'E_BAD_PATH' },
+]) {
+  test(`read selector input error ${row.path} ${safeStringify(row.query)} retains ${row.code}`, async () => {
+    const { toRuntimeAdapterErrorPayload } = await import('../../../api/runtime-adapter/errors');
+    const env = makeEnv();
+    const failure = await resolveRuntimeAdapterRead({ env }, row.path, row.query).then(
+      () => null,
+      error => toRuntimeAdapterErrorPayload(error),
+    );
+    expect(failure?.code).toBe(row.code);
+  });
+}

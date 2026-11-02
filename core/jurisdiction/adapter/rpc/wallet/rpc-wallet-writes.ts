@@ -1,4 +1,4 @@
-import { toEntityId } from '../../../../protocol/identity';
+import { toEntityId, type EntityId } from '../../../../protocol/identity';
 import type { Provider, Signer } from 'ethers';
 import { ethers } from 'ethers';
 
@@ -10,8 +10,8 @@ type TxOverrides = FeeOverrides & { gasLimit?: bigint; nonce?: number };
 type RpcReceipt = { hash: string; blockNumber: number; blockHash: string; logs: readonly ApprovalReceiptLog[] };
 type WalletMethods = Pick<JAdapter, 'getErc20Allowance' | 'approveErc20' | 'transferErc20' | 'transferNative'>;
 type ApprovalDeltaContext = {
-  entityId?: string;
-  tokenId?: number;
+  entityId: EntityId | undefined;
+  tokenId: number | undefined;
   tokenAddress: string;
   owner: string;
   spender: string;
@@ -29,9 +29,9 @@ type RpcWalletWriteDeps = {
 };
 
 const buildApprovalDelta = (receipt: RpcReceipt, allowance: bigint, context: ApprovalDeltaContext): JEvent[] => {
-  const entityId = toEntityId(context.entityId || '');
+  const entityId = context.entityId;
   const tokenId = Number(context.tokenId);
-  if (!entityId || !Number.isInteger(tokenId) || tokenId < 0) return [];
+  if (entityId === undefined || !Number.isInteger(tokenId) || tokenId < 0) return [];
   const logIndex = resolveApprovalReceiptLogIndex({
     receiptHash: receipt.hash,
     logs: receipt.logs,
@@ -61,12 +61,7 @@ const buildApprovalDelta = (receipt: RpcReceipt, allowance: bigint, context: App
 
 /** External-wallet writes are serialized per signer to prevent EOA nonce races. */
 export const createRpcWalletWriteMethods = (deps: RpcWalletWriteDeps): WalletMethods => {
-  const {
-    provider,
-    signerForPrivateKey,
-    runSerializedBatchFor,
-    sendSignerTxWithExplicitNonce,
-  } = deps;
+  const { provider, signerForPrivateKey, runSerializedBatchFor, sendSignerTxWithExplicitNonce } = deps;
   return {
     async getErc20Allowance(tokenAddress: string, owner: string, spender: string): Promise<bigint> {
       const erc20 = new ethers.Contract(
@@ -91,6 +86,9 @@ export const createRpcWalletWriteMethods = (deps: RpcWalletWriteDeps): WalletMet
         tokenId?: number;
       },
     ): Promise<JEvent[]> {
+      // Telemetry is optional; supplied identity must be valid before an approval
+      // (including its zero-reset) can change allowance or consume a nonce.
+      const entityId = options?.entityId === undefined ? undefined : toEntityId(options.entityId);
       const signerWallet = await signerForPrivateKey(`0x${Buffer.from(signerPrivateKey).toString('hex')}`);
       const signerAddress = await signerWallet.getAddress();
       const erc20 = new ethers.Contract(
@@ -121,7 +119,8 @@ export const createRpcWalletWriteMethods = (deps: RpcWalletWriteDeps): WalletMet
       const currentAllowance = await allowanceFn(signerAddress, spender);
       if (currentAllowance === amount) return [];
       const approvalContext: ApprovalDeltaContext = {
-        ...options,
+        entityId,
+        tokenId: options?.tokenId,
         tokenAddress,
         owner: signerAddress,
         spender,
@@ -181,7 +180,9 @@ export const createRpcWalletWriteMethods = (deps: RpcWalletWriteDeps): WalletMet
       ) => Promise<unknown>;
       const receipt = await runSerializedBatchFor(signerWallet, () =>
         sendSignerTxWithExplicitNonce(signerWallet, 'transferErc20', (nonce, feeOverrides) =>
-          transferFn(to, amount, { ...feeOverrides, nonce })));
+          transferFn(to, amount, { ...feeOverrides, nonce }),
+        ),
+      );
       return receipt.hash;
     },
 
@@ -189,7 +190,9 @@ export const createRpcWalletWriteMethods = (deps: RpcWalletWriteDeps): WalletMet
       const signerWallet = await signerForPrivateKey(`0x${Buffer.from(signerPrivateKey).toString('hex')}`);
       const receipt = await runSerializedBatchFor(signerWallet, () =>
         sendSignerTxWithExplicitNonce(signerWallet, 'transferNative', (nonce, feeOverrides) =>
-          signerWallet.sendTransaction({ to, value: amount, ...feeOverrides, nonce })));
+          signerWallet.sendTransaction({ to, value: amount, ...feeOverrides, nonce }),
+        ),
+      );
       return receipt.hash;
     },
   };

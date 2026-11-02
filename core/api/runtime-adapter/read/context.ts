@@ -1,4 +1,4 @@
-import { toEntityId, toRuntimeId } from '../../../protocol/identity';
+import { isValidEntityId, toEntityId, toRuntimeId, type EntityId } from '../../../protocol/identity';
 import type { BookState } from '../../../swapbook';
 import type { AccountFrame } from '../../../types/account';
 import type { EntityReplica, EntityState } from '../../../entity/types';
@@ -129,6 +129,19 @@ export type RuntimeAdapterAccountPageSummary = {
   sampleIds: string[];
   pageStateHashes: string[];
   visibleTopDeltas: RuntimeAdapterVisibleDeltaSummary[];
+};
+
+/** Untrusted selectors are caller errors; committed identities still fail-stop. */
+export const readEntityIdParam = (
+  value: unknown,
+  code: 'E_BAD_QUERY' | 'E_BAD_PATH',
+  field: string,
+): EntityId | '' => {
+  if (value === undefined || value === null || value === '') return '';
+  if (typeof value !== 'string' || !isValidEntityId(value)) {
+    throw new RuntimeAdapterError(code, `${field} must be 0x + 64 lowercase hex chars`);
+  }
+  return value;
 };
 
 export const readBoundedLimit = (rawValue: unknown, defaultValue: number): number => {
@@ -363,7 +376,7 @@ export const listEntitySummaries = async (
     }
     const ids = await ctx.listEntityIdsAtHeight(height);
     const summaries: RuntimeAdapterEntitySummary[] = [];
-    const requestedEntityId = (query?.entityId ? toEntityId(query.entityId) : '');
+    const requestedEntityId = readEntityIdParam(query?.entityId, 'E_BAD_QUERY', 'entityId');
     const ctxRuntimeId = (ctx.env.runtimeId ? toRuntimeId(ctx.env.runtimeId) : '');
     for (const id of ids) {
       const normalizedId = toEntityId(id);
@@ -460,7 +473,7 @@ const projectLiveAccountsPage = (
   query?: RuntimeAdapterReadQuery,
 ): RuntimeAdapterAccountPage => {
   const limit = readBoundedLimit(query?.accountsLimit ?? query?.limit, 10);
-  const accountId = (query?.accountId ? toEntityId(query.accountId) : '');
+  const accountId = readEntityIdParam(query?.accountId, 'E_BAD_QUERY', 'accountId');
   if (accountId) {
     const account = state.accounts.get(accountId);
     return singleAccountPage(
@@ -469,7 +482,7 @@ const projectLiveAccountsPage = (
       limit,
     );
   }
-  const cursor = ((query?.accountsCursor ?? query?.cursor) ? toEntityId(String(query?.accountsCursor ?? query?.cursor)) : '');
+  const cursor = readEntityIdParam(query?.accountsCursor ?? query?.cursor, 'E_BAD_QUERY', 'accounts cursor');
   const pageIndex = readPageIndex(query?.accountsPage);
   const orderedKeys = sortedStringMapKeys(state.accounts);
   const keys = query?.sortDir === 'desc' ? [...orderedKeys].reverse() : orderedKeys;
@@ -574,6 +587,9 @@ export const loadViewPageForHeight = async (
   accounts: RuntimeAdapterAccountPage;
   books: RuntimeAdapterBookPage;
 }> => {
+  // Both live and persisted page readers receive the same validated selectors.
+  readEntityIdParam(query?.accountId, 'E_BAD_QUERY', 'accountId');
+  readEntityIdParam(query?.accountsCursor ?? query?.cursor, 'E_BAD_QUERY', 'accounts cursor');
   if (isCurrentHeight) return projectLiveEntityViewPage(ctx, entityId, query);
   return await loadRequiredEntityViewPage(ctx, entityId, height, query);
 };

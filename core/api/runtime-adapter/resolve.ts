@@ -37,6 +37,7 @@ import {
   readAtHeight,
   readBestHead,
   readBoundedLimit,
+  readEntityIdParam,
   type RuntimeAdapterEntityCoreDoc,
   type RuntimeAdapterResolveContext,
 } from './read/context';
@@ -83,9 +84,8 @@ const normalizePath = (path: string): string[] => {
   const parts = String(path || '')
     .trim()
     .replace(/^\/+|\/+$/g, '')
-    .split('/')
-    .filter(Boolean);
-  if (parts.length === 0) throw new RuntimeAdapterError('E_BAD_PATH', 'empty adapter path');
+    .split('/');
+  if (parts.some(part => !part)) throw new RuntimeAdapterError('E_BAD_PATH', 'empty adapter path segment');
   return parts;
 };
 
@@ -385,7 +385,7 @@ const resolveScopedRuntimeAdapterRead = async <T>(
   query?: RuntimeAdapterReadQuery,
 ): Promise<T> => {
   if (parts[0] === 'entity' && parts.length >= 2) {
-    const entityId = parts[1];
+    const entityId = readEntityIdParam(parts[1], 'E_BAD_PATH', 'entity id');
     if (!entityId) throw new RuntimeAdapterError('E_BAD_PATH', 'entity id is required');
 
     if (parts.length === 3 && parts[2] === 'lending') return readLendingEvidence(ctx, entityId, query) as T;
@@ -412,7 +412,7 @@ const resolveScopedRuntimeAdapterRead = async <T>(
       const height = readAtHeight(query);
       const targetHeight = height ?? envHeight(ctx.env);
       if (targetHeight < 1) throw new RuntimeAdapterError('E_BAD_QUERY', 'paged entity reads require a persisted runtime height');
-      const accountId = (query?.accountId ? toEntityId(query.accountId) : '');
+      const accountId = readEntityIdParam(query?.accountId, 'E_BAD_QUERY', 'accountId');
       if (parts[2] === 'accounts' && accountId) {
         const limit = readBoundedLimit(query?.accountsLimit ?? query?.limit, 10);
         const isCurrentHeight = height === null || targetHeight === envHeight(ctx.env);
@@ -439,7 +439,7 @@ const resolveScopedRuntimeAdapterRead = async <T>(
     if (parts.length === 5 && parts[2] === 'account' && parts[4] === 'frames') {
       // A dispute is argued from the frames both parties signed. The aggregate
       // Entity view carries only the current one, so this is a point read.
-      const counterpartyId = toEntityId(parts[3] ?? '');
+      const counterpartyId = readEntityIdParam(parts[3], 'E_BAD_PATH', 'account id');
       if (!counterpartyId) throw new RuntimeAdapterError('E_BAD_PATH', 'account id is required');
       if (readAtHeight(query) !== null) {
         throw new RuntimeAdapterError('E_BAD_QUERY', 'historical frame reads are not available through a live adapter');
@@ -455,7 +455,7 @@ const resolveScopedRuntimeAdapterRead = async <T>(
     }
 
     if (parts.length === 5 && parts[2] === 'account' && parts[4] === 'swap-history') {
-      const counterpartyId = toEntityId(parts[3] ?? '');
+      const counterpartyId = readEntityIdParam(parts[3], 'E_BAD_PATH', 'account id');
       if (!counterpartyId) throw new RuntimeAdapterError('E_BAD_PATH', 'account id is required');
       if (readAtHeight(query) !== null) {
         throw new RuntimeAdapterError('E_BAD_QUERY', 'historical swap-history reads are not available through a live adapter');
@@ -475,7 +475,8 @@ const resolveScopedRuntimeAdapterRead = async <T>(
     }
 
     if (parts.length === 4 && parts[2] === 'account') {
-      const counterpartyId = toEntityId(parts[3] ?? '');
+      const counterpartyId = readEntityIdParam(parts[3], 'E_BAD_PATH', 'account id');
+      if (!counterpartyId) throw new RuntimeAdapterError('E_BAD_PATH', 'account id is required');
       const height = readAtHeight(query);
       if (height !== null && height !== envHeight(ctx.env)) {
         if (!ctx.loadEntityAccountDoc) {

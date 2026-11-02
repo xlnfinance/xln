@@ -106,3 +106,54 @@ test('real receipt polling settles before immediate adapter-provider shutdown', 
     await provider.destroy();
   }
 }, 15_000);
+
+async function approvalFixture(initialAllowance: bigint) {
+  const { createJAdapter } = await import('../../../jurisdiction/adapter');
+  const { ERC20Mock__factory } = await import('../../../../jurisdictions/typechain-types');
+  const provider = createXlnJsonRpcProvider(rpcUrl, 31337);
+  provider.pollingInterval = 1;
+  await provider.send('evm_setAutomine', [true]);
+  const owner = new ethers.Wallet(DEFAULT_PRIVATE_KEY, provider);
+  try {
+    const token = await new ERC20Mock__factory(owner).deploy('Approval boundary', 'AB', 18, 1000n);
+    await token.waitForDeployment();
+    const tokenAddress = await token.getAddress();
+    if (initialAllowance) {
+      const nonce = Number(await provider.send('eth_getTransactionCount', [owner.address, 'pending']));
+      await (await token.approve(tokenAddress, initialAllowance, { nonce })).wait();
+    }
+    const adapter = await createJAdapter({ mode: 'rpc', chainId: 31337, rpcUrl });
+    return { adapter, tokenAddress, owner: owner.address, key: ethers.getBytes(DEFAULT_PRIVATE_KEY) };
+  } finally {
+    await provider.destroy();
+  }
+}
+
+for (const initial of [0n, 5n])
+  test(`approval without Entity telemetry reaches the requested allowance from ${initial}`, async () => {
+    const { adapter, tokenAddress, owner, key } = await approvalFixture(initial);
+    try {
+      expect(await adapter.approveErc20(key, tokenAddress, tokenAddress, 999n)).toEqual([]);
+      expect(await adapter.getErc20Allowance(tokenAddress, owner, tokenAddress)).toBe(999n);
+    } finally {
+      await adapter.close();
+    }
+  });
+
+test('supplied noncanonical approval identity is rejected before nonce or allowance mutation', async () => {
+  const { adapter, tokenAddress, owner, key } = await approvalFixture(5n);
+  const observer = createXlnJsonRpcProvider(rpcUrl, 31337);
+  try {
+    for (const entityId of ['', '0x1', `0x${'AB'.repeat(32)}`]) {
+      const nonce = await observer.send('eth_getTransactionCount', [owner, 'pending']);
+      await expect(
+        adapter.approveErc20(key, tokenAddress, tokenAddress, 999n, { entityId, tokenId: 1 }),
+      ).rejects.toThrow('Invalid EntityId');
+      expect(await observer.send('eth_getTransactionCount', [owner, 'pending'])).toBe(nonce);
+      expect(await adapter.getErc20Allowance(tokenAddress, owner, tokenAddress)).toBe(5n);
+    }
+  } finally {
+    await observer.destroy();
+    await adapter.close();
+  }
+});
