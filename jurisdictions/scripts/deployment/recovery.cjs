@@ -1,11 +1,14 @@
 /** Public native views construct the graph; only Ignition decides which Future sends. */
-const { status, listTransactions } = require('@nomicfoundation/ignition-core');
+const { status } = require('@nomicfoundation/ignition-core');
+const { readNativeTransactions, readNativeJournal } = require('./transactions.cjs');
+const { assertNativeNonces } = require('./nonces.cjs');
+const { assertNativeReceipts } = require('./receipts.cjs');
 const { existsSync } = require('node:fs');
 const { join } = require('node:path');
-const { deploymentModuleIds, assertNativeDeploymentIdentity } = require('./namespace.cjs');
+const { deploymentModuleIds, assertNativeDeploymentIdentity, assertNativeJournalIdentity } = require('./namespace.cjs');
 const { readStackFoundationAuthority } = require('../../../core/jurisdiction/adapter/stack-manager/bindings.ts');
 
-const validateFoundation = async (attempt, prior, ethers) => {
+const validateFoundation = async (attempt, prior, transactions, ethers) => {
   const modules = deploymentModuleIds(attempt.deploymentId);
   const ep = prior.contracts[`${modules.stack}#entityProvider`];
   if (!ep) return;
@@ -18,6 +21,15 @@ const validateFoundation = async (attempt, prior, ethers) => {
   if (authority.nonce < BigInt(completed) || authority.nonce > BigInt(started)) {
     throw new Error('STACK_MANAGER_FOUNDATION_NONCE_CONFLICT');
   }
+  const known = new Set();
+  for (const tx of transactions.filter(tx => listingIds.includes(tx.futureId))) {
+    const receipt = await ethers.provider.getTransactionReceipt(tx.txHash);
+    const block = receipt && await ethers.provider.getBlock(receipt.blockNumber);
+    if (receipt?.status === 1 && block?.hash === receipt.blockHash) known.add(tx.futureId);
+  }
+  // The same signed Hanko can be relayed by another EOA. Only an actual known
+  // native winning receipt explains authority advancement for this attempt.
+  if (authority.nonce !== BigInt(known.size)) throw new Error('STACK_MANAGER_FOUNDATION_NONCE_CONFLICT');
 };
 
 const readRecovery = async (attempt, artifacts, ethers) => {
@@ -25,19 +37,18 @@ const readRecovery = async (attempt, artifacts, ethers) => {
     if (attempt.mode === 'resume') throw new Error('STACK_MANAGER_IGNITION_JOURNAL_MISSING');
     return undefined;
   }
-  const prior = await status(attempt.journalDirectory);
+  assertNativeJournalIdentity(await readNativeJournal(attempt.journalDirectory), attempt.deploymentId);
+  let prior;
+  try { prior = await status(attempt.journalDirectory); }
+  catch (error) { throw new Error('STACK_MANAGER_IGNITION_JOURNAL_INVALID', { cause: error }); }
   if (prior.chainId !== attempt.chainId) throw new Error('STACK_MANAGER_IGNITION_CHAIN_MISMATCH');
   assertNativeDeploymentIdentity(prior, attempt.deploymentId);
-  await validateFoundation(attempt, prior, ethers);
-  const transactions = await listTransactions(attempt.journalDirectory, { loadArtifact: name => artifacts.readArtifact(name) });
+  const transactions = await readNativeTransactions(attempt.journalDirectory);
+  await assertNativeReceipts(attempt.journalDirectory, ethers.provider);
+  await assertNativeNonces(attempt, prior, transactions, ethers.provider);
+  await validateFoundation(attempt, prior, transactions, ethers);
   for (const tx of transactions) {
     if (tx.from.toLowerCase() !== attempt.deployer.toLowerCase()) throw new Error('STACK_MANAGER_IGNITION_SIGNER_MISMATCH');
-    if (tx.status !== 'SUCCESS') continue;
-    const receipt = await ethers.provider.getTransactionReceipt(tx.txHash);
-    const block = receipt && await ethers.provider.getBlock(receipt.blockNumber);
-    if (!receipt || receipt.status !== 1 || !block || block.hash !== receipt.blockHash) {
-      throw new Error(`STACK_MANAGER_IGNITION_RECEIPT_CONFLICT:${tx.txHash}`);
-    }
   }
   return prior;
 };

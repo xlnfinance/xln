@@ -10,9 +10,10 @@ async function runStack({ network, artifacts, config }) {
   try {
     const [signer] = await connection.ethers.getSigners();
     const chainId = Number((await connection.ethers.provider.getNetwork()).chainId);
-    const release = await acquireDeploymentLane(join(config.paths.root, '.xln-deployment-locks'), chainId, signer.address);
+    const release = await acquireDeploymentLane(join(config.paths.root, '.xln-deployment-locks'), chainId, signer.address,
+      String(process.env.XLN_DEPLOYMENT_ID || ''));
     try {
-      const attempt = await prepareExecution({ ethers: connection.ethers, artifacts, config });
+      const attempt = await prepareExecution({ ethers: connection.ethers, artifacts, config, networkConfig: connection.networkConfig });
       console.log(JSON.stringify(await executeStack({ connection, artifacts, config, attempt }), null, 2));
     } finally { await release(); }
   } finally { await connection.close(); }

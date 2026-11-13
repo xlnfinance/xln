@@ -1,5 +1,5 @@
 /** Audit exports are derived from Ignition; they never decide which Future sends. */
-const { listTransactions } = require('@nomicfoundation/ignition-core');
+const { readNativeTransactions } = require('./transactions.cjs');
 const { writeFileSync, openSync, fsyncSync, closeSync, renameSync } = require('node:fs');
 const { randomUUID } = require('node:crypto');
 const { dirname } = require('node:path');
@@ -18,22 +18,23 @@ const save = (path, value) => {
 
 const deriveManifest = async ({ journalDirectory, artifacts, ethers, addresses, registeredTokens,
   deploymentId, network, chainId, deployer, foundationRecipient, output }) => {
-  const transactions = await listTransactions(journalDirectory, { loadArtifact: name => artifacts.readArtifact(name) });
+  const transactions = await readNativeTransactions(journalDirectory);
   const audit = await Promise.all(transactions.map(async transaction => ({ ...transaction,
     receipt: (await ethers.provider.getTransactionReceipt(transaction.txHash))?.toJSON(),
   })));
   save(`${output}.transactions.json`, audit);
+  const winners = audit.filter(entry => entry.status === 'SUCCESS' && entry.receipt?.status === 1);
   const expected = 10 + Number(Boolean(addresses.stablecoin)) + Object.keys(registeredTokens).length;
-  if (audit.length !== expected || audit.some(entry => entry.status !== 'SUCCESS' || entry.receipt?.status !== 1)) {
-    throw new Error(`IGNITION_OPERATION_EVIDENCE_INVALID:expected=${expected}:actual=${audit.length}`);
+  if (winners.length !== expected || new Set(winners.map(entry => entry.futureId)).size !== expected) {
+    throw new Error(`IGNITION_OPERATION_EVIDENCE_INVALID:expected=${expected}:actual=${winners.length}`);
   }
   const creation = address => {
-    const entry = audit.find(entry => entry.receipt.contractAddress?.toLowerCase() === address.toLowerCase());
+    const entry = winners.find(entry => entry.receipt.contractAddress?.toLowerCase() === address.toLowerCase());
     if (!entry) throw new Error(`IGNITION_CREATION_RECEIPT_MISSING:${address}`);
     return { address, transactionHash: entry.txHash, deploymentBlock: entry.receipt.blockNumber };
   };
   const call = (target, functionName) => {
-    const entries = audit.filter(entry => entry.to?.toLowerCase() === addresses[target[0].toLowerCase() + target.slice(1)]?.toLowerCase()
+    const entries = winners.filter(entry => entry.to?.toLowerCase() === addresses[target[0].toLowerCase() + target.slice(1)]?.toLowerCase()
       && entry.name === `${target}#${functionName}`);
     // Public Ignition transaction names identify calls; verify actual calldata independently at admission.
     if (entries.length !== 1) throw new Error(`IGNITION_CALL_RECEIPT_MISSING:${functionName}`);
@@ -42,7 +43,7 @@ const deriveManifest = async ({ journalDirectory, artifacts, ethers, addresses, 
   const evmContracts = Object.fromEntries(Object.entries(addresses).map(([name, address]) => [name, creation(address)]));
   evmContracts.deltaTransformerBinding = call('DeltaTransformer', 'bindDepository');
   evmContracts.shareDepositoryBinding = call('EntityProvider', 'bindShareDepository');
-  const listings = audit.filter(entry => entry.name === 'EntityProvider#foundationRegisterExternalToken');
+  const listings = winners.filter(entry => entry.name === 'EntityProvider#foundationRegisterExternalToken');
   if (listings.length !== Object.keys(registeredTokens).length) throw new Error('IGNITION_LISTING_RECEIPTS_MISSING');
   evmContracts.stablecoinRegistration = { transactionHash: listings[0].txHash, blockNumber: listings[0].receipt.blockNumber };
   if (listings[1]) evmContracts.wrappedNativeRegistration = { transactionHash: listings[1].txHash, blockNumber: listings[1].receipt.blockNumber };

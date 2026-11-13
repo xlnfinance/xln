@@ -7,6 +7,8 @@ const { save } = require('./manifest.cjs');
 const { assertArtifactPipeline } = require('./artifacts.cjs');
 const { STACK_ARTIFACTS } = require('../../../core/jurisdiction/adapter/stack-manager/verification.ts');
 const { readCompilerBytecodeEvidence } = require('../../../core/jurisdiction/adapter/stack-manager/compiler-bytecode.ts');
+const { nativeDeploymentOptions } = require('./engine.cjs');
+const { captureOrigin, verifyOrigin } = require('./origin.cjs');
 
 const readToken = async (ethers, address, decimals) => {
   if (await ethers.provider.getCode(address) === '0x') throw new Error('DEPLOYMENT_TOKEN_CODE_MISSING');
@@ -17,7 +19,7 @@ const readToken = async (ethers, address, decimals) => {
   return { address, symbol, decimals };
 };
 
-const prepareExecution = async ({ ethers, artifacts, config, input = process.env }) => {
+const prepareExecution = async ({ ethers, artifacts, config, networkConfig, input = process.env }) => {
   const deploymentId = input.XLN_DEPLOYMENT_ID;
   if (!deploymentId || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/.test(deploymentId)) throw new Error('STACK_MANAGER_DEPLOYMENT_ID_INVALID');
   const mode = input.XLN_DEPLOYMENT_MODE;
@@ -49,16 +51,13 @@ const prepareExecution = async ({ ethers, artifacts, config, input = process.env
   }
   if (fixtureToken) assertArtifactPipeline(config.paths.artifacts, await artifacts.readArtifact('ERC20Mock'), config);
   const digests = captureArtifactDigests(config.paths.artifacts);
-  const sealPath = join(directory, 'identity.json');
-  const parentIdentity = existsSync(sealPath) ? JSON.parse(readFileSync(sealPath, 'utf8')) : null;
-  if (parentIdentity && (parentIdentity.deploymentId !== deploymentId ||
-    Object.keys(parentIdentity.candidate.artifacts).length !== Object.keys(digests).length ||
-    Object.entries(parentIdentity.candidate.artifacts).some(([path, hash]) => digests[path] !== hash))) {
-    throw new Error('STACK_MANAGER_ARTIFACT_IDENTITY_CHANGED');
-  }
+  const saved = mode === 'resume' ? JSON.parse(readFileSync(`${output}.execution.json`, 'utf8')) : undefined;
+  const origin = mode === 'new' ? await captureOrigin(ethers.provider, deployer.address)
+    : await verifyOrigin(saved.origin, ethers.provider, deployer.address);
   const identity = { schemaVersion: 1, deploymentId, graphVersion: 'xln-stack-ignition-1', chainId, deployer: deployer.address,
-    foundationRecipient, stablecoin, fixtureToken, wrapped, artifacts: digests, sources: captureCandidateSources(), candidateSha: candidateRevision().sha,
-    policy: { executionConfirmations: 1, admissionConfirmations: Number(input.XLN_DEPLOY_CONFIRMATIONS || parentIdentity?.policy.admissionConfirmations || 12) } };
+    foundationRecipient, stablecoin, fixtureToken, wrapped, origin, artifacts: digests, sources: captureCandidateSources(), candidateSha: candidateRevision().sha,
+    policy: { executionConfirmations: 1, admissionConfirmations: Number(input.XLN_DEPLOY_CONFIRMATIONS || 12),
+      native: JSON.parse(JSON.stringify(nativeDeploymentOptions(config, networkConfig), (_, value) => typeof value === 'bigint' ? String(value) : value)) } };
   if (mode === 'new') {
     if (existsSync(journalDirectory)) throw new Error('STACK_MANAGER_DEPLOYMENT_ATTEMPT_EXISTS');
     mkdirSync(dirname(directory), { recursive: true, mode: 0o700 });
@@ -67,10 +66,9 @@ const prepareExecution = async ({ ethers, artifacts, config, input = process.env
     fsyncSync(handle); closeSync(handle);
   } else if (!existsSync(join(journalDirectory, 'journal.jsonl'))) throw new Error('STACK_MANAGER_IGNITION_JOURNAL_MISSING');
   if (mode === 'resume') {
-    const saved = JSON.parse(readFileSync(`${output}.execution.json`, 'utf8'));
     if (JSON.stringify(saved) !== JSON.stringify(identity)) throw new Error('STACK_MANAGER_EXECUTION_IDENTITY_MISMATCH');
   } else save(`${output}.execution.json`, identity);
-  if (!parentIdentity) cpSync(config.paths.artifacts, `${output}.artifacts`, { recursive: true });
+  if (mode === 'new') cpSync(config.paths.artifacts, `${output}.artifacts`, { recursive: true });
   return { deploymentId, mode, output, directory, journalDirectory, privateKey, deployer: deployer.address,
     foundationRecipient, chainId, stablecoin, fixtureToken, wrapped, identity };
 };

@@ -178,6 +178,7 @@ export const verifyJurisdictionStack = async (
   provider: JsonRpcProvider,
   manifest: JurisdictionStackManifest,
   confirmations: number,
+  blockTag: number | 'latest' = 'latest',
 ): Promise<void> => {
   if (confirmations < 12) throw new Error('STACK_MANAGER_CONFIRMATIONS_BELOW_ADMISSION_MINIMUM');
   const network = await provider.getNetwork();
@@ -194,7 +195,7 @@ export const verifyJurisdictionStack = async (
         throw new Error(`STACK_MANAGER_RECEIPT_ADDRESS_MISMATCH:${name}`);
       }
       return receipt;
-    });
+    }, blockTag === 'latest' ? undefined : blockTag);
     const code = (await provider.getCode(deployment.address, receipt.blockNumber)).toLowerCase();
     const linked = linkExpectedBytecode(await readArtifact(name), manifest, name);
     const descriptor = STACK_ARTIFACTS[name];
@@ -223,11 +224,11 @@ export const verifyJurisdictionStack = async (
       immutableValues,
       name,
     );
-    if (code !== expected || (await provider.getCode(deployment.address)).toLowerCase() !== expected) {
+    if (code !== expected || (await provider.getCode(deployment.address, blockTag)).toLowerCase() !== expected) {
       throw new Error(`STACK_MANAGER_BYTECODE_MISMATCH:${name}:${describeBytecodeMismatch(code, expected)}`);
     }
   }
-  await verifyStackBindings(provider, manifest, confirmations);
+  await verifyStackBindings(provider, manifest, confirmations, blockTag);
   const registration = manifest.evmContracts.stablecoinRegistration;
   const registrationTransaction = await provider.getTransaction(registration.transactionHash);
   if (!registrationTransaction) throw new Error('STACK_MANAGER_STABLECOIN_REGISTRATION_TX_MISSING');
@@ -240,9 +241,9 @@ export const verifyJurisdictionStack = async (
       (receipt.to || '').toLowerCase() !== manifest.contracts.entityProvider.toLowerCase()
     ) throw new Error('STACK_MANAGER_STABLECOIN_REGISTRATION_RECEIPT_INVALID');
     return receipt;
-  });
+  }, blockTag === 'latest' ? undefined : blockTag);
   const stablecoin = decodeRegisteredStackStablecoin(manifest.registeredTokens);
-  const metadata = await readStackStablecoinMetadata(provider, stablecoin.address);
+  const metadata = await readStackStablecoinMetadata(provider, stablecoin.address, blockTag);
   if (metadata.symbol !== stablecoin.symbol || metadata.decimals !== stablecoin.decimals) {
     throw new Error('STACK_MANAGER_STABLECOIN_METADATA_MISMATCH');
   }
@@ -250,12 +251,12 @@ export const verifyJurisdictionStack = async (
     'function _tokens(uint256) view returns (address contractAddress,uint256 externalTokenId,uint8 tokenType)',
     'function getTokensLength() view returns (uint256)',
   ], provider);
-  const registered = await depository.getFunction('_tokens')(stablecoin.tokenId);
+  const registered = await depository.getFunction('_tokens')(stablecoin.tokenId, { blockTag });
   if (
     String(registered.contractAddress).toLowerCase() !== stablecoin.address.toLowerCase() ||
     registered.externalTokenId !== 0n || registered.tokenType !== 0n
   ) throw new Error('STACK_MANAGER_STABLECOIN_REGISTRY_MISMATCH');
-  if (await depository.getFunction('getTokensLength')() !== 2n) throw new Error('STACK_MANAGER_TOKEN_COUNT_MISMATCH');
+  if (await depository.getFunction('getTokensLength')({ blockTag }) !== 2n) throw new Error('STACK_MANAGER_TOKEN_COUNT_MISMATCH');
   const stablecoinDeployment = manifest.evmContracts.stablecoin;
   if (stablecoinDeployment) {
     const receipt = await readConfirmedReceipt(provider, stablecoinDeployment.transactionHash, confirmations, receipt => {
@@ -264,7 +265,7 @@ export const verifyJurisdictionStack = async (
         (receipt.contractAddress || '').toLowerCase() !== stablecoinDeployment.address.toLowerCase()
       ) throw new Error('STACK_MANAGER_TEST_STABLECOIN_RECEIPT_INVALID');
       return receipt;
-    });
+    }, blockTag === 'latest' ? undefined : blockTag);
     const artifactValue: unknown = JSON.parse(await readFile(
       artifactUrl('contracts/ERC20Mock.sol/ERC20Mock.json'),
       'utf8',
@@ -281,9 +282,9 @@ export const verifyJurisdictionStack = async (
       { tokenDecimals: '0x06' },
       'stablecoin',
     );
-    if (code !== stablecoinExpected) {
+    if (code !== stablecoinExpected || (await provider.getCode(stablecoinDeployment.address, blockTag)).toLowerCase() !== stablecoinExpected) {
       throw new Error('STACK_MANAGER_TEST_STABLECOIN_BYTECODE_MISMATCH');
     }
   }
-  await verifyCurrentStackReceipts(provider, manifest, confirmations);
+  await verifyCurrentStackReceipts(provider, manifest, confirmations, blockTag === 'latest' ? undefined : blockTag);
 };

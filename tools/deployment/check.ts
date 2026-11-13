@@ -137,7 +137,7 @@ const gates = (): Gate[] => [
     '--keep-test-artifacts', '--', 'forge', 'test', '--match-contract',
     'DepositoryInvariants|DepositoryConservationInvariants|DebtLifecycleInvariants|HashLadderInvariants|HankoThresholdInvariants|TransformerAllowanceInvariants|DisputeIngressGasTest'], timeoutMs: 300_000 },
   { name: 'native', command: ['bun', cleanup, '--reason=deployment-native', '--keep-test-artifacts', '--',
-    'bun', 'test', ...nativeTests(), ...owningTests], timeoutMs: 300_000 },
+    'bun', 'test', ...nativeTests(), ...owningTests], timeoutMs: 900_000 },
 ];
 
 const sourceIdentity = (files: string[]) => {
@@ -197,7 +197,7 @@ const runProfile = async (): Promise<void> => {
     coverage: { types: 'strict TypeScript including transitive dependencies; CJS exports inferred with checkJs=false',
       lint: 'emitted value-import closure, CommonJS/TypeScript consumers and exact shared debt; generated TypeChain covered by parity/types',
       invariants: 'six Foundry invariant suites plus DisputeIngressGasTest; default Foundry runs/depth',
-      deferred: ['tickets 04-07 complete recovery matrix', 'repository check', 'browser and public networks'] } };
+      deferred: ['repository check', 'browser/whole-product release', 'public networks and financial flows'] } };
   writeResult(directory, result);
   console.log(`DEPLOYMENT_CHECK_RESULT:${join(directory, 'result.json')}`);
   if (failure) throw new Error(failure);

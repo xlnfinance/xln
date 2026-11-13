@@ -5,10 +5,9 @@ const deploymentModuleIds = deploymentId => {
   return { stack: `XlnStack_${suffix}`, listing: `XlnListing_${suffix}` };
 };
 
-const assertNativeDeploymentIdentity = (prior, deploymentId) => {
+const assertFutureIds = (ids, deploymentId) => {
   const modules = deploymentModuleIds(deploymentId);
-  const ids = [...Object.keys(prior.contracts), ...prior.started, ...prior.successful,
-    ...[...prior.failed, ...prior.held, ...prior.timedOut].map(entry => entry.futureId)];
+  if (!ids.length) throw new Error('STACK_MANAGER_IGNITION_JOURNAL_INCOMPLETE');
   // Same signer/chain/bytecode is insufficient: a copied attempt B would otherwise
   // certify its contracts as A. Reject foreign native Futures before any send.
   if (ids.some(id => !id.startsWith(`${modules.stack}#`) && !id.startsWith(`${modules.listing}#`))) {
@@ -16,4 +15,12 @@ const assertNativeDeploymentIdentity = (prior, deploymentId) => {
   }
 };
 
-module.exports = { deploymentModuleIds, assertNativeDeploymentIdentity };
+const assertNativeDeploymentIdentity = (prior, deploymentId) => assertFutureIds([
+  ...Object.keys(prior.contracts), ...prior.started, ...prior.successful,
+  ...[...prior.failed, ...prior.held, ...prior.timedOut].map(entry => entry.futureId),
+], deploymentId);
+const assertNativeJournalIdentity = (messages, deploymentId) => assertFutureIds(
+  messages.filter(message => message.futureId !== undefined).map(message => message.futureId), deploymentId,
+);
+
+module.exports = { deploymentModuleIds, assertNativeDeploymentIdentity, assertNativeJournalIdentity };

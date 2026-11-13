@@ -3,6 +3,7 @@ const { createHash } = require('node:crypto');
 const { readdirSync, readFileSync } = require('node:fs');
 const { join } = require('node:path');
 const { execFileSync } = require('node:child_process');
+const { URL, URLSearchParams } = require('node:url');
 
 const candidatePaths = ['jurisdictions/tasks', 'jurisdictions/scripts/deployment/dispatch.cjs', 'jurisdictions/scripts/deploy-stack.cjs', 'jurisdictions/scripts/foundation-hanko.cjs',
   'jurisdictions/scripts/compiler/local-solc.ts', 'jurisdictions/hardhat.config.ts', 'jurisdictions/package.json',
@@ -52,6 +53,17 @@ const sanitizeDeploymentMessage = (value, privateKeyHex, rpcUrl) => {
     message = message.replace(new RegExp(`(?:0x)?${key}`, 'gi'), '[REDACTED_PRIVATE_KEY]');
   }
   if (rpcUrl) message = message.replaceAll(rpcUrl, '[REDACTED_RPC_URL]');
+  if (rpcUrl && URL.canParse(rpcUrl)) {
+    const rpc = new URL(rpcUrl);
+    const values = [rpc.username, rpc.password, ...rpc.searchParams.values(), ...rpc.pathname.split('/')].filter(Boolean);
+    // Providers may repeat credential fragments outside the endpoint URL.
+    // URLSearchParams also decodes percent escapes without throwing on a
+    // malformed diagnostic representation; retain both literal and decoded forms.
+    const decoded = values.map(value => new URLSearchParams(`value=${value.replaceAll('&', '%26').replaceAll('+', '%2B')}`).get('value'));
+    for (const value of [...new Set([...values, ...decoded])].filter(Boolean).sort((a, b) => b.length - a.length)) {
+      message = message.replaceAll(value, '[REDACTED_RPC_CREDENTIAL]');
+    }
+  }
   return message.replace(/https?:\/\/[^\s"'<>]+/gi, '[REDACTED_RPC_URL]')
     .replaceAll('\n', ' ').replaceAll('\r', ' ').slice(-4_096).trim();
 };
