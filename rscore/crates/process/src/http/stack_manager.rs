@@ -5,6 +5,9 @@ use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+#[path = "stack_manager_input.rs"]
+mod input;
+
 fn reply(stream: &mut TcpStream, status: u16, value: &Value) -> Result<(), String> {
     let body = serde_json::to_vec(value).map_err(|e| e.to_string())?;
     let header = format!(
@@ -40,6 +43,14 @@ fn worker(input: Value, status: Arc<Mutex<Value>>) -> Result<Value, String> {
     if !std::path::Path::new(&script).is_absolute() {
         return Err("STACK_MANAGER_WORKER_PATH_INVALID".into());
     }
+    run_worker(input, status, &executable, &script)
+}
+fn run_worker(
+    input: Value,
+    status: Arc<Mutex<Value>>,
+    executable: &str,
+    script: &str,
+) -> Result<Value, String> {
     let mut child = Command::new(executable)
         .arg(script)
         .process_group(0)
@@ -186,17 +197,13 @@ pub(super) fn serve(
         Value::Null
     };
     let signer_id = if deploy {
-        body["signerId"].as_str().map(str::to_string)
+        match input::deploy_signer(&body) {
+            Ok(signer) => Some(signer.to_string()),
+            Err(error) => return reply(stream, 400, &json!({"ok":false,"error":error})),
+        }
     } else {
         query.get("signerId").cloned()
     };
-    if deploy && signer_id.is_none() {
-        return reply(
-            stream,
-            400,
-            &json!({"ok":false,"error":"STACK_MANAGER_SIGNER_REQUIRED"}),
-        );
-    }
     let (sender, receiver) = sync_channel(1);
     state
         .commands
@@ -226,7 +233,7 @@ pub(super) fn serve(
         );
     }
     let input = if deploy {
-        json!({"op":"deploy","request":body,"signerPrivateKey":format!("0x{}",hex::encode(key.ok_or("STACK_MANAGER_SIGNER_NOT_OWNED")?))})
+        input::deploy_input(&body, &key.ok_or("STACK_MANAGER_SIGNER_NOT_OWNED")?)
     } else {
         json!({"op":"probe","rpcUrl":query.get("rpcUrl"),"signerId":signer_id})
     };
@@ -271,3 +278,7 @@ pub(super) fn serve(
     });
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "stack_manager_tests.rs"]
+mod tests;

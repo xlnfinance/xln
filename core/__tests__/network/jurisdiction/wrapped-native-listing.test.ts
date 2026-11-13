@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ContractFactory, HDNodeWallet, JsonRpcProvider, NonceManager, Wallet, toBeHex, zeroPadValue } from 'ethers';
 import weth9 from '../../../../jurisdictions/external/weth9.json';
-import { Depository__factory, EntityProvider__factory } from '../../../../jurisdictions/typechain-types';
+import { Depository__factory, EntityProvider__factory, ERC20Mock__factory } from '../../../../jurisdictions/typechain-types';
 import { requireBoundaryRecord } from '../../../protocol/boundary-validation';
 import { safeStringify } from '../../../protocol/serialization';
 import { acquireLocalTestPortLease } from '../../../scripts/e2e/harness/local-test-port-lease';
@@ -15,7 +15,7 @@ const requireString = (value: unknown, code: string): string => {
   return value;
 };
 
-test('real WETH backing and Foundation listings retain exact assets and sequential authority', async () => {
+test.each(['fixture', 'existing-usdc'] as const)('real WETH backing and %s listings retain exact assets and sequential authority', async kind => {
   const work = await mkdtemp(join(tmpdir(), 'xln-wrapped-listing-'));
   const lease = await acquireLocalTestPortLease({ requiredOffsets: [0] });
   const rpc = `http://127.0.0.1:${lease.basePort}`;
@@ -29,6 +29,10 @@ test('real WETH backing and Foundation listings retain exact assets and sequenti
     await waitForRpcReady(rpc, 5_000);
     const signer = new NonceManager(new Wallet(key, provider));
     const owner = await signer.getAddress();
+    const stablecoin = kind === 'existing-usdc'
+      ? await new ERC20Mock__factory(signer).deploy('USD Coin Test', 'USDC', 6, 1_000_000n)
+      : null;
+    if (stablecoin) await stablecoin.waitForDeployment();
     const wrapped = await new ContractFactory(weth9.abi, weth9.bytecode, signer).deploy();
     await wrapped.waitForDeployment();
     const address = await wrapped.getAddress();
@@ -47,8 +51,9 @@ test('real WETH backing and Foundation listings retain exact assets and sequenti
     expect(await wrapped.getFunction('totalSupply')()).toBe(10n ** 18n);
 
     const output = join(work, 'deployment.json');
+    const nonceBefore = BigInt(await provider.send('eth_getTransactionCount', [owner, 'latest']));
     const child = Bun.spawn(
-      ['bunx', 'hardhat', 'run', 'scripts/deploy-stack.cjs', '--network', 'stack-manager', '--no-compile'],
+      ['bunx', 'hardhat', 'xln-chain-stack', '--network', 'stack-manager'],
       {
         cwd: join(process.cwd(), 'jurisdictions'),
         stdout: 'pipe',
@@ -58,11 +63,13 @@ test('real WETH backing and Foundation listings retain exact assets and sequenti
           ...process.env,
           DEPLOYER_PRIVATE_KEY: key,
           XLN_FOUNDATION_ADDRESS: '',
-          XLN_STABLECOIN_ADDRESS: '',
+          XLN_STABLECOIN_ADDRESS: stablecoin ? await stablecoin.getAddress() : '',
           XLN_WRAPPED_NATIVE_ADDRESS: address,
           XLN_STACK_MANAGER_RPC_URL: rpc,
           XLN_STACK_MANAGER_CHAIN_ID: '31337',
-          XLN_DEPLOY_TEST_STABLECOIN: '1',
+          XLN_DEPLOY_TEST_STABLECOIN: kind === 'fixture' ? '1' : '0',
+          XLN_DEPLOYMENT_ID: `local-${kind}`,
+          XLN_DEPLOYMENT_MODE: 'new',
           XLN_DEPLOY_OUTPUT: output,
         },
       },
@@ -75,23 +82,28 @@ test('real WETH backing and Foundation listings retain exact assets and sequenti
     if (code !== 0) throw new Error(`WRAPPED_LISTING_DEPLOY_FAILED:${code}\n${stdout}\n${stderr}`);
     const deployment = requireBoundaryRecord(await Bun.file(output).json(), 'WRAPPED_DEPLOYMENT_INVALID');
     const registered = requireBoundaryRecord(deployment['registeredTokens'], 'WRAPPED_REGISTRY_MISSING');
+    const operationCount = kind === 'fixture' ? 13 : 12;
+    expect(BigInt(await provider.send('eth_getTransactionCount', [owner, 'latest'])) - nonceBefore).toBe(BigInt(operationCount));
+    expect(await Bun.file(`${output}.transactions.json`).json()).toHaveLength(operationCount);
+    const stablecoinSymbol = kind === 'fixture' ? 'USDT' : 'USDC';
+    if (stablecoin) expect(registered['USDC']).toEqual({ address: await stablecoin.getAddress(), tokenId: 1, decimals: 6 });
     expect(registered['WETH']).toEqual({ address, tokenId: 2, decimals: 18 });
     const contracts = requireBoundaryRecord(deployment['contracts'], 'WRAPPED_CONTRACTS_MISSING');
     const ep = EntityProvider__factory.connect(requireString(contracts['entityProvider'], 'WRAPPED_EP'), provider);
     const dep = Depository__factory.connect(requireString(contracts['depository'], 'WRAPPED_DEP'), provider);
     expect(await ep.shareDepository()).toBe(await dep.getAddress());
-    // Genesis authority lists USDT first and WETH second. A stale/replayed
+    // Genesis authority lists the stablecoin first and WETH second. A stale/replayed
     // Foundation Hanko cannot authorize another asset or consume a third nonce.
     expect(await ep.entityActionNonces(zeroPadValue(toBeHex(1), 32))).toBe(2n);
     expect(await dep.getTokensLength()).toBe(3n);
     for (const [symbol, tokenId] of [
-      ['USDT', 1],
+      [stablecoinSymbol, 1],
       ['WETH', 2],
     ] as const) {
       const metadata = requireBoundaryRecord(registered[symbol], `WRAPPED_${symbol}_MISSING`);
       const token = await dep._tokens(tokenId);
       expect(metadata['tokenId']).toBe(tokenId);
-      expect(token.contractAddress).toBe(metadata['address']);
+      expect(token.contractAddress).toBe(requireString(metadata['address'], 'WRAPPED_TOKEN_ADDRESS'));
       expect(token.tokenType).toBe(0n);
       expect(token.externalTokenId).toBe(0n);
     }
@@ -101,7 +113,7 @@ test('real WETH backing and Foundation listings retain exact assets and sequenti
       const receipt = await provider.getTransactionReceipt(requireString(entry['transactionHash'], 'WRAPPED_TX'));
       if (!receipt) throw new Error(`WRAPPED_RECEIPT_MISSING:${name}`);
       expect(receipt.status).toBe(1);
-      expect(receipt.blockNumber).toBe(entry['blockNumber']);
+      expect(entry['blockNumber']).toBe(receipt.blockNumber);
     }
     console.log(
       'WRAPPED_NATIVE_LISTING:' +
@@ -112,6 +124,8 @@ test('real WETH backing and Foundation listings retain exact assets and sequenti
           retainedSupply: 10n ** 18n,
           registeredTokens: registered,
           foundationNonce: 2,
+          kind,
+          operations: operationCount,
           evidence,
         }),
     );

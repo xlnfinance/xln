@@ -59,7 +59,7 @@ export type JurisdictionGossipAnnouncement = Readonly<{
     depository: string;
     deltaTransformer: string;
   }>;
-  stablecoin: Readonly<{ symbol: 'USDT'; address: string; tokenId: 1; decimals: 6 }>;
+  stablecoin: Readonly<{ symbol: string; address: string; tokenId: 1; decimals: 6 }>;
   signerId: string;
   signature: string;
 }>;
@@ -164,7 +164,7 @@ const decodeAnnouncement = (
   ])) as JurisdictionGossipAnnouncement['contracts'];
   const stablecoinRecord = requireBoundaryRecord(record['stablecoin'], 'JURISDICTION_GOSSIP_STABLECOIN_INVALID');
   requireExactBoundaryKeys(stablecoinRecord, ['symbol', 'address', 'tokenId', 'decimals'], [], 'JURISDICTION_GOSSIP_STABLECOIN_FIELDS_INVALID');
-  if (stablecoinRecord['symbol'] !== 'USDT' || stablecoinRecord['tokenId'] !== 1 || stablecoinRecord['decimals'] !== 6) {
+  if (stablecoinRecord['tokenId'] !== 1 || stablecoinRecord['decimals'] !== 6) {
     throw new Error('JURISDICTION_GOSSIP_STABLECOIN_INVALID');
   }
   const announcement: JurisdictionGossipAnnouncement = {
@@ -186,7 +186,7 @@ const decodeAnnouncement = (
     entityProviderDeploymentBlock: requireBoundaryInteger(record['entityProviderDeploymentBlock'], 'JURISDICTION_GOSSIP_DEPLOYMENT_BLOCK_INVALID', 1),
     contracts,
     stablecoin: {
-      symbol: 'USDT',
+      symbol: boundedText(stablecoinRecord['symbol'], 'JURISDICTION_GOSSIP_STABLECOIN_SYMBOL_INVALID', 32),
       address: canonicalAddress(stablecoinRecord['address'], 'JURISDICTION_GOSSIP_STABLECOIN_ADDRESS_INVALID'),
       tokenId: 1,
       decimals: 6,

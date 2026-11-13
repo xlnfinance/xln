@@ -73,7 +73,7 @@ test.each([
       await waitForRpc(rpc);
       const deploymentPath = join(work, 'deployment.json');
       await run(
-        ['bunx', 'hardhat', 'run', 'scripts/deploy-stack.cjs', '--network', 'stack-manager', '--no-compile'],
+        ['bunx', 'hardhat', 'xln-chain-stack', '--network', 'stack-manager'],
         join(root, 'jurisdictions'),
         {
           ...process.env,
@@ -83,6 +83,8 @@ test.each([
           XLN_STACK_MANAGER_RPC_URL: rpc,
           XLN_STACK_MANAGER_CHAIN_ID: '31337',
           XLN_DEPLOY_TEST_STABLECOIN: '1',
+          XLN_DEPLOYMENT_ID: 'local-fixture',
+          XLN_DEPLOYMENT_MODE: 'new',
           XLN_DEPLOY_OUTPUT: deploymentPath,
         },
       );

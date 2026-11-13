@@ -1,0 +1,82 @@
+test artifact cleanup (deployment-native): preserving existing artifacts
+test artifact budget (deployment-native): workspace=13.45GiB budgeted=3.31GiB / 50GiB
+bun test v1.4.3 (c6da4a4d3)
+
+core/__tests__/orchestrator/stack-manager-routing.test.ts:
+(pass) CLI and private worker route explicit resume intent to the production seam [132.89ms]
+(pass) server routes the execution envelope and rejects obsolete flat deployment input [32.36ms]
+
+core/__tests__/orchestrator/stack-manager-validation.test.ts:
+(pass) Stack Manager exact boundaries > refuses a scan floor that is not the verified EntityProvider deployment block [0.40ms]
+(pass) Stack Manager exact boundaries > accepts canonical V1 operator input and normalizes EOAs [0.11ms]
+(pass) Stack Manager exact boundaries > rejects private-key laundering and unknown compatibility fields [0.03ms]
+(pass) Stack Manager exact boundaries > rejects credential-bearing and non-http RPC URLs [0.42ms]
+(pass) Stack Manager exact boundaries > keeps unauthenticated public and local RPC catalog inputs intact [0.09ms]
+(pass) Stack Manager exact boundaries > decodes exact manifest evidence without trusting generic JSON [0.22ms]
+(pass) Stack Manager exact boundaries > rejects incomplete or extended deployment evidence [0.17ms]
+(pass) Stack Manager exact boundaries > binds the stablecoin listing to deployer, EntityProvider Foundation lane and exact USDT identity [2.05ms]
+(pass) Stack Manager exact boundaries > keeps arbitrary-RPC status behind operator authority [0.02ms]
+(pass) Stack Manager exact boundaries > lists only signer EOAs whose keys belong to this Runtime [45.83ms]
+(pass) Stack Manager exact boundaries > persists the complete verified manifest atomically and refuses replacement [5.97ms]
+(pass) Stack Manager exact boundaries > signs exact community discovery and rejects payload or signature mutation [3.09ms]
+(pass) Stack Manager exact boundaries > rejects official publication before RPC or gas unless the configured root signer owns the stack [0.20ms]
+(pass) Stack Manager exact boundaries > serializes CLI and server deployment with one cross-process lock [1.32ms]
+(pass) Stack Manager exact boundaries > claims the deployment before reading the body, so a concurrent POST gets 409 [18.21ms]
+(pass) Stack Manager exact boundaries > passes only the explicit deployment environment to Hardhat [0.07ms]
+
+core/__tests__/orchestrator/stack-manager-ignition-anvil.test.ts:
+JsonRpcProvider failed to detect network and cannot start up; retry in 1s (perhaps the URL is wrong or the node is not started)
+IGNITION_FRESH_EVIDENCE:/Users/nick/Projects/xlnfinance/xln/docs/evidence/ignition-resume-20261112/fresh-WCfD58:operations=11:foundationNonce=1:admissionDepth=12
+(pass) fresh existing-USDC stack admits eleven Ignition operations only at depth twelve [12748.68ms]
+
+core/__tests__/network/jurisdiction/wrapped-native-listing.test.ts:
+JsonRpcProvider failed to detect network and cannot start up; retry in 1s (perhaps the URL is wrong or the node is not started)
+WRAPPED_NATIVE_LISTING:{"address":"0x5FbDB2315678afecb367f032d93F642f64180aa3","deposited":"0xc5b67e258445ea0e7e8d719555d912e2cd022beab7d382e8982522fc44e31d08","evidence":{"account":{"address":"0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9","deploymentBlock":14,"transactionHash":"0x1fabfc49473e2a2e32eefd374348256934f300a3a48d94685e8050fa7a41e08d"},"deltaTransformer":{"address":"0x0165878A594ca255338adfa4d48449f69242Eb8F","deploymentBlock":17,"transactionHash":"0x9da6c675b8292b693b90d45e3f0cd814fbc8154bb54957e827fdbaf793f04ad7"},"deltaTransformerBinding":{"blockNumber":22,"transactionHash":"0x175b6f01587a7ecf01c3af606d5c7f8fb00aea97548685b300f9ccd670ffb3a1"},"depository":{"address":"0x610178dA211FEF7D417bC0e6FeD39F05609AD788","deploymentBlock":21,"transactionHash":"0x0053197944efea36adfa18e38a0eeb0ba19924375ad7c273b1b7c5d649125757"},"depositoryBounds":{"address":"0xa513E6E4b8f2a923D98304ec87F64353C4D5C853","deploymentBlock":18,"transactionHash":"0x95846d75db017ae84cf2eaa456a6fbc672f76d2b380741e377e5b88ef4af8b8b"},"entityProvider":{"address":"0x5FC8d32690cc91D4c39d9d3abcBD16989F875707","deploymentBlock":16,"transactionHash":"0xc77f4eb7ac7166e52b81ee6629972c7ba6eaa01e04d6620c51d0bfa5a2d1f92c"},"hankoVerifier":{"address":"0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9","deploymentBlock":15,"transactionHash":"0x4927406665532f47d240068d12342a6065461a39136ad2bd42022de0aaf997ca"},"hashLadderRegistry":{"address":"0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6","deploymentBlock":19,"transactionHash":"0x1d08d64a2ab8e1e758c41ef21ecba15b8a31fde847dc6ecbc2c0a6d8fb1e0aed"},"nftCustody":{"address":"0x8A791620dd6260079BF849Dc5567aDC3F2FdC318","deploymentBlock":20,"transactionHash":"0x3eef9c692cdb4524136ffc8c8e39fba2dd7a955f2032e5ce43a1b8b14120a04e"},"shareDepositoryBinding":{"blockNumber":23,"transactionHash":"0x5f2e74b8af795e64aa830f8d639b9a48ca0400903391fbf2f05568fb009b9be6"},"stablecoin":{"address":"0x0DCd1Bf9A1b36cE34237eEaFef220932846BCD82","deploymentBlock":24,"transactionHash":"0x30c4695c5541731c489c07a84f18bee524522571720ef675c47ebe185ce0aaa5"},"stablecoinRegistration":{"blockNumber":25,"transactionHash":"0x948fb903391f13ce64b290a0f449832bbd3770204cdb4a5fc94b888eb63978e4"},"wrappedNativeRegistration":{"blockNumber":26,"transactionHash":"0x2d21773a2b9400f323e3a9080ba5851606181ebd3e9389f2a27d8e2c8c970fc4"}},"foundationNonce":2,"kind":"fixture","operations":13,"registeredTokens":{"USDT":{"address":"0x0DCd1Bf9A1b36cE34237eEaFef220932846BCD82","decimals":6,"tokenId":1},"WETH":{"address":"0x5FbDB2315678afecb367f032d93F642f64180aa3","decimals":18,"tokenId":2}},"retainedSupply":{"__xlnType":"BigInt","value":"1000000000000000000"},"withdrawn":"0x3a3b460ae5693bed0edc0ca1b38c84d13d544d5c7b63523b070d3bdc14c8d976"}
+(pass) real WETH backing and fixture listings retain exact assets and sequential authority [26221.39ms]
+JsonRpcProvider failed to detect network and cannot start up; retry in 1s (perhaps the URL is wrong or the node is not started)
+WRAPPED_NATIVE_LISTING:{"address":"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512","deposited":"0xe094ddbf1531a791a15f4abf558fe52b2087368f109b92318295c6df11f5b3d6","evidence":{"account":{"address":"0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9","deploymentBlock":18,"transactionHash":"0x104dd61caf84e0d1043f95932a4a3c6ddae251c247deceeffb6e2f6fb7de7ad9"},"deltaTransformer":{"address":"0xa513E6E4b8f2a923D98304ec87F64353C4D5C853","deploymentBlock":21,"transactionHash":"0x80134aec5af967b39e3fea387f4eed59e289465a6460508d1d98932fbde30be4"},"deltaTransformerBinding":{"blockNumber":26,"transactionHash":"0xd74cdaaf961f151b7cebf1d47679811df17c07c128b0ba669f142a89095c239b"},"depository":{"address":"0xB7f8BC63BbcaD18155201308C8f3540b07f84F5e","deploymentBlock":25,"transactionHash":"0x38573b5cd729c6bc2a07e832333a14e23b54d2abefc8f8b97927b0dff263d81e"},"depositoryBounds":{"address":"0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6","deploymentBlock":22,"transactionHash":"0x07fc8ccb18fb8386560bd438c69666a5ecd22b83e6776e8bc8bef3e1c0d059dc"},"entityProvider":{"address":"0x0165878A594ca255338adfa4d48449f69242Eb8F","deploymentBlock":20,"transactionHash":"0x339357e5399e89e19c9863f74d8d2bd913a03e465cbc3d4b40120218ea5d5ad2"},"hankoVerifier":{"address":"0x5FC8d32690cc91D4c39d9d3abcBD16989F875707","deploymentBlock":19,"transactionHash":"0x7b8399e22ca55347e30dc1da41b002c1db678c3988a6b948797404e1b0bfc40d"},"hashLadderRegistry":{"address":"0x8A791620dd6260079BF849Dc5567aDC3F2FdC318","deploymentBlock":23,"transactionHash":"0xf1746fab7c06239f0a6155b1d2a293468b29e5910d3b2734853d55d2d2b63bd1"},"nftCustody":{"address":"0x610178dA211FEF7D417bC0e6FeD39F05609AD788","deploymentBlock":24,"transactionHash":"0x1f72e03e9277010b6c495c063c9430f396e35dd9a1b01606284764d563774664"},"shareDepositoryBinding":{"blockNumber":27,"transactionHash":"0x6e1604136e8a21bf9d2b5540fbe7a76df5d628ebd3c612e4d40730213bc344fa"},"stablecoinRegistration":{"blockNumber":28,"transactionHash":"0x85e5d0afca24e2c2432e40f1318eaf32222d9113de895cbe4165c8eea5e9dc23"},"wrappedNativeRegistration":{"blockNumber":29,"transactionHash":"0x83d1222cbbd3e5eef72d130ad90f88c7b20f12aec226f9065e849ca1e5989930"}},"foundationNonce":2,"kind":"existing-usdc","operations":12,"registeredTokens":{"USDC":{"address":"0x5FbDB2315678afecb367f032d93F642f64180aa3","decimals":6,"tokenId":1},"WETH":{"address":"0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512","decimals":18,"tokenId":2}},"retainedSupply":{"__xlnType":"BigInt","value":"1000000000000000000"},"withdrawn":"0x495e1a83c835cd55da34cee1ed37a7a680fc37e10666ad1b4e4d00de0ce1ee71"}
+(pass) real WETH backing and existing-usdc listings retain exact assets and sequential authority [29234.11ms]
+
+core/__tests__/operations/release/foundation-hanko-deploy.test.ts:
+(pass) deployment Foundation token listing uses the canonical four-field Hanko envelope [8.54ms]
+
+core/__tests__/orchestrator/standalone-deployment/standalone-deployment-policy.test.ts:
+(pass) preserves an explicit operator fee-bump prohibition and retry policy when network fields are undefined [0.05ms]
+(pass) uses native Hardhat global-first precedence and network retry defaults [0.02ms]
+(pass) imports executor and variant dispatcher as callable functions without starting an operation
+
+core/__tests__/orchestrator/standalone-deployment/standalone-deployment-validation.test.ts:
+(pass) Standalone deployment admission > keeps reusable parameters independent from attempt identity and normalizes addresses [0.18ms]
+(pass) Standalone deployment admission > rejects secret laundering, retired fields and incomplete parameter objects [0.07ms]
+(pass) Standalone deployment admission > requires exact safe chain IDs and at least twelve whole confirmations [0.06ms]
+(pass) Standalone deployment admission > rejects ambiguous token shape and missing or zero authority addresses [0.11ms]
+(pass) Standalone deployment admission > requires an explicit attempt and exact new or resume intent [0.05ms]
+(pass) Standalone deployment admission > redacts key variants and credential-bearing RPC URLs without losing the final error [0.07ms]
+JsonRpcProvider failed to detect network and cannot start up; retry in 1s (perhaps the URL is wrong or the node is not started)
+STANDALONE_ADMISSION_EVIDENCE:/Users/nick/Projects/xlnfinance/xln/docs/evidence/ignition-resume-20261112/case-VnteM9:rejections=4:sends=0
+(pass) native task rejects wrong chain, Foundation and token metadata before sending [4735.67ms]
+
+core/__tests__/orchestrator/standalone-deployment/standalone-deployment-anvil.test.ts:
+JsonRpcProvider failed to detect network and cannot start up; retry in 1s (perhaps the URL is wrong or the node is not started)
+STANDALONE_FRESH_EVIDENCE:/Users/nick/Projects/xlnfinance/xln/docs/evidence/ignition-resume-20261112/case-4Vbe1S/native:operations=11:depth=12
+(pass) native task verifies eleven existing-USDC operations at depth twelve and reports exact fees without a catalog [7868.17ms]
+
+core/__tests__/orchestrator/standalone-deployment/standalone-deployment-resume-anvil.test.ts:
+JsonRpcProvider failed to detect network and cannot start up; retry in 1s (perhaps the URL is wrong or the node is not started)
+STANDALONE_RESUME_EVIDENCE:/Users/nick/Projects/xlnfinance/xln/docs/evidence/ignition-resume-20261112/case-hLhldC/native:cut=4:initialNonce=1:operations=11:depth=12
+(pass) native task resumes operation 4 mined before receipt observation without duplicate actions [7623.75ms]
+JsonRpcProvider failed to detect network and cannot start up; retry in 1s (perhaps the URL is wrong or the node is not started)
+STANDALONE_RESUME_EVIDENCE:/Users/nick/Projects/xlnfinance/xln/docs/evidence/ignition-resume-20261112/case-9nyM0I/native:cut=11:initialNonce=4:operations=11:depth=12
+(pass) native task resumes operation 11 mined before receipt observation without duplicate actions [7958.11ms]
+
+core/__tests__/testing/tooling/lint/eslint-debt.test.ts:
+(pass) Shared exact ESLint debt policy > accepts only the two approved serializer findings under the unchanged full baseline [351.46ms]
+(pass) Shared exact ESLint debt policy > rejects a new raw JSON finding rather than inheriting the serializer allowance [2.54ms]
+(pass) Shared exact ESLint debt policy > rejects omitted approved findings instead of passing a partial scoped report [10.56ms]
+(pass) Shared exact ESLint debt policy > rejects changed approved source even when the finding count remains two [8.49ms]
+(pass) Shared exact ESLint debt policy > requires every declared scoped file to have actually been linted [1.70ms]
+
+ 40 pass
+ 0 fail
+ 497 expect() calls
+Ran 40 tests across 10 files. [97.49s]

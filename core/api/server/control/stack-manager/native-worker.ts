@@ -1,6 +1,6 @@
 // Private operator IPC only; keys arrive on stdin and never enter HTTP or logs.
 import { deployJurisdictionStack, probeJurisdictionStackTarget } from '../../../../jurisdiction/adapter/stack-manager/deploy';
-import { decodeDeployJurisdictionStackRequest } from '../../../../jurisdiction/adapter/stack-manager/validation';
+import { decodeDeployJurisdictionStackRequest, decodeStackDeploymentExecution } from '../../../../jurisdiction/adapter/stack-manager/validation';
 import { getConfiguredOfficialFoundationSignerId } from '../../../../jurisdiction/adapter/kernel/jurisdiction-loader';
 import { getAddress, isAddress } from 'ethers';
 import { requireBoundaryRecord, requireExactBoundaryKeys } from '../../../../protocol/boundary-validation';
@@ -20,13 +20,15 @@ try {
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('STACK_MANAGER_PROBE_QUERY_INVALID');
     emit({ type: 'result', value: await probeJurisdictionStackTarget({ rpcUrl: input['rpcUrl'], signerId: getAddress(input['signerId']).toLowerCase() }) });
   } else if (input['op'] === 'deploy') {
-    requireExactBoundaryKeys(input, ['op', 'request', 'signerPrivateKey'], [], 'STACK_MANAGER_PRIVATE_FIELDS_INVALID');
+    requireExactBoundaryKeys(input, ['op', 'request', 'execution', 'signerPrivateKey'], [], 'STACK_MANAGER_PRIVATE_FIELDS_INVALID');
     if (typeof input['signerPrivateKey'] !== 'string') throw new Error('STACK_MANAGER_PRIVATE_SIGNER_INVALID');
     privateKey = input['signerPrivateKey'];
     const request = decodeDeployJurisdictionStackRequest(input['request']);
+    const execution = decodeStackDeploymentExecution(input['execution']);
     if (!/^0x[0-9a-f]{64}$/.test(privateKey)) throw new Error('STACK_MANAGER_PRIVATE_SIGNER_INVALID');
     const officialFoundationSignerId = getConfiguredOfficialFoundationSignerId();
     const result = await deployJurisdictionStack(request, {
+      ...execution,
       signerPrivateKey: Uint8Array.from(Buffer.from(privateKey.slice(2), 'hex')),
       ...(officialFoundationSignerId ? { officialFoundationSignerId } : {}),
       onPhase: phase => emit({ type: 'phase', phase, updatedAt: new Date().toISOString() }),

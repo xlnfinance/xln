@@ -73,7 +73,9 @@ contract HashLadderInvariants is XlnFixture {
   ///         only then does that slot hold a value.
   function test_control_orderedPairIsolation() public {
     // Target role needs no dispute/window.
+    uint256 sourceNonce = dep.entityNonces(handler.entityOf(0));
     handler.registerReveal(0, 1, 0 /*target*/, 0x0fff, 0, 1);
+    assertEq(dep.entityNonces(handler.entityOf(0)), sourceNonce, "Target publication consumed a Source batch nonce");
     (uint16 direct, ) = dep.getHashLadderReveal(
       handler.entityOf(0), handler.entityOf(1), _ladderOf(0, 0x0fff), true
     );

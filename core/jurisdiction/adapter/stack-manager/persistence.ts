@@ -6,7 +6,10 @@
 
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
+import { status } from '@nomicfoundation/ignition-core';
+import { getAddress } from 'ethers';
+import { createRequire } from 'node:module';
 import { resolveJurisdictionsJsonPath } from '../jurisdictions-path';
 import { computeJurisdictionsNetworkVersion } from '../kernel/jurisdictions-version';
 import {
@@ -21,6 +24,12 @@ import {
   MAX_JURISDICTION_GOSSIP_RECORDS,
   type JurisdictionGossipAnnouncement,
 } from '../../gossip/announcement';
+const { deploymentModuleIds, assertNativeDeploymentIdentity } = createRequire(import.meta.url)(
+  '../../../../jurisdictions/scripts/deployment/namespace.cjs',
+) as Readonly<{
+  deploymentModuleIds: (deploymentId: string) => { stack: string; listing: string };
+  assertNativeDeploymentIdentity: (prior: Awaited<ReturnType<typeof status>>, deploymentId: string) => void;
+}>;
 
 const readRoot = async (path: string): Promise<Record<string, unknown>> => {
   try {
@@ -44,6 +53,33 @@ export const assertJurisdictionStackKeyAvailable = async (key: string): Promise<
   const jurisdictions = root['jurisdictions'];
   if (jurisdictions && typeof jurisdictions === 'object' && !Array.isArray(jurisdictions)) {
     if (Object.hasOwn(jurisdictions, key)) throw new Error(`STACK_MANAGER_JURISDICTION_KEY_EXISTS:${key}`);
+  }
+};
+
+export const assertStackResumeCatalogBinding = async (
+  request: DeployJurisdictionStackRequest, directory: string, deploymentId: string, publishedRpcUrl?: string,
+): Promise<void> => {
+  const root = await readRoot(resolveJurisdictionsJsonPath());
+  const entries = root['jurisdictions'] as Record<string, Record<string, unknown>>;
+  const existing = entries[request.key];
+  if (!existing) return;
+  if (!publishedRpcUrl || existing['rpc'] !== publishedRpcUrl) throw new Error('STACK_MANAGER_JURISDICTION_KEY_CONFLICT');
+  const prior = await status(directory);
+  assertNativeDeploymentIdentity(prior, deploymentId);
+  const modules = deploymentModuleIds(deploymentId);
+  // Publication follows native listing success. A catalog collision during an
+  // incomplete graph must reject before Ignition can spend another sender nonce.
+  if (!prior.successful.includes(`${modules.listing}#registerStablecoin`)) throw new Error('STACK_MANAGER_JURISDICTION_KEY_CONFLICT');
+  const contracts = existing['contracts'] as Record<string, string>;
+  for (const [name, address] of Object.entries(contracts)) {
+    if (prior.contracts[`${modules.stack}#${name}`]?.address.toLowerCase() !== address.toLowerCase()) {
+      throw new Error('STACK_MANAGER_JURISDICTION_KEY_CONFLICT');
+    }
+  }
+  for (const [name, value] of Object.entries({ name: request.name, chainId: request.expectedChainId,
+    deployer: getAddress(request.signerId), foundationRecipient: getAddress(request.foundationRecipient), currency: request.currency,
+    blockTimeMs: request.blockTimeMs, explorer: request.explorer })) {
+    if (existing[name] !== value) throw new Error('STACK_MANAGER_JURISDICTION_KEY_CONFLICT');
   }
 };
 
@@ -89,7 +125,8 @@ export const persistVerifiedJurisdictionStack = async (
   manifest: JurisdictionStackManifest,
   announcement?: JurisdictionGossipAnnouncement,
   officialFoundationSignerId?: string,
-): Promise<{ key: string; name: string }> => {
+  allowIdentical = false,
+): Promise<{ key: string; name: string; alreadyPresent?: true }> => {
   const path = resolveJurisdictionsJsonPath();
   const root = await readRoot(path);
   const jurisdictionsValue = root['jurisdictions'];
@@ -97,8 +134,9 @@ export const persistVerifiedJurisdictionStack = async (
     !jurisdictionsValue || typeof jurisdictionsValue !== 'object' || Array.isArray(jurisdictionsValue)
   )) throw new Error('JURISDICTIONS_MAP_INVALID');
   const jurisdictions = { ...(jurisdictionsValue as Record<string, unknown> | undefined) };
-  if (Object.hasOwn(jurisdictions, request.key)) throw new Error(`STACK_MANAGER_JURISDICTION_KEY_EXISTS:${request.key}`);
-  jurisdictions[request.key] = {
+  const existing = jurisdictions[request.key];
+  if (existing && !allowIdentical) throw new Error(`STACK_MANAGER_JURISDICTION_KEY_EXISTS:${request.key}`);
+  const entry = {
     name: request.name,
     chainId: manifest.chainId,
     rpc: request.rpcUrl,
@@ -107,7 +145,7 @@ export const persistVerifiedJurisdictionStack = async (
     currency: request.currency,
     status: 'active',
     ...(request.description ? { description: request.description } : {}),
-    primary: Object.keys(jurisdictions).length === 0,
+    primary: existing ? (existing as Record<string, unknown>)['primary'] : Object.keys(jurisdictions).length === 0,
     stackVersion: manifest.stackVersion,
     entityProviderDeploymentBlock: manifest.entityProviderDeploymentBlock,
     deployer: manifest.deployer,
@@ -119,9 +157,9 @@ export const persistVerifiedJurisdictionStack = async (
       depository: manifest.contracts.depository,
       deltaTransformer: manifest.contracts.deltaTransformer,
     },
-    tokens: {
-      USDT: { symbol: 'USDT', ...manifest.registeredTokens.USDT },
-    },
+    tokens: Object.fromEntries(Object.entries(manifest.registeredTokens).map(([symbol, token]) => [
+      symbol, { symbol, ...token },
+    ])),
     evmContracts: manifest.evmContracts,
   };
   const version = String(root['version'] || '1');
@@ -136,6 +174,19 @@ export const persistVerifiedJurisdictionStack = async (
   if (announcement?.scope === 'official' && !trustedOfficialSigner) {
     throw new Error('JURISDICTIONS_OFFICIAL_FOUNDATION_SIGNER_MISSING');
   }
+  if (existing) {
+    if (safeStringify(existing) !== safeStringify(entry)) throw new Error(`STACK_MANAGER_JURISDICTION_KEY_CONFLICT:${request.key}`);
+    if (announcement) {
+      const records = root['jurisdictionAnnouncements'];
+      const hash = computeJurisdictionGossipHash(announcement);
+      if (!Array.isArray(records) || !records.some(value =>
+        computeJurisdictionGossipHash(decodeJurisdictionGossipAnnouncement(value, trustedOfficialSigner)) === hash)) {
+        throw new Error('STACK_MANAGER_JURISDICTION_PUBLICATION_CONFLICT');
+      }
+    }
+    return { key: request.key, name: request.name, alreadyPresent: true };
+  }
+  jurisdictions[request.key] = entry;
   const next = {
     ...root,
     version,

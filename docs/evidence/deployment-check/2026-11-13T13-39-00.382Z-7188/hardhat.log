@@ -1,0 +1,363 @@
+$ bun core/scripts/e2e/runners/run-with-test-cleanup.ts --reason=contracts --child-cwd=jurisdictions -- bunx hardhat test
+test artifact budget (contracts): workspace=13.45GiB budgeted=3.31GiB / 50GiB
+No contracts to compile
+
+Running Solidity tests
+
+
+Running Mocha tests
+
+
+  Depository current-debt forgiveness
+    ✔ clears only the exact FIFO cursor debt in O(1)
+    ✔ reverts the whole settlement when a third-party FIFO head blocks bilateral forgiveness (38ms)
+
+  DeltaTransformer
+    ✔ decodes swap fill ratios from uint16 calldata arguments
+    ✔ treats malformed adversarial argument blobs as empty evidence
+    ✔ requires token IDs to stay aligned one-to-one with deltas
+    ✔ reverts on out-of-bounds swap delta indices
+    ✔ settles pulls only from evidence within signed absolute deadlines
+    ✔ uses timestamp deadlines for payment secrets from arguments and on-chain reveals
+    ✔ stores the first secret reveal timestamp and treats exact retries as no-ops
+    ✔ applies mixed-side positional fill ratio arrays exactly in batch order
+    ✔ keeps proof body swaps, positional fill ratios, wrapped dispute args, and contract deltas aligned end-to-end
+
+  Depository
+    ✔ ERC20 deposit to reserve
+    ✔ ERC721 deposit to reserve
+    ✔ ERC1155 deposit to reserve
+    ✔ rejects ERC721 deposits when the registered token reports a successful no-op transfer
+    ✔ rejects ERC1155 deposits when the registered token reports a successful no-op transfer
+    ✔ reserveToReserve transfers between entities
+    ✔ reverts an underfunded R2C batch without consuming its nonce
+    ✔ reverts underfunded C2R/R2E batches and keeps signature failures fatal
+    ✔ rejects permissionless token-id allocation from the production batch path
+    ✔ accepts ERC1155 custody without allocating an unregistered token ID
+    ✔ processBatch deposits and withdraws external ERC20 reserves through the production path
+    ✔ processBatch supports no-return ERC20 tokens on deposit and withdrawal
+    ✔ uses exact balance deltas for false-return ERC20 deposits and withdrawals
+    ✔ rejects fee-on-transfer ERC20 withdrawals without reducing reserve
+    ✔ rejects zero-amount ERC721 withdrawals instead of transferring the NFT for free
+    ✔ rejects a successful no-op ERC721 withdrawal without reducing reserve
+    ✔ rejects a successful no-op ERC1155 withdrawal without reducing reserve
+    ✔ requires strictly sequential entity batch nonces and binds signatures to nonce and calldata
+    ✔ settles bilateral diffs with counterparty hanko and rejects settlement replay
+    ✔ rejects duplicate forgiveness token ids before one settlement can advance the debt cursor twice
+    ✔ rejects unsafe Account and outer batch nonces at the Solidity write boundary
+    ✔ reserves the maximum safe nonce for one unilateral finalization successor
+    ✔ reverts settlement when a reserve would exceed uint256 and leaves no partial diff
+    ✔ reverts settlement and R2C when collateral would exceed uint256
+    ✔ requires counterparty hanko for empty settlements too
+    ✔ blocks cooperative settlement and C2R while a dispute is active
+    ✔ rejects authenticated underfunded C2R above the retired 2^200 cap without mutation
+    ✔ rejects duplicate tokenIds inside one settlement diff
+    ✔ rejects oversized batches before mutating reserves or nonces
+    ✔ admits at most one defensive dispute finalization per transaction
+    ✔ rejects batches over the aggregate 50-op cap even when each array is under its own cap
+    ✔ rejects zero-value R2C before it can forge a victim AccountSettled event
+    ✔ lets only the non-starter finalize a newer jointly signed counter-proof
+    ✔ carries cooperative ondelta diffs into the next dispute exactly once (41ms)
+    ✔ binds starter initial and counter dispute arguments independently (87ms)
+    ✔ treats malformed dispute argument wrappers as empty evidence
+    ✔ never accepts starter argument blobs that cannot be repeated inside a 15M-gas finalization (106ms)
+    ✔ never accepts a signed proof body that cannot be revealed inside a 15M-gas finalization (100ms)
+    ✔ keeps the dispute active when any signed transformer cannot execute exactly (3830ms)
+    ✔ reverts caller gas starvation without consuming the active dispute (311ms)
+    ✔ rejects over-budget transformer arguments without consuming the active dispute (481ms)
+    ✔ executes a near-limit valid signed transformer batch within the 15M envelope (399ms)
+    ✔ reverts the whole signed transformer program when one clause mutates an unallowed token (250ms)
+    ✔ rejects out-of-range and duplicate transformer allowances (503ms)
+    ✔ clamps oversized and int256-min transformer outputs to signed per-token holds
+1000-swap Depository finalization gasUsed=9488104
+    ✔ finalizes 1000 swaps through Depository within the 15M gas envelope with exact allocation (284ms)
+    ✔ clamps a wide transformer output to the full uint256 allowance band
+    ✔ accepts full Int512 proof deltas and rejects values outside the ABI domain
+    ✔ executes the runtime maximum swap book inside the bounded transformer call (522ms)
+    ✔ allows a designated tower to submit a delayed last-resort counter-dispute
+
+  Depository
+    ✔ rejects watchtower counter-dispute from the wrong tower or without a newer signed proof (45ms)
+    ✔ fences watchtower appointments below watchtowerMinSequence raised by the owner board
+    ✔ waits the signed window for a newer Pull proof and settles only registry evidence (61ms)
+    ✔ locks outstanding debt before reserve outflows and pays FIFO debt in bounded chunks (54ms)
+    ✔ requires timeout for unilateral dispute finalization and bumps account nonce once
+    ✔ rejects historical cooperative signatures as a dispute bypass
+    ✔ implicit flash (a): repays an R2R overdraw from a same-batch collateral withdrawal, exactly
+    ✔ implicit flash (b): reverts E3 when the deficit is not repaid inside the batch
+    ✔ implicit flash (a'): a settlement overdraw is repaid by a later settlement in the same batch
+    ✔ implicit flash (c): an initiator with outstanding debt on the token gets no credit
+    ✔ implicit flash (d): a non-initiator reserve never goes negative, however rich the initiator
+    ✔ implicit flash (e): deposit, overdraw, repay from collateral and withdraw the external token in one batch
+    ✔ mintToReserve refuses a token id that was never listed
+    ✔ rejects non-admin use of local dev bootstrap helpers
+    ✔ keeps signed token/offdelta shape corruption fail-fast
+    ✔ never lets a tower start a dispute when no active dispute exists
+
+  Dispute entitlement: TS mirror == Depository finalization
+[entitlement] production seed=0x6b31656e7469746c cases=3072 mismatches=0 wallMs=23808 maxFinalizeGas=12844084
+[entitlement] production coverage {"at-collateral":512,"beyond-rcpan/reserve-exact":25,"beyond-rcpan/reserve-full":17,"beyond-rcpan/reserve-partial":174,"beyond-rcpan/reserve-zero":296,"inside":512,"left-debt/reserve-exact":72,"left-debt/reserve-full":79,"left-debt/reserve-partial":67,"left-debt/reserve-zero":295,"right-debt/reserve-exact":66,"right-debt/reserve-full":88,"right-debt/reserve-partial":67,"right-debt/reserve-zero":290,"zero":512}
+    ✔ settles seeded single-token states exactly as deriveDisputeTokenFinalization (23842ms)
+[entitlement] prior-debt seed=0x6b31656e7469746c cases=168 mismatches=0 wallMs=2348 maxFinalizeGas=13119730
+[entitlement] prior-debt coverage {"at-collateral":27,"beyond-rcpan/reserve-full":2,"beyond-rcpan/reserve-partial":1,"beyond-rcpan/reserve-partial/locked-tail":3,"beyond-rcpan/reserve-zero":20,"inside":29,"left-debt/reserve-full":2,"left-debt/reserve-full/locked-tail":1,"left-debt/reserve-partial":2,"left-debt/reserve-partial/locked-tail":1,"left-debt/reserve-zero":24,"left-debt/reserve-zero/locked-tail":1,"right-debt/reserve-full":1,"right-debt/reserve-partial":1,"right-debt/reserve-zero":24,"zero":29}
+    ✔ sweeps prior FIFO debt before the shortfall, then settles as the mirror says (2378ms)
+
+  dispute hash Solidity↔TS vector
+    ✔ matches watchtower encodeDisputeHash packing for empty and non-empty args
+
+  dispute ondelta liveness
+    ✔ caps a reserve at uint256 max and reverts overflow before mutating state
+    ✔ finalizes exactly when ondelta and offdelta both sit at the MAX_MONEY bound
+    ✔ settles a large signed offdelta and rejects values outside Int512
+    ✔ finalizes every dispute with exact debt independent of token supply (62ms)
+    ✔ rejects zero supply and accepts a full uint256 fixed supply at token registration
+    ✔ finalizes an adversarial unknown-token proof as exact internal debt
+    ✔ finalizes after a registered token becomes gas-burning
+    ✔ finalizes after a registered token becomes returndata-bomb
+
+  signed term claims on the production Depository
+    ✔ recovers savings with the debtor offline: left=true, elapsed=0, debtorCapital=0, partial=false (47ms)
+    ✔ recovers savings with the debtor offline: left=true, elapsed=0, debtorCapital=10000, partial=false (42ms)
+    ✔ recovers savings with the debtor offline: left=true, elapsed=43200000, debtorCapital=0, partial=false (48ms)
+    ✔ recovers savings with the debtor offline: left=true, elapsed=43200000, debtorCapital=10000, partial=false (44ms)
+    ✔ recovers savings with the debtor offline: left=true, elapsed=86400000, debtorCapital=0, partial=false (41ms)
+    ✔ recovers savings with the debtor offline: left=true, elapsed=86400000, debtorCapital=10000, partial=false (43ms)
+    ✔ recovers savings with the debtor offline: left=true, elapsed=172800000, debtorCapital=0, partial=false (42ms)
+    ✔ recovers savings with the debtor offline: left=true, elapsed=172800000, debtorCapital=10000, partial=false (42ms)
+    ✔ recovers savings with the debtor offline: left=true, elapsed=259200000, debtorCapital=0, partial=false (42ms)
+    ✔ recovers savings with the debtor offline: left=true, elapsed=259200000, debtorCapital=10000, partial=false (42ms)
+    ✔ recovers savings with the debtor offline: left=false, elapsed=0, debtorCapital=0, partial=false (41ms)
+    ✔ recovers savings with the debtor offline: left=false, elapsed=0, debtorCapital=10000, partial=false (42ms)
+    ✔ recovers savings with the debtor offline: left=false, elapsed=43200000, debtorCapital=0, partial=false (40ms)
+    ✔ recovers savings with the debtor offline: left=false, elapsed=43200000, debtorCapital=10000, partial=false (42ms)
+    ✔ recovers savings with the debtor offline: left=false, elapsed=86400000, debtorCapital=0, partial=false (44ms)
+    ✔ recovers savings with the debtor offline: left=false, elapsed=86400000, debtorCapital=10000, partial=false (44ms)
+    ✔ recovers savings with the debtor offline: left=false, elapsed=172800000, debtorCapital=0, partial=false (45ms)
+    ✔ recovers savings with the debtor offline: left=false, elapsed=172800000, debtorCapital=10000, partial=false (43ms)
+    ✔ recovers savings with the debtor offline: left=false, elapsed=259200000, debtorCapital=0, partial=false (42ms)
+    ✔ recovers savings with the debtor offline: left=false, elapsed=259200000, debtorCapital=10000, partial=false (44ms)
+    ✔ recovers loan with the debtor offline: left=true, elapsed=0, debtorCapital=0, partial=false (44ms)
+    ✔ recovers loan with the debtor offline: left=true, elapsed=0, debtorCapital=10000, partial=false (46ms)
+    ✔ recovers loan with the debtor offline: left=true, elapsed=43200000, debtorCapital=0, partial=false (44ms)
+    ✔ recovers loan with the debtor offline: left=true, elapsed=43200000, debtorCapital=0, partial=true (50ms)
+    ✔ recovers loan with the debtor offline: left=true, elapsed=43200000, debtorCapital=10000, partial=false (43ms)
+    ✔ recovers loan with the debtor offline: left=true, elapsed=43200000, debtorCapital=10000, partial=true (43ms)
+    ✔ recovers loan with the debtor offline: left=true, elapsed=86400000, debtorCapital=0, partial=false (42ms)
+    ✔ recovers loan with the debtor offline: left=true, elapsed=86400000, debtorCapital=0, partial=true (42ms)
+    ✔ recovers loan with the debtor offline: left=true, elapsed=86400000, debtorCapital=10000, partial=false (42ms)
+    ✔ recovers loan with the debtor offline: left=true, elapsed=86400000, debtorCapital=10000, partial=true (45ms)
+    ✔ recovers loan with the debtor offline: left=true, elapsed=172800000, debtorCapital=0, partial=false (43ms)
+    ✔ recovers loan with the debtor offline: left=true, elapsed=172800000, debtorCapital=0, partial=true (42ms)
+    ✔ recovers loan with the debtor offline: left=true, elapsed=172800000, debtorCapital=10000, partial=false (42ms)
+    ✔ recovers loan with the debtor offline: left=true, elapsed=172800000, debtorCapital=10000, partial=true (43ms)
+    ✔ recovers loan with the debtor offline: left=true, elapsed=259200000, debtorCapital=0, partial=false (43ms)
+    ✔ recovers loan with the debtor offline: left=true, elapsed=259200000, debtorCapital=0, partial=true (44ms)
+    ✔ recovers loan with the debtor offline: left=true, elapsed=259200000, debtorCapital=10000, partial=false (44ms)
+    ✔ recovers loan with the debtor offline: left=true, elapsed=259200000, debtorCapital=10000, partial=true (43ms)
+    ✔ recovers loan with the debtor offline: left=false, elapsed=0, debtorCapital=0, partial=false (41ms)
+    ✔ recovers loan with the debtor offline: left=false, elapsed=0, debtorCapital=10000, partial=false (43ms)
+    ✔ recovers loan with the debtor offline: left=false, elapsed=43200000, debtorCapital=0, partial=false (42ms)
+    ✔ recovers loan with the debtor offline: left=false, elapsed=43200000, debtorCapital=0, partial=true (41ms)
+    ✔ recovers loan with the debtor offline: left=false, elapsed=43200000, debtorCapital=10000, partial=false (43ms)
+    ✔ recovers loan with the debtor offline: left=false, elapsed=43200000, debtorCapital=10000, partial=true (46ms)
+    ✔ recovers loan with the debtor offline: left=false, elapsed=86400000, debtorCapital=0, partial=false (44ms)
+    ✔ recovers loan with the debtor offline: left=false, elapsed=86400000, debtorCapital=0, partial=true (44ms)
+    ✔ recovers loan with the debtor offline: left=false, elapsed=86400000, debtorCapital=10000, partial=false (45ms)
+    ✔ recovers loan with the debtor offline: left=false, elapsed=86400000, debtorCapital=10000, partial=true (45ms)
+    ✔ recovers loan with the debtor offline: left=false, elapsed=172800000, debtorCapital=0, partial=false (45ms)
+    ✔ recovers loan with the debtor offline: left=false, elapsed=172800000, debtorCapital=0, partial=true (43ms)
+    ✔ recovers loan with the debtor offline: left=false, elapsed=172800000, debtorCapital=10000, partial=false (44ms)
+    ✔ recovers loan with the debtor offline: left=false, elapsed=172800000, debtorCapital=10000, partial=true (44ms)
+    ✔ recovers loan with the debtor offline: left=false, elapsed=259200000, debtorCapital=0, partial=false (42ms)
+    ✔ recovers loan with the debtor offline: left=false, elapsed=259200000, debtorCapital=0, partial=true (43ms)
+    ✔ recovers loan with the debtor offline: left=false, elapsed=259200000, debtorCapital=10000, partial=false (53ms)
+    ✔ recovers loan with the debtor offline: left=false, elapsed=259200000, debtorCapital=10000, partial=true (48ms)
+    ✔ recovers demand with the debtor offline: left=true, elapsed=15768000000, debtorCapital=0, partial=false (45ms)
+    ✔ recovers demand with the debtor offline: left=true, elapsed=15768000000, debtorCapital=10000, partial=false (46ms)
+    ✔ recovers demand with the debtor offline: left=false, elapsed=15768000000, debtorCapital=0, partial=false (45ms)
+    ✔ recovers demand with the debtor offline: left=false, elapsed=15768000000, debtorCapital=10000, partial=false (46ms)
+SAVINGS_FINALIZATION_MAX_GAS=440185
+
+  DeltaTransformer secret reveal liveness
+    ✔ treats an exact repeated reveal as an idempotent no-op
+
+  settlement finality events
+    ✔ emits AccountSettled for a successful pure-forgiveness settlement
+
+  EntityProvider settled CONTROL governance
+    ✔ binds one Depository and releases CONTROL only into that custody (39ms)
+    ✔ lets a current Entity Hanko backed by more than 50% settled CONTROL schedule rotation (39ms)
+    ✔ rejects exactly 50%, duplicate/unsorted supporters, and an unbacked Entity (87ms)
+    ✔ rejects a retired shareholder board even during historical-proof grace (43ms)
+    ✔ binds proposal signatures to provider, epoch and nonce (75ms)
+    ✔ keeps BOARD authority current-only and activation permissionless (41ms)
+
+  EntityProvider board rotation grace
+    ✔ accepts only current and immediate previous board, with an exact seven-day boundary
+    ✔ cannot evict a retired board before its exact grace boundary (two historical slots)
+    ✔ applies current-only rotation authority to every registered claim in a recursive Hanko
+    ✔ rejects a previous-board processBatch during the historical-proof grace window
+    ✔ rejects previous-board money actions but accepts its signed dispute proof (89ms)
+    ✔ rejects previous-board watchtower authority while accepting the current board (51ms)
+
+  Entity Control-Shares System
+    Entity Registration with Automatic Governance
+      ✔ Should register entity with control and dividend tokens
+      ✔ Should track governance info correctly
+    Control Shares Release
+      ✔ Should reject release without valid signature
+      ✔ Should reject release with zero amounts
+      ✔ Should reject release to zero address
+      ✔ Should reject release for non-existent entity
+
+  EntityProvider with Automatic Governance
+    Foundation Setup
+      ✔ rejects a zero foundation recipient
+      ✔ Should deploy with foundation entity #1 with governance
+      ✔ Should authorize foundation functions with the current Foundation Hanko
+      ✔ exposes no name registry (names are a relay/UI concern)
+    Automatic Entity Registration
+      ✔ Should register new numbered entity with automatic governance
+      ✔ Should allow foundation to create entity with custom governance
+    Token ID System
+      ✔ Should generate correct token IDs using first bit flip
+    ERC1155 Token Transfers
+      ✔ Should support ERC1155 transfers
+      ✔ Should support ERC1155 batch transfers
+      ✔ Should support ERC1155 approvals
+    Governance Information
+      ✔ Should track governance info correctly
+    Foundation Access Control
+      ✔ Should reject calls without a valid current Foundation Hanko
+    Entity Hanko Verification
+      ✔ Should verify a canonical Hanko for a registered entity
+
+  Foundation authority
+    ✔ assigns stable token IDs only through a Foundation listing
+    ✔ does not turn minority Foundation control ownership into admin authority
+
+  Hanko Authorization
+    ✔ processBatch rejects invalid Hanko
+    ✔ bounds Hanko bytes and aggregate entity slots before quadratic verification
+    ✔ processBatch accepts a correctly signed single-signer reserve transfer
+    ✔ processBatch rejects high-s malleable Hanko signatures
+    ✔ rejects Hanko claim weights that would truncate below the board hash width
+    ✔ rejects one recovered EOA repeated across signature slots
+    ✔ rejects one signature slot repeated inside a board claim
+    ✔ rejects duplicate board members reached through distinct placeholder slots
+    ✔ keeps a legitimate distinct quorum valid when signature and board order differ
+    ✔ accepts reordered recovered signer slots when indexes reconstruct the exact board
+    ✔ accepts reordered placeholder slots when indexes reconstruct the exact board
+    ✔ rejects unused signature, placeholder, and sibling-claim proof material
+    ✔ accepts a raw 65-byte signature as the signer's own lazy 1-of-1 entity
+    ✔ rejects malformed raw signatures: high-s and bad v fail softly, wrong lengths do not decode
+    ✔ binds all three Board delays into the lazy Entity id
+    ✔ rejects an Entity claim as the default proposer at member zero
+    ✔ verifies an EOA-anchored parent from an already-verified child claim
+    ✔ binds every registered child claim to its on-chain board
+    ✔ rejects self and future claim references
+    ✔ rejects duplicate claim Entity ids
+    ✔ canonical Hanko verification uses the current board of a registered entity
+    ✔ binds a shared board independently to every registered entity id
+    ✔ does not expose unsafeProcessBatch
+
+  HankoVerifier: ERC-1271 contract members (single 4-field envelope)
+    ✔ lets one contract member reach threshold through memberSignatures
+    ✔ keeps the same member a zero-power placeholder when no member signature is supplied
+    ✔ fails softly for a reverting, rejecting, or code-less member
+    ✔ accepts only the 4-field envelope: 3-field, tagged, empty and misaligned encodings fail
+    ✔ still rejects a placeholder that equals a recovered signer
+    ✔ caps contract members per proof at 8
+    ✔ authorizes a registered entity action with a contract-member board
+
+  canonical on-chain Hanko domains
+    ✔ matches independent fixed bytes and hashes for every Hanko codec (39ms)
+    ✔ matches canonical TS bytes and hashes for every contract Hanko payload
+    ✔ executes entityTransferTokens and rejects replay, wrong-chain, and wrong-provider signatures
+    ✔ publishes one exact action receipt identity for deterministic reconciliation
+    ✔ keeps transfer and release in one replay-protected action nonce lane
+    ✔ lets quorum cancel one exact pending action nonce and makes execute/cancel mutually exclusive
+    ✔ executes releaseControlShares and rejects replay, wrong-chain, and wrong-provider signatures
+
+  EntityProvider deploy-once redesign
+    board validation (commitBoard)
+      ✔ rejects unreachable, zero-weight, duplicate, oversized and numbered-slot-0 boards (126ms)
+    registration and proposals
+      ✔ registers a multi-member board and gates proposeBoard on committed preimages
+    seconds-based delays
+      ✔ activates only once block.timestamp reaches activateAt
+      ✔ installs 1 day / 3 days / 10 days default articles on plain registration
+    two historical board slots
+      ✔ rotates twice back-to-back, blocks a third inside grace, keeps retired evidence authority
+    entity treasuries
+      ✔ mints shares to entityTreasury(N) and moves them only through entityTransferTokens
+    Foundation token listing
+      ✔ lists an ERC20 through foundationRegisterExternalToken and rejects direct listing
+    share depositories
+      ✔ appends a second Depository by Foundation Hanko and rejects foreign stacks (47ms)
+    DIVIDEND lane checkpoints
+      ✔ reads dividend balances one second back and exposes dividendBalanceAt
+      ✔ lets a numbered entity vote its treasury dividend shares through a current-board Hanko
+
+  Foundation release Hanko parity
+    ✔ verifies the exact 2-of-3 release Hanko in EntityProvider.sol
+
+  EP multisig company with onchain shares
+XLNC_COMPANY_GAS registration=246804 allocation=198077 limit=6000000
+    ✔ creates a 2-of-3 company and distributes shares only with its quorum, within the XLNC transaction budget
+
+  canonical transformer secret reveal
+    ✔ records a reveal through the canonical transformer
+    ✔ rejects a reveal routed to a foreign transformer with the same ABI
+    ✔ rejects a zero transformer address
+
+  EIP-170 production contract sizes
+    ✔ Account deployed bytecode stays within 24,576 bytes
+    ✔ Depository deployed bytecode stays within 24,576 bytes
+    ✔ EntityProvider deployed bytecode stays within 24,576 bytes
+
+  HashLadder
+    ✔ builds the full-fill hash and four-nibble partial root
+    ✔ verifies a partial fill from nibble reveal nodes
+    ✔ uses the one-hash full-fill fast path for 0xffff
+    ✔ treats nibble index 0 as the most significant hex digit
+
+  HashLadderRegistry (cross-j pull settlement authority)
+    ✔ ports a beneficiary-signed Target witness independently of the batch nonce
+    ✔ absolute deadline: asymmetric starts cannot refund Target before Source witness arrives (116ms)
+    ✔ pending Target batch ACK at 1297 cannot delay the port past D_target=1233 (113ms)
+    ✔ absolute deadline: finalization waits strictly beyond D when T expired (38ms)
+    ✔ absolute deadline: D+0 settlement boundary
+    ✔ absolute deadline: D+1 settlement boundary
+    ✔ absolute deadline: Target retry preserves timely evidence after D (40ms)
+    ✔ settles a partial fill from a verified registry record and emits the portable material (39ms)
+    ✔ settles a full fill from the one-hash full-secret fast path (39ms)
+    ✔ reverts registration on an unverifiable ratio, an off-by-one ratio, and a zero ratio
+    ✔ authenticates only the batch writer; routing metadata cannot write another entity record (39ms)
+    ✔ a pre-dispute Source write in a different pair cannot authorize this Pull (38ms)
+    ✔ single-shot: a higher ratio overwrite on the same ladder reverts
+    ✔ target conflicting retry after D cannot erase timely evidence (43ms)
+    ✔ absolute deadline: accepts pre-dispute evidence, target=false (39ms)
+    ✔ absolute deadline: accepts pre-dispute evidence, target=true
+    ✔ source exact retry preserves its timely record after the response window (44ms)
+    ✔ target same-ratio late redelivery preserves timely settlement (39ms)
+    ✔ reads a missing record as a zero fill and releases the payer collateral
+    ✔ cross-j residual model: reveal leg settles, silent sibling leg settles 0 (71ms)
+    ✔ a late first Source record is inert at settlement (38ms)
+    ✔ accepts a first Source registration at the inclusive absolute deadline
+    ✔ accepts Source registration in the exact batch and block that starts its dispute
+    ✔ settles a target registration immediately after its dispute starts
+    ✔ publishes target evidence independently before its dispute starts
+    ✔ blocks early finalization on both the timeout path and the counterparty-signed path (58ms)
+    ✔ orders mutually signed same-nonce branches by LEFT proposer (46ms)
+    ✔ rejects a RIGHT same-nonce branch when the initial proposer was LEFT
+    ✔ counts a registration written inside this dispute window (38ms)
+    ✔ applies one dispute-T barrier to every pull in the proofbody (48ms)
+    ✔ matches floor(amount * ratio / 65535) dust semantics exactly (38ms)
+    ✔ cannot claim twice: a second finalization of the same dispute reverts (43ms)
+
+
+  274 passing (40s)
+
+
+274 passing (274 mocha)

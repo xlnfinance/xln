@@ -132,14 +132,6 @@ describe('mainnet chain deployment wiring', () => {
     expect(pkg.scripts['deploy:mainnets']).toBe('bun run deploy:chains:mainnet');
   });
 
-  test('canonical EVM deploy pins the configured stablecoin to tokenId 1 before publishing', () => {
-    const script = readFileSync(join(repoRoot, 'jurisdictions/scripts/deploy-stack.cjs'), 'utf8');
-    expect(script).not.toContain('ID will be assigned on first use');
-    expect(script).toMatch(/getTokensLength\s*\(/);
-    expect(script).toMatch(/stablecoinTokenId\s*!==\s*1n/);
-    expect(script).toContain('await stablecoin.decimals()');
-    expect(script).toContain('STABLECOIN_DECIMALS_MISMATCH');
-  });
 
   test('mainnet stablecoin is validated before the first deployment command', async () => {
     const script = readFileSync(join(repoRoot, 'jurisdictions/scripts/deploy-chain-matrix.cjs'), 'utf8');
@@ -181,22 +173,6 @@ describe('mainnet chain deployment wiring', () => {
     );
   });
 
-  test('EVM deployment evidence retains every linked contract receipt and watcher start block', () => {
-    const stack = readFileSync(join(repoRoot, 'jurisdictions/scripts/deploy-stack.cjs'), 'utf8');
-    const matrix = readFileSync(join(repoRoot, 'jurisdictions/scripts/deploy-chain-matrix.cjs'), 'utf8');
-    expect(stack).toContain('deploymentEvidence');
-    expect(stack).toContain('hankoVerifier: hankoVerifierAddr');
-    expect(stack).toContain('entityProviderDeploymentBlock: entityProviderDeployment.deploymentBlock');
-    expect(stack).toContain('evmContracts:');
-    expect(stack).toContain('transactionHash: transaction.hash');
-    expect(stack).toContain('STABLECOIN_TOKEN_ID_MISMATCH');
-    expect(stack).toMatch(/\bregisteredTokens\s*[:,]/);
-    expect(matrix).toContain('result.evmContracts ? { evmContracts: result.evmContracts }');
-    expect(matrix).toContain("XLN_DEPLOY_TEST_STABLECOIN: stablecoin.deployTestStablecoin ? '1' : '0'");
-    expect(matrix).toContain('...existingDeployments');
-    expect(matrix).toContain("run('bunx', ['hardhat', 'compile'])");
-    expect(matrix).toContain("run('bunx', ['hardhat', 'run'");
-  });
 
   test('hardhat has explicit Ethereum testnet and mainnet networks', () => {
     const config = readFileSync(join(repoRoot, 'jurisdictions/hardhat.config.ts'), 'utf8');

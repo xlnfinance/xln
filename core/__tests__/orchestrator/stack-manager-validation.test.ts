@@ -56,6 +56,7 @@ const request = () => ({
 });
 
 const manifest = () => ({
+  deploymentId: 'validation-attempt',
   stackVersion: 'V1',
   network: 'stack-manager',
   chainId: 42161,
@@ -70,6 +71,8 @@ const manifest = () => ({
       deploymentBlock: index + 1,
       transactionHash: transactionHash((index + 1).toString(16)),
     }])),
+    deltaTransformerBinding: { transactionHash: transactionHash('b'), blockNumber: 8 },
+    shareDepositoryBinding: { transactionHash: transactionHash('c'), blockNumber: 9 },
     stablecoinRegistration: { transactionHash: transactionHash('a'), blockNumber: 9 },
   },
   registeredTokens: { USDT: { address: address('a'), tokenId: 1, decimals: 6 } },
@@ -92,7 +95,7 @@ const announcement = () => {
     foundationRecipient: decodedManifest.foundationRecipient,
     entityProviderDeploymentBlock: decodedManifest.entityProviderDeploymentBlock,
     contracts: decodedManifest.contracts,
-    stablecoin: { symbol: 'USDT', ...decodedManifest.registeredTokens.USDT },
+    stablecoin: { symbol: 'USDT', ...decodedManifest.registeredTokens['USDT']! },
   }, getBytes(signerPrivateKey));
 };
 
@@ -112,7 +115,7 @@ describe('Stack Manager exact boundaries', () => {
     expect(decodeDeployJurisdictionStackRequest({
       ...request(),
       expectedChainId: 31_337,
-    }).confirmations).toBe(1);
+    }).confirmations).toBe(12);
   });
 
   test('rejects private-key laundering and unknown compatibility fields', () => {
@@ -130,13 +133,34 @@ describe('Stack Manager exact boundaries', () => {
     })).toThrow('STACK_MANAGER_RPC_URL_CREDENTIALS_FORBIDDEN');
     expect(() => decodeDeployJurisdictionStackRequest({ ...request(), rpcUrl: 'file:///etc/passwd' }))
       .toThrow('STACK_MANAGER_RPC_URL_PROTOCOL_INVALID');
+    for (const rpcUrl of [
+      'https://eth-sepolia.g.alchemy.com/v2/EXAMPLE_API_KEY',
+      'https://sepolia.infura.io/v3/EXAMPLE_API_KEY',
+      'https://arb.example/rpc?apiKey=EXAMPLE_API_KEY',
+      'https://arb.example/rpc?api_key=EXAMPLE_API_KEY',
+      'https://arb.example/rpc?TOKEN=EXAMPLE_TOKEN',
+      'https://arb.example/rpc?access-token=EXAMPLE_TOKEN',
+    ]) {
+      expect(() => decodeDeployJurisdictionStackRequest({ ...request(), rpcUrl }))
+        .toThrow('STACK_MANAGER_RPC_URL_CREDENTIALS_FORBIDDEN');
+    }
+  });
+
+  test('keeps unauthenticated public and local RPC catalog inputs intact', () => {
+    for (const rpcUrl of [
+      'https://ethereum-sepolia-rpc.publicnode.com',
+      'https://sepolia-rollup.arbitrum.io/rpc',
+      'http://127.0.0.1:8545',
+    ]) {
+      expect(decodeDeployJurisdictionStackRequest({ ...request(), rpcUrl }).rpcUrl).toBe(rpcUrl);
+    }
   });
 
   test('decodes exact manifest evidence without trusting generic JSON', () => {
     const decoded = decodeJurisdictionStackManifest(manifest());
     expect(decoded.stackVersion).toBe('V1');
     expect(decoded.evmContracts.entityProvider.deploymentBlock).toBe(6);
-    expect(decoded.registeredTokens.USDT.tokenId).toBe(1);
+    expect(decoded.registeredTokens['USDT']!.tokenId).toBe(1);
   });
 
   test('rejects incomplete or extended deployment evidence', () => {
@@ -163,14 +187,14 @@ describe('Stack Manager exact boundaries', () => {
     const canonical = {
       from: decoded.deployer,
       to: decoded.contracts.entityProvider,
-      data: listing(decoded.contracts.depository, decoded.registeredTokens.USDT.address),
+      data: listing(decoded.contracts.depository, decoded.registeredTokens['USDT']!.address),
     };
     expect(() => assertCanonicalStablecoinRegistration(canonical, decoded)).not.toThrow();
-    // Hanko bytes and Foundation action nonce vary per deployment; only the arguments are pinned.
+    // A second action cannot certify the first listing at genesis.
     expect(() => assertCanonicalStablecoinRegistration({
       ...canonical,
-      data: listing(decoded.contracts.depository, decoded.registeredTokens.USDT.address, `0x${'cd'.repeat(65)}`, 7n),
-    }, decoded)).not.toThrow();
+      data: listing(decoded.contracts.depository, decoded.registeredTokens['USDT']!.address, `0x${'cd'.repeat(65)}`, 7n),
+    }, decoded)).toThrow('STACK_MANAGER_STABLECOIN_REGISTRATION_CALLDATA_MISMATCH');
     expect(() => assertCanonicalStablecoinRegistration({ ...canonical, from: foundation }, decoded))
       .toThrow('STACK_MANAGER_STABLECOIN_REGISTRATION_SENDER_MISMATCH');
     expect(() => assertCanonicalStablecoinRegistration({ ...canonical, to: decoded.contracts.depository }, decoded))
@@ -181,12 +205,12 @@ describe('Stack Manager exact boundaries', () => {
     }, decoded)).toThrow('STACK_MANAGER_STABLECOIN_REGISTRATION_CALLDATA_MISMATCH');
     expect(() => assertCanonicalStablecoinRegistration({
       ...canonical,
-      data: listing(decoded.contracts.account, decoded.registeredTokens.USDT.address),
+      data: listing(decoded.contracts.account, decoded.registeredTokens['USDT']!.address),
     }, decoded)).toThrow('STACK_MANAGER_STABLECOIN_REGISTRATION_CALLDATA_MISMATCH');
     // The retired direct Depository listing is no longer canonical.
     expect(() => assertCanonicalStablecoinRegistration({
       ...canonical,
-      data: codec.encodeFunctionData('registerExternalToken', [0, decoded.registeredTokens.USDT.address, 0]),
+      data: codec.encodeFunctionData('registerExternalToken', [0, decoded.registeredTokens['USDT']!.address, 0]),
     }, decoded)).toThrow('STACK_MANAGER_STABLECOIN_REGISTRATION_CALLDATA_MISMATCH');
   });
 
@@ -254,7 +278,7 @@ describe('Stack Manager exact boundaries', () => {
       publication: 'official',
     });
     await expect(deployJurisdictionStack(officialRequest, {
-      signerPrivateKey: getBytes(signerPrivateKey),
+      deploymentId: 'validation-attempt', mode: 'new', signerPrivateKey: getBytes(signerPrivateKey),
     })).rejects.toThrow('FOUNDATION_PUBLICATION_AUTHORITY_UNAVAILABLE');
   });
 
@@ -307,7 +331,7 @@ describe('Stack Manager exact boundaries', () => {
         foundationRecipient: foundation,
         stablecoinAddress: '',
         deployTestStablecoin: true,
-        outputPath: '/tmp/manifest.json',
+        outputPath: '/tmp/manifest.json', deploymentId: 'validation-attempt', mode: 'new',
       });
       expect(env['XLN_STACK_MANAGER_CANARY_SECRET']).toBeUndefined();
       expect(env['DEPLOYER_PRIVATE_KEY']).toBe(`0x${'11'.repeat(32)}`);

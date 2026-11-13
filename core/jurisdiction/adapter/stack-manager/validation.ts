@@ -1,8 +1,4 @@
-/**
- * Exact decoders for Stack Manager operator input and Hardhat deployment output.
- * They prevent untrusted HTTP/subprocess JSON from minting deployment authority
- * through a generic cast. [96/100]
- */
+/** Exact decoders for Stack Manager input and deployment evidence. */
 
 import { getAddress, isAddress } from 'ethers';
 import { normalizeJurisdictionKey } from '../../../jurisdiction/machine/config/jurisdiction-key';
@@ -12,17 +8,13 @@ import {
   type JurisdictionStackManifest,
   type StackContractDeployment,
   type StackContractName,
+  type StackStablecoin,
+  type StackDeploymentExecution,
 } from './types';
 
 const CONTRACT_NAMES = [
-  'account',
-  'depositoryBounds',
-  'hashLadderRegistry',
-  'nftCustody',
-  'hankoVerifier',
-  'entityProvider',
-  'depository',
-  'deltaTransformer',
+  'account', 'depositoryBounds', 'hashLadderRegistry', 'nftCustody',
+  'hankoVerifier', 'entityProvider', 'depository', 'deltaTransformer',
 ] as const satisfies readonly StackContractName[];
 
 const record = (value: unknown, code: string): Record<string, unknown> => {
@@ -58,16 +50,38 @@ const address = (value: unknown, code: string): string => {
   return getAddress(raw);
 };
 
-const rpcUrl = (value: unknown): string => {
+export const decodeStackManagerRpcUrl = (value: unknown): string => {
   const raw = nonEmpty(value, 'STACK_MANAGER_RPC_URL_REQUIRED');
   const parsed = new URL(raw);
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new Error('STACK_MANAGER_RPC_URL_PROTOCOL_INVALID');
   }
-  if (parsed.username || parsed.password) {
+  // RPC inputs become public catalog entries. Reject recognizable auth instead
+  // of persisting an Alchemy/Infura path key or a query token after deployment.
+  // Opaque custom paths cannot establish that a URL is credential-free; the
+  // operator must supply an unauthenticated public endpoint.
+  const credentialQueryNames = new Set(['apikey', 'token', 'accesstoken', 'authorization',
+    'auth', 'password', 'secret', 'key', 'projectid', 'projectsecret', 'subscriptionkey']);
+  const credentialQuery = [...parsed.searchParams.keys()]
+    .some(name => credentialQueryNames.has(name.toLowerCase().replace(/[-_]/g, '')));
+  const providerPathKey = (parsed.hostname.endsWith('.alchemy.com') && /^\/v2\/[^/]+/.test(parsed.pathname))
+    || (parsed.hostname.endsWith('.infura.io') && /^\/v3\/[^/]+/.test(parsed.pathname));
+  if (parsed.username || parsed.password || credentialQuery || providerPathKey) {
     throw new Error('STACK_MANAGER_RPC_URL_CREDENTIALS_FORBIDDEN');
   }
   return raw;
+};
+
+export const decodeStackDeploymentExecution = (value: unknown): StackDeploymentExecution => {
+  const input = record(value, 'STACK_MANAGER_EXECUTION_INVALID');
+  exactKeys(input, ['deploymentId', 'mode'], [], 'STACK_MANAGER_EXECUTION_KEYS_INVALID');
+  const deploymentId = input['deploymentId'];
+  if (typeof deploymentId !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/.test(deploymentId)) {
+    throw new Error('STACK_MANAGER_DEPLOYMENT_ID_INVALID');
+  }
+  const mode = input['mode'];
+  if (mode !== 'new' && mode !== 'resume') throw new Error('STACK_MANAGER_DEPLOYMENT_MODE_INVALID');
+  return { deploymentId, mode };
 };
 
 export const decodeDeployJurisdictionStackRequest = (
@@ -117,12 +131,13 @@ export const decodeDeployJurisdictionStackRequest = (
     throw new Error('STACK_MANAGER_PUBLICATION_INVALID');
   }
   const confirmations = input['confirmations'] === undefined
-    ? (expectedChainId === 31_337 || expectedChainId === 1_337 ? 1 : 12)
+    ? 12
     : safePositiveInteger(input['confirmations'], 'STACK_MANAGER_CONFIRMATIONS_INVALID');
+  if (confirmations < 12) throw new Error('STACK_MANAGER_CONFIRMATIONS_BELOW_ADMISSION_MINIMUM');
   return {
     name,
     key,
-    rpcUrl: rpcUrl(input['rpcUrl']),
+    rpcUrl: decodeStackManagerRpcUrl(input['rpcUrl']),
     expectedChainId,
     blockTimeMs,
     currency,
@@ -156,11 +171,32 @@ const decodeDeployment = (value: unknown, name: string): StackContractDeployment
   };
 };
 
+export const decodeRegisteredStackStablecoin = (value: unknown): StackStablecoin => {
+  const tokens = record(value, 'STACK_MANAGER_TOKENS_INVALID');
+  const [entry, ...remaining] = Object.entries(tokens);
+  if (!entry || remaining.length !== 0) throw new Error('STACK_MANAGER_TOKEN_KEYS_INVALID');
+  const [symbol, tokenValue] = entry;
+  if (!symbol.trim() || symbol !== symbol.trim() || new TextEncoder().encode(symbol).byteLength > 32) {
+    throw new Error('STACK_MANAGER_STABLECOIN_SYMBOL_INVALID');
+  }
+  const token = record(tokenValue, 'STACK_MANAGER_STABLECOIN_INVALID');
+  exactKeys(token, ['address', 'tokenId', 'decimals'], [], 'STACK_MANAGER_STABLECOIN_KEYS_INVALID');
+  if (token['tokenId'] !== 1 || token['decimals'] !== 6) {
+    throw new Error('STACK_MANAGER_STABLECOIN_CANONICAL_INVALID');
+  }
+  return {
+    symbol,
+    address: address(token['address'], 'STACK_MANAGER_STABLECOIN_ADDRESS_INVALID'),
+    tokenId: 1,
+    decimals: 6,
+  };
+};
+
 export const decodeJurisdictionStackManifest = (value: unknown): JurisdictionStackManifest => {
   const manifest = record(value, 'STACK_MANAGER_MANIFEST_INVALID');
   exactKeys(manifest, [
     'stackVersion', 'network', 'chainId', 'deployer', 'foundationRecipient',
-    'entityProviderDeploymentBlock', 'contracts', 'evmContracts', 'registeredTokens',
+    'entityProviderDeploymentBlock', 'contracts', 'evmContracts', 'registeredTokens', 'deploymentId',
   ], [], 'STACK_MANAGER_MANIFEST_KEYS_INVALID');
   if (manifest['stackVersion'] !== JURISDICTION_STACK_VERSION) {
     throw new Error('STACK_MANAGER_VERSION_INVALID');
@@ -170,7 +206,7 @@ export const decodeJurisdictionStackManifest = (value: unknown): JurisdictionSta
   exactKeys(contractsInput, CONTRACT_NAMES, [], 'STACK_MANAGER_CONTRACT_KEYS_INVALID');
   exactKeys(
     deploymentsInput,
-    [...CONTRACT_NAMES, 'stablecoinRegistration'],
+    [...CONTRACT_NAMES, 'stablecoinRegistration', 'deltaTransformerBinding', 'shareDepositoryBinding'],
     ['stablecoin'],
     'STACK_MANAGER_DEPLOYMENT_KEYS_INVALID',
   );
@@ -187,10 +223,7 @@ export const decodeJurisdictionStackManifest = (value: unknown): JurisdictionSta
       throw new Error(`STACK_MANAGER_CONTRACT_DEPLOYMENT_ADDRESS_MISMATCH:${name}`);
     }
   }
-  const registeredTokens = record(manifest['registeredTokens'], 'STACK_MANAGER_TOKENS_INVALID');
-  exactKeys(registeredTokens, ['USDT'], [], 'STACK_MANAGER_TOKEN_KEYS_INVALID');
-  const usdt = record(registeredTokens['USDT'], 'STACK_MANAGER_USDT_INVALID');
-  exactKeys(usdt, ['address', 'tokenId', 'decimals'], [], 'STACK_MANAGER_USDT_KEYS_INVALID');
+  const stablecoin = decodeRegisteredStackStablecoin(manifest['registeredTokens']);
   const stablecoinRegistration = record(
     deploymentsInput['stablecoinRegistration'],
     'STACK_MANAGER_STABLECOIN_REGISTRATION_INVALID',
@@ -211,7 +244,6 @@ export const decodeJurisdictionStackManifest = (value: unknown): JurisdictionSta
   const stablecoinDeployment = deploymentsInput['stablecoin'] === undefined
     ? undefined
     : decodeDeployment(deploymentsInput['stablecoin'], 'stablecoin');
-  if (usdt['tokenId'] !== 1 || usdt['decimals'] !== 6) throw new Error('STACK_MANAGER_USDT_CANONICAL_INVALID');
   const entityProviderDeploymentBlock = safePositiveInteger(
     manifest['entityProviderDeploymentBlock'],
     'STACK_MANAGER_ENTITY_PROVIDER_BLOCK_INVALID',
@@ -226,6 +258,7 @@ export const decodeJurisdictionStackManifest = (value: unknown): JurisdictionSta
     );
   }
   return {
+    deploymentId: decodeStackDeploymentExecution({ deploymentId: manifest['deploymentId'], mode: 'new' }).deploymentId,
     stackVersion: JURISDICTION_STACK_VERSION,
     network: nonEmpty(manifest['network'], 'STACK_MANAGER_NETWORK_INVALID'),
     chainId: safePositiveInteger(manifest['chainId'], 'STACK_MANAGER_CHAIN_ID_INVALID'),
@@ -235,6 +268,8 @@ export const decodeJurisdictionStackManifest = (value: unknown): JurisdictionSta
     contracts,
     evmContracts: {
       ...deployments,
+      deltaTransformerBinding: decodeCallReceipt(deploymentsInput['deltaTransformerBinding']),
+      shareDepositoryBinding: decodeCallReceipt(deploymentsInput['shareDepositoryBinding']),
       stablecoinRegistration: {
         transactionHash: registrationTransactionHash,
         blockNumber: safePositiveInteger(
@@ -245,11 +280,19 @@ export const decodeJurisdictionStackManifest = (value: unknown): JurisdictionSta
       ...(stablecoinDeployment ? { stablecoin: stablecoinDeployment } : {}),
     },
     registeredTokens: {
-      USDT: {
-        address: address(usdt['address'], 'STACK_MANAGER_USDT_ADDRESS_INVALID'),
+      [stablecoin.symbol]: {
+        address: stablecoin.address,
         tokenId: 1,
         decimals: 6,
       },
     },
   };
+};
+
+const decodeCallReceipt = (value: unknown): Readonly<{ transactionHash: string; blockNumber: number }> => {
+  const input = record(value, 'STACK_MANAGER_BINDING_RECEIPT_INVALID');
+  exactKeys(input, ['transactionHash', 'blockNumber'], [], 'STACK_MANAGER_BINDING_RECEIPT_KEYS_INVALID');
+  const hash = input['transactionHash'];
+  if (typeof hash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(hash)) throw new Error('STACK_MANAGER_BINDING_HASH_INVALID');
+  return { transactionHash: hash.toLowerCase(), blockNumber: safePositiveInteger(input['blockNumber'], 'STACK_MANAGER_BINDING_BLOCK_INVALID') };
 };

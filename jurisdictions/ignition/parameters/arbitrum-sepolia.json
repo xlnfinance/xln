@@ -1,0 +1,5 @@
+{
+  "chainId": 421614,
+  "stablecoin": { "kind": "existing", "address": "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d" },
+  "confirmations": 12
+}

@@ -73,6 +73,20 @@ rules. Normative TypeScript and state-machine safety remains in
 - **Outbox** is the flat ordered external output of one sealed Runtime frame.
   It is published only after that frame is durable.
 
+## Jurisdiction deployment
+
+- **Stack Deployment** is a versioned operation that creates, configures and
+  verifies one jurisdiction stack on one chain under one durable deployment
+  identity. Its completion is distinct from jurisdiction discovery admission.
+- **Deployment Resume** continues an incomplete Stack Deployment from durable
+  evidence without repeating confirmed on-chain steps.
+- **Deployment Reconciliation** compares durable deployment evidence with
+  current on-chain receipts, nonces, bytecode and authority state before any
+  Deployment Resume or Fresh Stack Deployment.
+- **Fresh Stack Deployment** creates a new stack under a new deployment
+  identity. It does not replace or erase contracts created by an earlier Stack
+  Deployment; avoid the ambiguous term `redeploy`.
+
 ## Forbidden synonyms
 
 - Do not use `channel`, `wave`, `round`, `receipt`, `delivery sequence` or

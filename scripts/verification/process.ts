@@ -149,7 +149,7 @@ export const runBoundedCommand = async (
     cwd,
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, PATH: `${dirname(process.execPath)}${delimiter}${process.env.PATH ?? ''}` },
+    env: { ...process.env, PATH: `${dirname(process.execPath)}${delimiter}${process.env['PATH'] ?? ''}` },
   });
   const { state, dispose, finish } = controlChild(child, timeoutMs);
   captureOutput(child, logFd);

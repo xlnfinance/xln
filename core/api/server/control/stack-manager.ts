@@ -9,7 +9,8 @@ import type { RuntimeReplica } from '../../../runtime/types';
 import { serializeTaggedJson } from '../../../protocol/serialization';
 import { getAddress, isAddress } from 'ethers';
 import { deployJurisdictionStack, probeJurisdictionStackTarget } from '../../../jurisdiction/adapter/stack-manager/deploy';
-import { decodeDeployJurisdictionStackRequest } from '../../../jurisdiction/adapter/stack-manager/validation';
+import { decodeDeployJurisdictionStackRequest, decodeStackDeploymentExecution } from '../../../jurisdiction/adapter/stack-manager/validation';
+import { requireBoundaryRecord, requireExactBoundaryKeys } from '../../../protocol/boundary-validation';
 import type { StackManagerStatus } from '../../../jurisdiction/adapter/stack-manager/types';
 import { getErrorMessage } from '../utils';
 import { getConfiguredOfficialFoundationSignerId } from '../../../jurisdiction/adapter/kernel/jurisdiction-loader';
@@ -88,11 +89,15 @@ export const createStackManagerController = (
       // while their bodies were read and race two deployments on one signer.
       setPhase('preflight');
       try {
-        const request = decodeDeployJurisdictionStackRequest(await deps.parseBody(req));
+        const input = requireBoundaryRecord(await deps.parseBody(req), 'STACK_MANAGER_INVOCATION_INVALID');
+        requireExactBoundaryKeys(input, ['request', 'execution'], [], 'STACK_MANAGER_INVOCATION_KEYS_INVALID');
+        const execution = decodeStackDeploymentExecution(input['execution']);
+        const request = decodeDeployJurisdictionStackRequest(input['request']);
         const signerPrivateKey = getLocalSignerPrivateKey(env, request.signerId);
         if (!signerPrivateKey) throw new Error(`STACK_MANAGER_SIGNER_NOT_OWNED:${request.signerId}`);
         const officialFoundationSignerId = getConfiguredOfficialFoundationSignerId();
         const result = await deployJurisdictionStack(request, {
+          ...execution,
           signerPrivateKey,
           ...(officialFoundationSignerId ? { officialFoundationSignerId } : {}),
           publishJurisdiction: announcement =>

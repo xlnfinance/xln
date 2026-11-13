@@ -17,6 +17,8 @@ node_modules
 
 # Hardhat Ignition default folder for deployments against a local node
 ignition/deployments/chain-31337
+# Local operator mutex owners and interrupted-owner tombstones are not deployment artifacts.
+/.xln-deployment-locks/
 /openzeppelin-contracts
 
 # Foundry

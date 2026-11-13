@@ -1,8 +1,10 @@
 import hardhatToolboxMochaEthers from "@nomicfoundation/hardhat-toolbox-mocha-ethers";
 import { defineConfig } from "hardhat/config";
+import { dirname, resolve } from 'node:path';
+import { xlnDeploy, xlnChainStack } from './tasks/xln-deploy.ts';
 
 const deployerAccounts = () => {
-  const key = process.env.DEPLOYER_PRIVATE_KEY;
+  const key = process.env['DEPLOYER_PRIVATE_KEY'];
   if (!key) return [];
   return [key.startsWith("0x") ? key : `0x${key}`];
 };
@@ -11,11 +13,12 @@ const requiredRpcPlaceholder = (envName: string) => process.env[envName] || "htt
 // scripts/sync-contract-artifacts.sh (which sets XLN_TYPECHAIN_OUT_DIR). A plain
 // `hardhat test`/`compile` must never overwrite it: the plugin's own emitter
 // formats imports differently and produced a 92-file phantom diff.
-const typechainOutDir = process.env.XLN_TYPECHAIN_OUT_DIR || ".typechain-hardhat";
-const etherscanApiKey = process.env.ETHERSCAN_API_KEY || "";
-const stackManagerChainId = Number(process.env.XLN_STACK_MANAGER_CHAIN_ID || 0);
+const typechainOutDir = process.env['XLN_TYPECHAIN_OUT_DIR'] || ".typechain-hardhat";
+const etherscanApiKey = process.env['ETHERSCAN_API_KEY'] || "";
+const stackManagerChainId = Number(process.env['XLN_STACK_MANAGER_CHAIN_ID'] || 0);
 
 const config = defineConfig({
+  tasks: [xlnDeploy, xlnChainStack],
   plugins: [hardhatToolboxMochaEthers, {
     id: 'xln-local-solc',
     hookHandlers: { solidity: () => import('./scripts/compiler/local-solc.ts') },
@@ -27,6 +30,7 @@ const config = defineConfig({
   // own (non-Foundry-aware) import resolution and fail. Point it at an unused
   // directory so Hardhat's solc test-scanning leaves the Foundry suite alone.
   paths: {
+    ...(process.env['XLN_DEPLOY_OUTPUT'] ? { ignition: resolve(dirname(process.env['XLN_DEPLOY_OUTPUT']), 'ignition') } : {}),
     tests: {
       mocha: 'test',
       solidity: 'test-solidity-unused',
@@ -75,7 +79,6 @@ const config = defineConfig({
     localhost: {
       type: 'http',
       url: 'http://127.0.0.1:8545',
-      allowUnlimitedContractSize: true,
     },
     hardhat: {
       type: 'edr-simulated',
@@ -87,15 +90,15 @@ const config = defineConfig({
     // Base Networks (Coinbase L2)
     'base-sepolia': {
       type: 'http',
-      url: process.env.BASE_SEPOLIA_RPC || 'https://sepolia.base.org',
+      url: process.env['BASE_SEPOLIA_RPC'] || 'https://sepolia.base.org',
       chainId: 84532,
-      accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
+      accounts: process.env['DEPLOYER_PRIVATE_KEY'] ? [process.env['DEPLOYER_PRIVATE_KEY']] : [],
     },
     'base-mainnet': {
       type: 'http',
-      url: process.env.BASE_MAINNET_RPC || 'https://mainnet.base.org',
+      url: process.env['BASE_MAINNET_RPC'] || 'https://mainnet.base.org',
       chainId: 8453,
-      accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
+      accounts: process.env['DEPLOYER_PRIVATE_KEY'] ? [process.env['DEPLOYER_PRIVATE_KEY']] : [],
     },
     // Ethereum Networks
     'ethereum-sepolia': {
@@ -110,24 +113,27 @@ const config = defineConfig({
       chainId: 1,
       accounts: deployerAccounts(),
     },
+    'arbitrum-sepolia': {
+      type: 'http',
+      url: requiredRpcPlaceholder('ARB_SEPOLIA_RPC'),
+      chainId: 421614,
+      accounts: deployerAccounts(),
+    },
     // Local test networks
     ethereum: {
       type: 'http',
       url: 'http://127.0.0.1:8545',
       chainId: 31337,
-      allowUnlimitedContractSize: true,
     },
     polygon: {
       type: 'http',
       url: 'http://0.0.0.0:8546',
       chainId: 31337,
-      allowUnlimitedContractSize: true,
     },
     arbitrum: {
       type: 'http',
       url: 'http://0.0.0.0:8547',
       chainId: 31337,
-      allowUnlimitedContractSize: true,
     },
   },
 });

@@ -1,63 +1,24 @@
-/**
- * Canonical V1 stack deployment orchestration shared by Bun CLI and server API.
- * It performs preflight, invokes the sole Hardhat deploy implementation, proves
- * receipts/linked bytecode, then and only then persists discovery metadata. [99/100]
- */
-
+import { safeStringify } from '../../../protocol/serialization';
+/** Application adapter: dispatch the canonical Hardhat task, then separately admit discovery. */
 import { JsonRpcProvider, Wallet, hexlify } from 'ethers';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { readFile, writeFile, mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { decodeJurisdictionStackManifest } from './validation';
-import {
-  acquireStackManagerDeploymentLock,
-  assertJurisdictionStackKeyAvailable,
-  persistVerifiedJurisdictionStack,
-} from './persistence';
-import { verifyJurisdictionStack } from './verification';
+import { assertStackDeploymentResumeExists, sanitizeDeploymentMessage } from './evidence';
+import { decodeJurisdictionStackManifest, decodeRegisteredStackStablecoin, decodeStackDeploymentExecution, decodeStackManagerRpcUrl } from './validation';
+import { acquireStackManagerDeploymentLock, assertJurisdictionStackKeyAvailable, assertStackResumeCatalogBinding, persistVerifiedJurisdictionStack } from './persistence';
 import { createJurisdictionGossipAnnouncement, type JurisdictionGossipAnnouncement } from '../../gossip/announcement';
-import type {
-  DeployJurisdictionStackRequest,
-  DeployJurisdictionStackResult,
-  StackManagerPhase,
-  StackManagerProbe,
-} from './types';
+import { readStackPublicationRpc, sealStackPublicationRpc } from './evidence/publication';
+import type { DeployJurisdictionStackRequest, DeployJurisdictionStackResult, StackManagerPhase, StackManagerProbe, StackDeploymentExecution } from './types';
 
-export type StackDeploymentOptions = Readonly<{
+export type StackDeploymentOptions = StackDeploymentExecution & Readonly<{
   signerPrivateKey: Uint8Array;
   officialFoundationSignerId?: string;
   publishJurisdiction?: (announcement: JurisdictionGossipAnnouncement) => boolean;
   onPhase?: (phase: StackManagerPhase) => void;
+  evidenceDirectory?: string;
 }>;
-
-const DEPLOY_TAIL_MAX_BYTES = 64 * 1024;
-
-const readBoundedTail = async (stream: ReadableStream<Uint8Array>): Promise<string> => {
-  const reader = stream.getReader();
-  let tail = new Uint8Array();
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (!value) continue;
-    const combined = new Uint8Array(Math.min(DEPLOY_TAIL_MAX_BYTES, tail.length + value.length));
-    const sourceOffset = Math.max(0, tail.length + value.length - DEPLOY_TAIL_MAX_BYTES);
-    const source = new Uint8Array(tail.length + value.length);
-    source.set(tail);
-    source.set(value, tail.length);
-    combined.set(source.subarray(sourceOffset));
-    tail = combined;
-  }
-  return new TextDecoder('utf8', { fatal: false }).decode(tail);
-};
-
-const sanitizeDeployTail = (tail: string, secretHex: string, rpcUrl: string): string =>
-  tail
-    .replaceAll(secretHex, '[REDACTED_PRIVATE_KEY]')
-    .replaceAll(secretHex.slice(2), '[REDACTED_PRIVATE_KEY]')
-    .replaceAll(rpcUrl, '[REDACTED_RPC_URL]')
-    .replaceAll('\n', ' ')
-    .slice(-4_096)
-    .trim();
 
 const CHILD_ENV_ALLOWLIST = ['PATH', 'HOME', 'TMPDIR', 'XDG_CACHE_HOME', 'BUN_INSTALL', 'CI', 'NO_COLOR'] as const;
 
@@ -70,6 +31,8 @@ export const buildStackManagerChildEnv = (
     stablecoinAddress: string;
     deployTestStablecoin: boolean;
     outputPath: string;
+    deploymentId: string;
+    mode: 'new' | 'resume';
   }>,
 ): Record<string, string> => {
   const env: Record<string, string> = {};
@@ -87,6 +50,8 @@ export const buildStackManagerChildEnv = (
     XLN_STABLECOIN_ADDRESS: deployment.stablecoinAddress,
     XLN_DEPLOY_TEST_STABLECOIN: deployment.deployTestStablecoin ? '1' : '0',
     XLN_DEPLOY_OUTPUT: deployment.outputPath,
+    XLN_DEPLOYMENT_ID: deployment.deploymentId,
+    XLN_DEPLOYMENT_MODE: deployment.mode,
   };
 };
 
@@ -107,114 +72,81 @@ export const probeJurisdictionStackTarget = async (
   }
 };
 
-export const deployJurisdictionStack = async (
-  request: DeployJurisdictionStackRequest,
-  options: StackDeploymentOptions,
-): Promise<DeployJurisdictionStackResult> => {
-  options.onPhase?.('preflight');
-  const signerPrivateKeyHex = hexlify(options.signerPrivateKey);
-  const wallet = new Wallet(signerPrivateKeyHex);
-  const officialFoundationSignerId = options.officialFoundationSignerId?.toLowerCase();
-  if (wallet.address.toLowerCase() !== request.signerId.toLowerCase()) {
-    throw new Error('STACK_MANAGER_SIGNER_KEY_MISMATCH');
-  }
-  if (request.publication === 'official') {
-    const authority = officialFoundationSignerId;
-    if (
-      !authority ||
-      authority !== request.signerId.toLowerCase() ||
-      authority !== request.foundationRecipient.toLowerCase()
-    ) {
-      throw new Error('FOUNDATION_PUBLICATION_AUTHORITY_UNAVAILABLE');
-    }
-  }
-  const probe = await probeJurisdictionStackTarget(request);
-  if (BigInt(probe.nativeBalanceWei) === 0n) throw new Error('STACK_MANAGER_SIGNER_GAS_BALANCE_EMPTY');
-  const releaseDeploymentLock = await acquireStackManagerDeploymentLock();
-  let temporaryDirectory = '';
-  let provider: JsonRpcProvider | null = null;
+const runNativeTask = async (request: DeployJurisdictionStackRequest, options: StackDeploymentOptions, directory: string) => {
+  const temporary = await mkdtemp(join(tmpdir(), 'xln-deploy-dispatch-'));
+  const parameters = join(temporary, 'parameters.json');
   try {
-    await assertJurisdictionStackKeyAvailable(request.key);
-    temporaryDirectory = await mkdtemp(join(tmpdir(), 'xln-stack-manager-'));
-    const outputPath = join(temporaryDirectory, 'manifest.json');
-    provider = new JsonRpcProvider(request.rpcUrl);
-    options.onPhase?.('deploying');
-    // Hardhat owns its Node/tsx loader, including the canonical TypeScript
-    // Hanko encoder. Forcing Bun breaks Hardhat's required Undici interceptors.
-    const child = Bun.spawn(['bunx', 'hardhat', 'run', 'scripts/deploy-stack.cjs', '--network', 'stack-manager'], {
-      cwd: new URL('../../../../jurisdictions', import.meta.url).pathname,
-      env: buildStackManagerChildEnv({
-        rpcUrl: request.rpcUrl,
-        chainId: request.expectedChainId,
-        signerPrivateKeyHex,
-        foundationRecipient: request.foundationRecipient,
+    await writeFile(parameters, safeStringify({ chainId: request.expectedChainId, foundationRecipient: request.foundationRecipient,
+      stablecoin: request.stablecoin, confirmations: request.confirmations }), { mode: 0o600 });
+    const child = spawn('bunx', ['hardhat', 'xln-deploy', '--network', 'stack-manager', '--parameters', parameters,
+      '--deployment-id', options.deploymentId, '--mode', options.mode, '--deployment-dir', directory], {
+      cwd: new URL('../../../../jurisdictions', import.meta.url),
+      env: buildStackManagerChildEnv({ rpcUrl: request.rpcUrl, chainId: request.expectedChainId,
+        signerPrivateKeyHex: hexlify(options.signerPrivateKey), foundationRecipient: request.foundationRecipient,
         stablecoinAddress: request.stablecoin.kind === 'existing' ? request.stablecoin.address : '',
-        deployTestStablecoin: request.stablecoin.kind === 'test',
-        outputPath,
-      }),
-      stdout: 'pipe',
-      stderr: 'pipe',
+        deployTestStablecoin: request.stablecoin.kind === 'test', outputPath: join(directory, 'manifest.json'),
+        deploymentId: options.deploymentId, mode: options.mode }),
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
-    const [exitCode, stdoutTail, stderrTail] = await Promise.all([
-      child.exited,
-      readBoundedTail(child.stdout),
-      readBoundedTail(child.stderr),
-    ]);
-    if (exitCode !== 0) {
-      const tail = sanitizeDeployTail(stderrTail || stdoutTail, signerPrivateKeyHex, request.rpcUrl);
-      throw new Error(`STACK_MANAGER_HARDHAT_DEPLOY_FAILED:exit=${exitCode}${tail ? `:tail=${tail}` : ''}`);
+    let tail = '';
+    const observe = (data: Buffer): void => {
+      const value = data.toString(); tail = (tail + value).slice(-65_536);
+      if (value.includes('XLN_DEPLOY_PHASE:verifying')) options.onPhase?.('verifying');
+    };
+    child.stdout.on('data', observe); child.stderr.on('data', observe);
+    const exit = await new Promise<number | null>((done, fail) => { child.once('error', fail); child.once('close', done); });
+    if (exit !== 0) throw new Error(`STACK_MANAGER_HARDHAT_DEPLOY_FAILED:exit=${exit}:detail=${sanitizeDeploymentMessage(tail, hexlify(options.signerPrivateKey), request.rpcUrl)}`);
+    const outcome: unknown = JSON.parse(await readFile(join(directory, 'result.json'), 'utf8'));
+    if (!outcome || typeof outcome !== 'object' || !('status' in outcome) || outcome.status !== 'complete' || !('manifest' in outcome)) {
+      throw new Error('STACK_MANAGER_NATIVE_RESULT_INVALID');
     }
-    const manifest = decodeJurisdictionStackManifest(JSON.parse(await readFile(outputPath, 'utf8')));
-    if (manifest.chainId !== request.expectedChainId) throw new Error('STACK_MANAGER_DEPLOY_CHAIN_ID_MISMATCH');
-    if (manifest.deployer.toLowerCase() !== request.signerId.toLowerCase())
-      throw new Error('STACK_MANAGER_DEPLOYER_MISMATCH');
-    if (manifest.foundationRecipient.toLowerCase() !== request.foundationRecipient.toLowerCase()) {
-      throw new Error('STACK_MANAGER_FOUNDATION_RECIPIENT_MISMATCH');
-    }
-    options.onPhase?.('verifying');
-    await verifyJurisdictionStack(provider, manifest, request.confirmations);
-    const announcement =
-      request.publication === 'local'
-        ? undefined
-        : createJurisdictionGossipAnnouncement(
-            {
-              scope: request.publication,
-              key: request.key,
-              name: request.name,
-              rpcUrl: request.rpcUrl,
-              blockTimeMs: request.blockTimeMs,
-              currency: request.currency,
-              explorer: request.explorer,
-              ...(request.description ? { description: request.description } : {}),
-              chainId: manifest.chainId,
-              deployer: manifest.deployer,
-              foundationRecipient: manifest.foundationRecipient,
-              entityProviderDeploymentBlock: manifest.entityProviderDeploymentBlock,
-              contracts: manifest.contracts,
-              stablecoin: { symbol: 'USDT', ...manifest.registeredTokens.USDT },
-            },
-            options.signerPrivateKey,
-            officialFoundationSignerId,
-          );
+    return decodeJurisdictionStackManifest(outcome.manifest);
+  } finally { await rm(temporary, { recursive: true }); }
+};
+
+const checkCallerAuthority = (request: DeployJurisdictionStackRequest, options: StackDeploymentOptions): void => {
+  const wallet = new Wallet(hexlify(options.signerPrivateKey));
+  if (wallet.address.toLowerCase() !== request.signerId.toLowerCase()) throw new Error('STACK_MANAGER_SIGNER_KEY_MISMATCH');
+  if (request.foundationRecipient.toLowerCase() !== wallet.address.toLowerCase()) throw new Error('FOUNDATION_LISTING_SIGNER_MISMATCH');
+  if (request.publication === 'official' && options.officialFoundationSignerId?.toLowerCase() !== wallet.address.toLowerCase()) {
+    throw new Error('FOUNDATION_PUBLICATION_AUTHORITY_UNAVAILABLE');
+  }
+};
+
+export const deployJurisdictionStack = async (request: DeployJurisdictionStackRequest, options: StackDeploymentOptions): Promise<DeployJurisdictionStackResult> => {
+  decodeStackManagerRpcUrl(request.rpcUrl);
+  const execution = decodeStackDeploymentExecution({ deploymentId: options.deploymentId, mode: options.mode });
+  if (execution.mode === 'resume') await assertStackDeploymentResumeExists(execution.deploymentId, options.evidenceDirectory);
+  checkCallerAuthority(request, options);
+  const base = resolve(options.evidenceDirectory || new URL('../../../../docs/evidence/stack-manager', import.meta.url).pathname);
+  await mkdir(base, { recursive: true, mode: 0o700 });
+  const directory = join(base, execution.deploymentId);
+  const release = await acquireStackManagerDeploymentLock();
+  try {
+    options.onPhase?.('preflight');
+    if (execution.mode === 'new') await assertJurisdictionStackKeyAvailable(request.key);
+    const publishedRpc = execution.mode === 'resume'
+      ? await readStackPublicationRpc(request, directory, execution.deploymentId) : undefined;
+    if (execution.mode === 'resume') await assertStackResumeCatalogBinding(request, directory, execution.deploymentId, publishedRpc);
+    options.onPhase?.('deploying');
+    const manifest = await runNativeTask(request, options, directory);
+    const advertisedRpc = publishedRpc || request.rpcUrl;
+    const stablecoin = decodeRegisteredStackStablecoin(manifest.registeredTokens);
+    const announcement = request.publication === 'local' ? undefined : createJurisdictionGossipAnnouncement({
+      scope: request.publication, key: request.key, name: request.name, rpcUrl: advertisedRpc,
+      blockTimeMs: request.blockTimeMs, currency: request.currency, explorer: request.explorer,
+      ...(request.description ? { description: request.description } : {}), chainId: manifest.chainId,
+      deployer: manifest.deployer, foundationRecipient: manifest.foundationRecipient,
+      entityProviderDeploymentBlock: manifest.entityProviderDeploymentBlock, contracts: manifest.contracts, stablecoin,
+    }, options.signerPrivateKey, options.officialFoundationSignerId);
     options.onPhase?.('persisting');
-    const localJurisdiction = await persistVerifiedJurisdictionStack(
-      request,
-      manifest,
-      announcement,
-      officialFoundationSignerId,
-    );
-    const publication = !announcement
-      ? { status: 'not_requested' as const, scope: 'local' as const }
-      : {
-          status: options.publishJurisdiction?.(announcement) ? ('published' as const) : ('queued' as const),
-          scope: announcement.scope,
-          announcement,
-        };
+    await sealStackPublicationRpc(request, directory, execution.deploymentId, advertisedRpc);
+    const { alreadyPresent, ...localJurisdiction } = await persistVerifiedJurisdictionStack({ ...request, rpcUrl: advertisedRpc }, manifest,
+      announcement, options.officialFoundationSignerId, execution.mode === 'resume');
+    const publication = !announcement ? { status: 'not_requested' as const, scope: 'local' as const }
+      : { status: !alreadyPresent && options.publishJurisdiction?.(announcement) ? 'published' as const : 'queued' as const,
+        scope: announcement.scope, announcement };
     options.onPhase?.('complete');
     return { manifest, localJurisdiction, publication };
-  } finally {
-    if (temporaryDirectory) await rm(temporaryDirectory, { recursive: true, force: true });
-    provider?.destroy();
-    await releaseDeploymentLock();
-  }
+  } finally { await release(); }
 };

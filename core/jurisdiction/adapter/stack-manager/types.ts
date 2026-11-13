@@ -10,6 +10,8 @@ export const JURISDICTION_STACK_VERSION = 'V1' as const;
 
 type StackPublicationScope = 'local' | 'community' | 'official';
 
+export type StackDeploymentExecution = Readonly<{ deploymentId: string; mode: 'new' | 'resume' }>;
+
 type StablecoinDeployment =
   | Readonly<{ kind: 'existing'; address: string }>
   | Readonly<{ kind: 'test' }>;
@@ -46,7 +48,15 @@ export type StackContractDeployment = Readonly<{
   transactionHash: string;
 }>;
 
+export type StackStablecoin = Readonly<{
+  symbol: string;
+  address: string;
+  tokenId: 1;
+  decimals: 6;
+}>;
+
 export type JurisdictionStackManifest = Readonly<{
+  deploymentId: string;
   stackVersion: typeof JURISDICTION_STACK_VERSION;
   network: string;
   chainId: number;
@@ -55,12 +65,12 @@ export type JurisdictionStackManifest = Readonly<{
   entityProviderDeploymentBlock: number;
   contracts: Readonly<Record<StackContractName, string>>;
   evmContracts: Readonly<Record<StackContractName, StackContractDeployment>> & Readonly<{
+    deltaTransformerBinding: Readonly<{ transactionHash: string; blockNumber: number }>;
+    shareDepositoryBinding: Readonly<{ transactionHash: string; blockNumber: number }>;
     stablecoinRegistration: Readonly<{ transactionHash: string; blockNumber: number }>;
     stablecoin?: StackContractDeployment;
   }>;
-  registeredTokens: Readonly<{
-    USDT: Readonly<{ address: string; tokenId: 1; decimals: 6 }>;
-  }>;
+  registeredTokens: Readonly<Record<string, Omit<StackStablecoin, 'symbol'>>>;
 }>;
 
 type StackPublicationResult =

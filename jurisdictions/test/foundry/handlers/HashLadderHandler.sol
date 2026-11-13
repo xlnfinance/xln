@@ -119,6 +119,20 @@ contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
     }
   }
 
+  /// @dev Source uses its batch nonce; Target publishes through the existing
+  /// nonce-independent port under the beneficiary's current Hanko. A Target
+  /// registration in processBatch is deliberately rejected by Depository.
+  function _submitReveal(uint256 actor, Batch memory batch) internal returns (bool) {
+    HashLadderRegistration memory registration = batch.hashLadderRegistrations[0];
+    if (!registration.targetRole) return _submit(actor, batch);
+    bytes32 digest = keccak256(abi.encode(
+      keccak256("XLN_TARGET_HASH_LADDER_REVEAL"), block.chainid, address(dep), entityOf[actor], registration
+    ));
+    try dep.registerTargetHashLadderReveal(entityOf[actor], registration, _hanko(actor, digest)) {
+      return true;
+    } catch { return false; }
+  }
+
   function pairIndex(uint256 a, uint256 b) public pure returns (uint256) {
     (uint256 lo, uint256 hi) = a < b ? (a, b) : (b, a);
     if (lo == 0) return hi - 1;
@@ -297,7 +311,7 @@ contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
   }
 
   /// @notice The core action: one hash-ladder registration through
-  ///         processBatch, ghost-checked against the ordered-slot rules.
+  ///         the canonical Source/Target port, ghost-checked against ordered-slot rules.
   function registerReveal(
     uint256 fromSeed,
     uint256 cpSeed,
@@ -346,7 +360,7 @@ contract HashLadderHandler is CommonBase, StdCheats, StdUtils {
     (bool found, uint256 idx) = _findSlot(from, cp, ladder, targetRole);
     if (!targetRole && !disputeLive && !found) closedDisputeSourceAttempts++;
 
-    if (_submit(from, b)) {
+    if (_submitReveal(from, b)) {
       if (corruptWitness) {
         invalidWitnessAccepted++;
         return;

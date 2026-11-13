@@ -229,12 +229,18 @@ const deployEvm = async (chain, options) => {
   }
 
   requireHexPrivateKey();
+  const execution = require('../../core/jurisdiction/adapter/stack-manager/validation.ts').decodeStackDeploymentExecution({
+    deploymentId: process.env.XLN_DEPLOYMENT_ID, mode: process.env.XLN_DEPLOYMENT_MODE,
+  });
   if (!process.env[chain.rpcEnv]) throw new Error(`${chain.rpcEnv} is required for ${chain.id}`);
   run('bunx', ['hardhat', 'compile']);
   mkdirSync(deploymentsDir, { recursive: true });
-  const outputPath = path.join(deploymentsDir, `${chain.id}.json`);
-  run('bunx', ['hardhat', 'run', 'scripts/deploy-stack.cjs', '--network', chain.hardhatNetwork], {
+  const outputPath = path.join(deploymentsDir, `${execution.deploymentId}.json`);
+  run('bunx', ['hardhat', 'xln-chain-stack', '--network', chain.hardhatNetwork], {
     env: {
+      XLN_DEPLOYMENT_ID: execution.deploymentId,
+      XLN_DEPLOYMENT_MODE: execution.mode,
+      XLN_STACK_MANAGER_CHAIN_ID: String(chain.chainId),
       XLN_DEPLOY_OUTPUT: outputPath,
       XLN_STABLECOIN_ADDRESS: stablecoin.address,
       XLN_WRAPPED_NATIVE_ADDRESS: wrapped,

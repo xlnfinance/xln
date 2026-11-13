@@ -1,23 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { readFileSync, rmSync } from 'node:fs';
-import { relative } from 'node:path';
-
-type EslintMessage = {
-  ruleId: string | null;
-  message: string;
-  line: number;
-};
-
-type EslintFile = {
-  filePath: string;
-  messages: EslintMessage[];
-};
-
-const DEBT_RULES = new Set(['import/no-duplicates', 'no-restricted-properties']);
-// Exact debt decreases when audited code is removed (calldata recovery deleted); new violations remain forbidden.
-const DEBT_COUNT = 315;
-const DEBT_SHA256 = '2ce06efcf0394912defbc97dd5cf74e07401c8a3b395569fadeaf757634b7008';
+import { assertEslintDebt, type EslintFile } from './eslint/debt';
 const outputPath = `${tmpdir()}/xln-eslint-${String(process.pid)}.json`;
 
 const result = spawnSync('bunx', ['eslint', 'core', '--ext', '.ts', '--format', 'json', '--output-file', outputPath], {
@@ -29,34 +13,7 @@ try {
   if (result.error) throw result.error;
   if (result.status === null) throw new Error(`ESLINT_DID_NOT_EXIT:${result.signal ?? 'unknown'}`);
   const report = JSON.parse(readFileSync(outputPath, 'utf8')) as EslintFile[];
-  const semanticErrors: string[] = [];
-  const debtRows: string[] = [];
-
-  for (const file of report) {
-    const sourceLines = readFileSync(file.filePath, 'utf8').split(/\r?\n/);
-    for (const message of file.messages) {
-      const fileName = relative(process.cwd(), file.filePath);
-      if (!message.ruleId || !DEBT_RULES.has(message.ruleId)) {
-        semanticErrors.push(`${fileName}:${message.line} ${message.ruleId ?? 'parse'} ${message.message}`);
-        continue;
-      }
-      const source = (sourceLines[message.line - 1] ?? '').trim().replace(/\s+/g, ' ');
-      debtRows.push(`${fileName}|${message.ruleId}|${source}`);
-    }
-  }
-
-  if (semanticErrors.length > 0) {
-    throw new Error(`ESLINT_SEMANTIC_FAILURE\n${semanticErrors.join('\n')}`);
-  }
-
-  debtRows.sort();
-  const debtHash = new Bun.CryptoHasher('sha256').update(debtRows.join('\n')).digest('hex');
-  if (debtRows.length !== DEBT_COUNT || debtHash !== DEBT_SHA256) {
-    throw new Error(
-      `ESLINT_DEBT_CHANGED expected=${DEBT_COUNT}/${DEBT_SHA256} ` +
-        `actual=${debtRows.length}/${debtHash}. Remove fixed debt from the exact baseline; never add debt.`,
-    );
-  }
+  const { debtRows, debtHash } = assertEslintDebt(report);
 
   console.log(`ESLINT_RATCHET_OK semantic=0 debt=${debtRows.length} sha256=${debtHash}`);
 } finally {

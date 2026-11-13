@@ -1,0 +1,1016 @@
+test artifact cleanup (deployment-invariants): preserving existing artifacts
+test artifact budget (deployment-invariants): workspace=13.45GiB budgeted=3.31GiB / 50GiB
+No files changed, compilation skipped
+
+Ran 1 test for test/foundry/stress/DisputeIngressGas.t.sol:DisputeIngressGasTest
+[PASS] test_unsolicitedCompanySharesCannotEnlargeExitProof() (gas: 79713758)
+Suite result: ok. 1 passed; 0 failed; 0 skipped; finished in 73.67ms (63.81ms CPU time)
+
+Ran 9 tests for test/foundry/HashLadder.invariants.t.sol:HashLadderInvariants
+[PASS] invariant_callSummary() (runs: 128, calls: 8192, reverts: 0)
+
+╭-------------------+-----------------+-------+---------+----------╮
+| Contract          | Selector        | Calls | Reverts | Discards |
++==================================================================+
+| HashLadderHandler | advance         | 1640  | 0       | 0        |
+|-------------------+-----------------+-------+---------+----------|
+| HashLadderHandler | advanceToWindow | 1641  | 0       | 0        |
+|-------------------+-----------------+-------+---------+----------|
+| HashLadderHandler | closeDispute    | 1647  | 0       | 0        |
+|-------------------+-----------------+-------+---------+----------|
+| HashLadderHandler | openDispute     | 1618  | 0       | 0        |
+|-------------------+-----------------+-------+---------+----------|
+| HashLadderHandler | registerReveal  | 1646  | 0       | 0        |
+╰-------------------+-----------------+-------+---------+----------╯
+
+[PASS] invariant_firstWriteDoesNotNeedDispute() (runs: 128, calls: 8192, reverts: 0)
+
+╭-------------------+-----------------+-------+---------+----------╮
+| Contract          | Selector        | Calls | Reverts | Discards |
++==================================================================+
+| HashLadderHandler | advance         | 1640  | 0       | 0        |
+|-------------------+-----------------+-------+---------+----------|
+| HashLadderHandler | advanceToWindow | 1641  | 0       | 0        |
+|-------------------+-----------------+-------+---------+----------|
+| HashLadderHandler | closeDispute    | 1647  | 0       | 0        |
+|-------------------+-----------------+-------+---------+----------|
+| HashLadderHandler | openDispute     | 1618  | 0       | 0        |
+|-------------------+-----------------+-------+---------+----------|
+| HashLadderHandler | registerReveal  | 1646  | 0       | 0        |
+╰-------------------+-----------------+-------+---------+----------╯
+
+[PASS] invariant_orderedPairSlotsAreIsolated() (runs: 128, calls: 8192, reverts: 0)
+
+╭-------------------+-----------------+-------+---------+----------╮
+| Contract          | Selector        | Calls | Reverts | Discards |
++==================================================================+
+| HashLadderHandler | advance         | 1640  | 0       | 0        |
+|-------------------+-----------------+-------+---------+----------|
+| HashLadderHandler | advanceToWindow | 1641  | 0       | 0        |
+|-------------------+-----------------+-------+---------+----------|
+| HashLadderHandler | closeDispute    | 1647  | 0       | 0        |
+|-------------------+-----------------+-------+---------+----------|
+| HashLadderHandler | openDispute     | 1618  | 0       | 0        |
+|-------------------+-----------------+-------+---------+----------|
+| HashLadderHandler | registerReveal  | 1646  | 0       | 0        |
+╰-------------------+-----------------+-------+---------+----------╯
+
+[PASS] invariant_sourceRevealsAreSticky() (runs: 128, calls: 8192, reverts: 0)
+
+╭-------------------+-----------------+-------+---------+----------╮
+| Contract          | Selector        | Calls | Reverts | Discards |
++==================================================================+
+| HashLadderHandler | advance         | 1640  | 0       | 0        |
+|-------------------+-----------------+-------+---------+----------|
+| HashLadderHandler | advanceToWindow | 1641  | 0       | 0        |
+|-------------------+-----------------+-------+---------+----------|
+| HashLadderHandler | closeDispute    | 1647  | 0       | 0        |
+|-------------------+-----------------+-------+---------+----------|
+| HashLadderHandler | openDispute     | 1618  | 0       | 0        |
+|-------------------+-----------------+-------+---------+----------|
+| HashLadderHandler | registerReveal  | 1646  | 0       | 0        |
+╰-------------------+-----------------+-------+---------+----------╯
+
+[PASS] invariant_targetRevealsAreSticky() (runs: 128, calls: 8192, reverts: 0)
+
+╭-------------------+-----------------+-------+---------+----------╮
+| Contract          | Selector        | Calls | Reverts | Discards |
++==================================================================+
+| HashLadderHandler | advance         | 1640  | 0       | 0        |
+|-------------------+-----------------+-------+---------+----------|
+| HashLadderHandler | advanceToWindow | 1641  | 0       | 0        |
+|-------------------+-----------------+-------+---------+----------|
+| HashLadderHandler | closeDispute    | 1647  | 0       | 0        |
+|-------------------+-----------------+-------+---------+----------|
+| HashLadderHandler | openDispute     | 1618  | 0       | 0        |
+|-------------------+-----------------+-------+---------+----------|
+| HashLadderHandler | registerReveal  | 1646  | 0       | 0        |
+╰-------------------+-----------------+-------+---------+----------╯
+
+[PASS] invariant_windowsAndWitnessesAreSound() (runs: 128, calls: 8192, reverts: 0)
+
+╭-------------------+-----------------+-------+---------+----------╮
+| Contract          | Selector        | Calls | Reverts | Discards |
++==================================================================+
+| HashLadderHandler | advance         | 1640  | 0       | 0        |
+|-------------------+-----------------+-------+---------+----------|
+| HashLadderHandler | advanceToWindow | 1641  | 0       | 0        |
+|-------------------+-----------------+-------+---------+----------|
+| HashLadderHandler | closeDispute    | 1647  | 0       | 0        |
+|-------------------+-----------------+-------+---------+----------|
+| HashLadderHandler | openDispute     | 1618  | 0       | 0        |
+|-------------------+-----------------+-------+---------+----------|
+| HashLadderHandler | registerReveal  | 1646  | 0       | 0        |
+╰-------------------+-----------------+-------+---------+----------╯
+
+[PASS] test_control_asymmetricWindowsDoNotGatePublication() (gas: 1593619)
+[PASS] test_control_orderedPairIsolation() (gas: 622147)
+[PASS] test_control_sourceSingleShotSemantics() (gas: 1349936)
+Suite result: ok. 9 passed; 0 failed; 0 skipped; finished in 9.87s (17.45s CPU time)
+
+Ran 8 tests for test/foundry/TransformerAllowance.invariants.t.sol:TransformerAllowanceInvariants
+[PASS] invariant_allowancedChangesAreExactlyClamped() (runs: 128, calls: 8192, reverts: 0)
+
+╭-----------------------------+-------------------------+-------+---------+----------╮
+| Contract                    | Selector                | Calls | Reverts | Discards |
++====================================================================================+
+| TransformerAllowanceHandler | advance                 | 1132  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| TransformerAllowanceHandler | advancePastDisputeDelay | 1167  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| TransformerAllowanceHandler | finalizeTransformed     | 1175  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| TransformerAllowanceHandler | mint                    | 1190  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| TransformerAllowanceHandler | repayDebt               | 1184  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| TransformerAllowanceHandler | seedCollateral          | 1146  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| TransformerAllowanceHandler | startTransformedDispute | 1198  | 0       | 0        |
+╰-----------------------------+-------------------------+-------+---------+----------╯
+
+[PASS] invariant_callSummary() (runs: 128, calls: 8192, reverts: 0)
+
+╭-----------------------------+-------------------------+-------+---------+----------╮
+| Contract                    | Selector                | Calls | Reverts | Discards |
++====================================================================================+
+| TransformerAllowanceHandler | advance                 | 1132  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| TransformerAllowanceHandler | advancePastDisputeDelay | 1167  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| TransformerAllowanceHandler | finalizeTransformed     | 1175  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| TransformerAllowanceHandler | mint                    | 1190  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| TransformerAllowanceHandler | repayDebt               | 1184  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| TransformerAllowanceHandler | seedCollateral          | 1146  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| TransformerAllowanceHandler | startTransformedDispute | 1198  | 0       | 0        |
+╰-----------------------------+-------------------------+-------+---------+----------╯
+
+[PASS] invariant_finalizeConservesValue() (runs: 128, calls: 8192, reverts: 0)
+
+╭-----------------------------+-------------------------+-------+---------+----------╮
+| Contract                    | Selector                | Calls | Reverts | Discards |
++====================================================================================+
+| TransformerAllowanceHandler | advance                 | 1132  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| TransformerAllowanceHandler | advancePastDisputeDelay | 1167  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| TransformerAllowanceHandler | finalizeTransformed     | 1175  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| TransformerAllowanceHandler | mint                    | 1190  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| TransformerAllowanceHandler | repayDebt               | 1184  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| TransformerAllowanceHandler | seedCollateral          | 1146  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| TransformerAllowanceHandler | startTransformedDispute | 1198  | 0       | 0        |
+╰-----------------------------+-------------------------+-------+---------+----------╯
+
+[PASS] invariant_noDeltaChangeWithoutAllowance() (runs: 128, calls: 8192, reverts: 0)
+
+╭-----------------------------+-------------------------+-------+---------+----------╮
+| Contract                    | Selector                | Calls | Reverts | Discards |
++====================================================================================+
+| TransformerAllowanceHandler | advance                 | 1132  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| TransformerAllowanceHandler | advancePastDisputeDelay | 1167  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| TransformerAllowanceHandler | finalizeTransformed     | 1175  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| TransformerAllowanceHandler | mint                    | 1190  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| TransformerAllowanceHandler | repayDebt               | 1184  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| TransformerAllowanceHandler | seedCollateral          | 1146  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| TransformerAllowanceHandler | startTransformedDispute | 1198  | 0       | 0        |
+╰-----------------------------+-------------------------+-------+---------+----------╯
+
+[PASS] invariant_valuePoolIsConserved() (runs: 128, calls: 8192, reverts: 0)
+
+╭-----------------------------+-------------------------+-------+---------+----------╮
+| Contract                    | Selector                | Calls | Reverts | Discards |
++====================================================================================+
+| TransformerAllowanceHandler | advance                 | 1132  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| TransformerAllowanceHandler | advancePastDisputeDelay | 1167  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| TransformerAllowanceHandler | finalizeTransformed     | 1175  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| TransformerAllowanceHandler | mint                    | 1190  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| TransformerAllowanceHandler | repayDebt               | 1184  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| TransformerAllowanceHandler | seedCollateral          | 1146  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| TransformerAllowanceHandler | startTransformedDispute | 1198  | 0       | 0        |
+╰-----------------------------+-------------------------+-------+---------+----------╯
+
+[PASS] test_control_clampAppliesExactBand() (gas: 1239393)
+[PASS] test_control_faultModeDisputeOnlyClosesViaCleanCounterState() (gas: 994607)
+[PASS] test_control_unallowancedChangeRevertsFinalization() (gas: 1269997)
+Suite result: ok. 8 passed; 0 failed; 0 skipped; finished in 9.94s (13.84s CPU time)
+
+Ran 7 tests for test/foundry/HankoThreshold.invariants.t.sol:HankoThresholdInvariants
+[PASS] invariant_callSummary() (runs: 128, calls: 8192, reverts: 1105)
+
+╭-----------------------+----------------+-------+---------+----------╮
+| Contract              | Selector       | Calls | Reverts | Discards |
++=====================================================================+
+| HankoThresholdHandler | probe          | 4089  | 0       | 0        |
+|-----------------------+----------------+-------+---------+----------|
+| HankoThresholdHandler | probeCanonical | 4103  | 1105    | 0        |
+╰-----------------------+----------------+-------+---------+----------╯
+
+[PASS] invariant_firstMemberIsAlwaysEoaSignature() (runs: 128, calls: 8192, reverts: 1105)
+
+╭-----------------------+----------------+-------+---------+----------╮
+| Contract              | Selector       | Calls | Reverts | Discards |
++=====================================================================+
+| HankoThresholdHandler | probe          | 4089  | 0       | 0        |
+|-----------------------+----------------+-------+---------+----------|
+| HankoThresholdHandler | probeCanonical | 4103  | 1105    | 0        |
+╰-----------------------+----------------+-------+---------+----------╯
+
+[PASS] invariant_quorumNeverBelowThreshold() (runs: 128, calls: 8192, reverts: 1105)
+
+╭-----------------------+----------------+-------+---------+----------╮
+| Contract              | Selector       | Calls | Reverts | Discards |
++=====================================================================+
+| HankoThresholdHandler | probe          | 4089  | 0       | 0        |
+|-----------------------+----------------+-------+---------+----------|
+| HankoThresholdHandler | probeCanonical | 4103  | 1105    | 0        |
+╰-----------------------+----------------+-------+---------+----------╯
+
+[PASS] invariant_unsatisfiableProofsAreRejected() (runs: 128, calls: 8192, reverts: 1105)
+
+╭-----------------------+----------------+-------+---------+----------╮
+| Contract              | Selector       | Calls | Reverts | Discards |
++=====================================================================+
+| HankoThresholdHandler | probe          | 4089  | 0       | 0        |
+|-----------------------+----------------+-------+---------+----------|
+| HankoThresholdHandler | probeCanonical | 4103  | 1105    | 0        |
+╰-----------------------+----------------+-------+---------+----------╯
+
+[PASS] invariant_validProofsAreAccepted() (runs: 128, calls: 8192, reverts: 1105)
+
+╭-----------------------+----------------+-------+---------+----------╮
+| Contract              | Selector       | Calls | Reverts | Discards |
++=====================================================================+
+| HankoThresholdHandler | probe          | 4089  | 0       | 0        |
+|-----------------------+----------------+-------+---------+----------|
+| HankoThresholdHandler | probeCanonical | 4103  | 1105    | 0        |
+╰-----------------------+----------------+-------+---------+----------╯
+
+[PASS] test_control_oneSignatureBelowThresholdRejected() (gas: 44676)
+[PASS] test_control_twoOfTwoLazyBoardAccepted() (gas: 50936)
+Suite result: ok. 7 passed; 0 failed; 0 skipped; finished in 11.16s (14.07s CPU time)
+
+Ran 15 tests for test/foundry/DebtLifecycle.invariants.t.sol:DebtLifecycleInvariants
+[PASS] invariant_callSummary() (runs: 128, calls: 8192, reverts: 0)
+
+╭----------------------+-------------------------+-------+---------+----------╮
+| Contract             | Selector                | Calls | Reverts | Discards |
++=============================================================================+
+| DebtLifecycleHandler | advance                 | 926   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | advancePastDisputeDelay | 896   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | enforceDebt             | 880   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | finalizeDebtDispute     | 905   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | forgiveDebt             | 898   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | mint                    | 932   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | openDebtDispute         | 910   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | seedCollateral          | 932   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | spend                   | 913   | 0       | 0        |
+╰----------------------+-------------------------+-------+---------+----------╯
+
+[PASS] invariant_debtAdmissionIsExact() (runs: 128, calls: 8192, reverts: 0)
+
+╭----------------------+-------------------------+-------+---------+----------╮
+| Contract             | Selector                | Calls | Reverts | Discards |
++=============================================================================+
+| DebtLifecycleHandler | advance                 | 926   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | advancePastDisputeDelay | 896   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | enforceDebt             | 880   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | finalizeDebtDispute     | 905   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | forgiveDebt             | 898   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | mint                    | 932   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | openDebtDispute         | 910   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | seedCollateral          | 932   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | spend                   | 913   | 0       | 0        |
+╰----------------------+-------------------------+-------+---------+----------╯
+
+[PASS] invariant_debtBooksMirrorGhost() (runs: 128, calls: 8192, reverts: 0)
+
+╭----------------------+-------------------------+-------+---------+----------╮
+| Contract             | Selector                | Calls | Reverts | Discards |
++=============================================================================+
+| DebtLifecycleHandler | advance                 | 926   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | advancePastDisputeDelay | 896   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | enforceDebt             | 880   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | finalizeDebtDispute     | 905   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | forgiveDebt             | 898   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | mint                    | 932   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | openDebtDispute         | 910   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | seedCollateral          | 932   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | spend                   | 913   | 0       | 0        |
+╰----------------------+-------------------------+-------+---------+----------╯
+
+[PASS] invariant_debtLifecycleFlowsBalance() (runs: 128, calls: 8192, reverts: 0)
+
+╭----------------------+-------------------------+-------+---------+----------╮
+| Contract             | Selector                | Calls | Reverts | Discards |
++=============================================================================+
+| DebtLifecycleHandler | advance                 | 926   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | advancePastDisputeDelay | 896   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | enforceDebt             | 880   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | finalizeDebtDispute     | 905   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | forgiveDebt             | 898   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | mint                    | 932   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | openDebtDispute         | 910   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | seedCollateral          | 932   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | spend                   | 913   | 0       | 0        |
+╰----------------------+-------------------------+-------+---------+----------╯
+
+[PASS] invariant_debtNeverEntersValuePool() (runs: 128, calls: 8192, reverts: 0)
+
+╭----------------------+-------------------------+-------+---------+----------╮
+| Contract             | Selector                | Calls | Reverts | Discards |
++=============================================================================+
+| DebtLifecycleHandler | advance                 | 926   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | advancePastDisputeDelay | 896   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | enforceDebt             | 880   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | finalizeDebtDispute     | 905   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | forgiveDebt             | 898   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | mint                    | 932   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | openDebtDispute         | 910   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | seedCollateral          | 932   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | spend                   | 913   | 0       | 0        |
+╰----------------------+-------------------------+-------+---------+----------╯
+
+[PASS] invariant_valuePoolIsConserved() (runs: 128, calls: 8192, reverts: 0)
+
+╭----------------------+-------------------------+-------+---------+----------╮
+| Contract             | Selector                | Calls | Reverts | Discards |
++=============================================================================+
+| DebtLifecycleHandler | advance                 | 926   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | advancePastDisputeDelay | 896   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | enforceDebt             | 880   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | finalizeDebtDispute     | 905   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | forgiveDebt             | 898   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | mint                    | 932   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | openDebtDispute         | 910   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | seedCollateral          | 932   | 0       | 0        |
+|----------------------+-------------------------+-------+---------+----------|
+| DebtLifecycleHandler | spend                   | 913   | 0       | 0        |
+╰----------------------+-------------------------+-------+---------+----------╯
+
+[PASS] test_boundary_createdBlockNeverTruncates() (gas: 1770763)
+[PASS] test_boundary_createdSeqNeverTruncates() (gas: 1783440)
+[PASS] test_control_partialEnforcementThenO1Forgiveness() (gas: 2796406)
+[PASS] test_control_shortfallBooksExactDebt() (gas: 1884911)
+[PASS] test_control_thirdPartyHeadBlocksForgiveness() (gas: 4625720)
+[PASS] test_meta_creditorCountIsSensitive() (gas: 1776191)
+[PASS] test_meta_debtBooksAreSensitive() (gas: 1798179)
+[PASS] test_meta_debtGenerationIsSensitive() (gas: 1872415)
+[PASS] test_meta_ghostDebtIsSensitive() (gas: 1523933)
+Suite result: ok. 15 passed; 0 failed; 0 skipped; finished in 11.18s (33.43s CPU time)
+
+Ran 15 tests for test/foundry/Depository.invariants.t.sol:DepositoryInvariants
+[PASS] invariant_accountNonceNeverDecreases() (runs: 128, calls: 8192, reverts: 0)
+
+╭-------------------+------------------------------+-------+---------+----------╮
+| Contract          | Selector                     | Calls | Reverts | Discards |
++===============================================================================+
+| DepositoryHandler | advance                      | 535   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | advancePastDisputeDelay      | 503   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | collateralToReserve          | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | depositExternal              | 528   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFinalizeTimeout       | 527   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFullCycle             | 506   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeStart                 | 542   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDeniedToDebtor          | 514   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDepositOverdrawWithdraw | 500   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashR2RRepaidByCollateral   | 513   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | mint                         | 501   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | pokeEnforceDebts             | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToCollateral          | 480   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToReserve             | 522   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | settle                       | 539   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | withdrawExternal             | 474   | 0       | 0        |
+╰-------------------+------------------------------+-------+---------+----------╯
+
+[PASS] invariant_activeDebtCountMatchesQueue() (runs: 128, calls: 8192, reverts: 0)
+
+╭-------------------+------------------------------+-------+---------+----------╮
+| Contract          | Selector                     | Calls | Reverts | Discards |
++===============================================================================+
+| DepositoryHandler | advance                      | 535   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | advancePastDisputeDelay      | 503   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | collateralToReserve          | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | depositExternal              | 528   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFinalizeTimeout       | 527   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFullCycle             | 506   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeStart                 | 542   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDeniedToDebtor          | 514   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDepositOverdrawWithdraw | 500   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashR2RRepaidByCollateral   | 513   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | mint                         | 501   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | pokeEnforceDebts             | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToCollateral          | 480   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToReserve             | 522   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | settle                       | 539   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | withdrawExternal             | 474   | 0       | 0        |
+╰-------------------+------------------------------+-------+---------+----------╯
+
+[PASS] invariant_callSummary() (runs: 128, calls: 8192, reverts: 0)
+
+╭-------------------+------------------------------+-------+---------+----------╮
+| Contract          | Selector                     | Calls | Reverts | Discards |
++===============================================================================+
+| DepositoryHandler | advance                      | 535   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | advancePastDisputeDelay      | 503   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | collateralToReserve          | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | depositExternal              | 528   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFinalizeTimeout       | 527   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFullCycle             | 506   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeStart                 | 542   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDeniedToDebtor          | 514   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDepositOverdrawWithdraw | 500   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashR2RRepaidByCollateral   | 513   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | mint                         | 501   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | pokeEnforceDebts             | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToCollateral          | 480   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToReserve             | 522   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | settle                       | 539   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | withdrawExternal             | 474   | 0       | 0        |
+╰-------------------+------------------------------+-------+---------+----------╯
+
+[PASS] invariant_debtCursorNeverStrandsDebt() (runs: 128, calls: 8192, reverts: 0)
+
+╭-------------------+------------------------------+-------+---------+----------╮
+| Contract          | Selector                     | Calls | Reverts | Discards |
++===============================================================================+
+| DepositoryHandler | advance                      | 535   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | advancePastDisputeDelay      | 503   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | collateralToReserve          | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | depositExternal              | 528   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFinalizeTimeout       | 527   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFullCycle             | 506   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeStart                 | 542   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDeniedToDebtor          | 514   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDepositOverdrawWithdraw | 500   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashR2RRepaidByCollateral   | 513   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | mint                         | 501   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | pokeEnforceDebts             | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToCollateral          | 480   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToReserve             | 522   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | settle                       | 539   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | withdrawExternal             | 474   | 0       | 0        |
+╰-------------------+------------------------------+-------+---------+----------╯
+
+[PASS] invariant_debtIsNotValue() (runs: 128, calls: 8192, reverts: 0)
+
+╭-------------------+------------------------------+-------+---------+----------╮
+| Contract          | Selector                     | Calls | Reverts | Discards |
++===============================================================================+
+| DepositoryHandler | advance                      | 535   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | advancePastDisputeDelay      | 503   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | collateralToReserve          | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | depositExternal              | 528   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFinalizeTimeout       | 527   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFullCycle             | 506   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeStart                 | 542   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDeniedToDebtor          | 514   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDepositOverdrawWithdraw | 500   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashR2RRepaidByCollateral   | 513   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | mint                         | 501   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | pokeEnforceDebts             | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToCollateral          | 480   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToReserve             | 522   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | settle                       | 539   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | withdrawExternal             | 474   | 0       | 0        |
+╰-------------------+------------------------------+-------+---------+----------╯
+
+[PASS] invariant_debtOutstandingMatchesQueue() (runs: 128, calls: 8192, reverts: 0)
+
+╭-------------------+------------------------------+-------+---------+----------╮
+| Contract          | Selector                     | Calls | Reverts | Discards |
++===============================================================================+
+| DepositoryHandler | advance                      | 535   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | advancePastDisputeDelay      | 503   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | collateralToReserve          | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | depositExternal              | 528   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFinalizeTimeout       | 527   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFullCycle             | 506   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeStart                 | 542   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDeniedToDebtor          | 514   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDepositOverdrawWithdraw | 500   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashR2RRepaidByCollateral   | 513   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | mint                         | 501   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | pokeEnforceDebts             | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToCollateral          | 480   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToReserve             | 522   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | settle                       | 539   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | withdrawExternal             | 474   | 0       | 0        |
+╰-------------------+------------------------------+-------+---------+----------╯
+
+[PASS] invariant_disputeNotFinalizableEarly() (runs: 128, calls: 8192, reverts: 0)
+
+╭-------------------+------------------------------+-------+---------+----------╮
+| Contract          | Selector                     | Calls | Reverts | Discards |
++===============================================================================+
+| DepositoryHandler | advance                      | 535   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | advancePastDisputeDelay      | 503   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | collateralToReserve          | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | depositExternal              | 528   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFinalizeTimeout       | 527   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFullCycle             | 506   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeStart                 | 542   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDeniedToDebtor          | 514   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDepositOverdrawWithdraw | 500   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashR2RRepaidByCollateral   | 513   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | mint                         | 501   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | pokeEnforceDebts             | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToCollateral          | 480   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToReserve             | 522   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | settle                       | 539   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | withdrawExternal             | 474   | 0       | 0        |
+╰-------------------+------------------------------+-------+---------+----------╯
+
+[PASS] invariant_disputeNotFinalizableTwice() (runs: 128, calls: 8192, reverts: 0)
+
+╭-------------------+------------------------------+-------+---------+----------╮
+| Contract          | Selector                     | Calls | Reverts | Discards |
++===============================================================================+
+| DepositoryHandler | advance                      | 535   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | advancePastDisputeDelay      | 503   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | collateralToReserve          | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | depositExternal              | 528   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFinalizeTimeout       | 527   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFullCycle             | 506   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeStart                 | 542   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDeniedToDebtor          | 514   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDepositOverdrawWithdraw | 500   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashR2RRepaidByCollateral   | 513   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | mint                         | 501   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | pokeEnforceDebts             | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToCollateral          | 480   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToReserve             | 522   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | settle                       | 539   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | withdrawExternal             | 474   | 0       | 0        |
+╰-------------------+------------------------------+-------+---------+----------╯
+
+[PASS] invariant_disputeNotRestartable() (runs: 128, calls: 8192, reverts: 0)
+
+╭-------------------+------------------------------+-------+---------+----------╮
+| Contract          | Selector                     | Calls | Reverts | Discards |
++===============================================================================+
+| DepositoryHandler | advance                      | 535   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | advancePastDisputeDelay      | 503   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | collateralToReserve          | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | depositExternal              | 528   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFinalizeTimeout       | 527   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFullCycle             | 506   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeStart                 | 542   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDeniedToDebtor          | 514   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDepositOverdrawWithdraw | 500   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashR2RRepaidByCollateral   | 513   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | mint                         | 501   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | pokeEnforceDebts             | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToCollateral          | 480   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToReserve             | 522   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | settle                       | 539   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | withdrawExternal             | 474   | 0       | 0        |
+╰-------------------+------------------------------+-------+---------+----------╯
+
+[PASS] invariant_disputeStateIsConsistent() (runs: 128, calls: 8192, reverts: 0)
+
+╭-------------------+------------------------------+-------+---------+----------╮
+| Contract          | Selector                     | Calls | Reverts | Discards |
++===============================================================================+
+| DepositoryHandler | advance                      | 535   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | advancePastDisputeDelay      | 503   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | collateralToReserve          | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | depositExternal              | 528   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFinalizeTimeout       | 527   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFullCycle             | 506   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeStart                 | 542   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDeniedToDebtor          | 514   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDepositOverdrawWithdraw | 500   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashR2RRepaidByCollateral   | 513   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | mint                         | 501   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | pokeEnforceDebts             | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToCollateral          | 480   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToReserve             | 522   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | settle                       | 539   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | withdrawExternal             | 474   | 0       | 0        |
+╰-------------------+------------------------------+-------+---------+----------╯
+
+[PASS] invariant_implicitFlashNeverProfits() (runs: 128, calls: 8192, reverts: 0)
+
+╭-------------------+------------------------------+-------+---------+----------╮
+| Contract          | Selector                     | Calls | Reverts | Discards |
++===============================================================================+
+| DepositoryHandler | advance                      | 535   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | advancePastDisputeDelay      | 503   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | collateralToReserve          | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | depositExternal              | 528   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFinalizeTimeout       | 527   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFullCycle             | 506   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeStart                 | 542   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDeniedToDebtor          | 514   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDepositOverdrawWithdraw | 500   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashR2RRepaidByCollateral   | 513   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | mint                         | 501   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | pokeEnforceDebts             | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToCollateral          | 480   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToReserve             | 522   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | settle                       | 539   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | withdrawExternal             | 474   | 0       | 0        |
+╰-------------------+------------------------------+-------+---------+----------╯
+
+[PASS] invariant_reservesPlusCollateralPlusDebtNotInflated() (runs: 128, calls: 8192, reverts: 0)
+
+╭-------------------+------------------------------+-------+---------+----------╮
+| Contract          | Selector                     | Calls | Reverts | Discards |
++===============================================================================+
+| DepositoryHandler | advance                      | 535   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | advancePastDisputeDelay      | 503   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | collateralToReserve          | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | depositExternal              | 528   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFinalizeTimeout       | 527   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFullCycle             | 506   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeStart                 | 542   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDeniedToDebtor          | 514   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDepositOverdrawWithdraw | 500   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashR2RRepaidByCollateral   | 513   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | mint                         | 501   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | pokeEnforceDebts             | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToCollateral          | 480   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToReserve             | 522   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | settle                       | 539   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | withdrawExternal             | 474   | 0       | 0        |
+╰-------------------+------------------------------+-------+---------+----------╯
+
+[PASS] invariant_valueConservation() (runs: 128, calls: 8192, reverts: 0)
+
+╭-------------------+------------------------------+-------+---------+----------╮
+| Contract          | Selector                     | Calls | Reverts | Discards |
++===============================================================================+
+| DepositoryHandler | advance                      | 535   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | advancePastDisputeDelay      | 503   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | collateralToReserve          | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | depositExternal              | 528   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFinalizeTimeout       | 527   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeFullCycle             | 506   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | disputeStart                 | 542   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDeniedToDebtor          | 514   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashDepositOverdrawWithdraw | 500   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | flashR2RRepaidByCollateral   | 513   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | mint                         | 501   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | pokeEnforceDebts             | 504   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToCollateral          | 480   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | reserveToReserve             | 522   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | settle                       | 539   | 0       | 0        |
+|-------------------+------------------------------+-------+---------+----------|
+| DepositoryHandler | withdrawExternal             | 474   | 0       | 0        |
+╰-------------------+------------------------------+-------+---------+----------╯
+
+[PASS] test_meta_debtInvariantIsSensitive() (gas: 92189)
+[PASS] test_meta_valueConservationIsSensitive() (gas: 134642)
+Suite result: ok. 15 passed; 0 failed; 0 skipped; finished in 11.18s (62.44s CPU time)
+
+Ran 9 tests for test/foundry/DepositoryConservation.invariants.t.sol:DepositoryConservationInvariants
+[PASS] invariant_callSummary() (runs: 128, calls: 8192, reverts: 53)
+
+╭---------------------+------------+-------+---------+----------╮
+| Contract            | Selector   | Calls | Reverts | Discards |
++===============================================================+
+| ConservationHandler | mint       | 2776  | 0       | 0        |
+|---------------------+------------+-------+---------+----------|
+| ConservationHandler | mixedBatch | 2786  | 53      | 0        |
+|---------------------+------------+-------+---------+----------|
+| ConservationHandler | replayLast | 2630  | 0       | 0        |
+╰---------------------+------------+-------+---------+----------╯
+
+[PASS] invariant_debtNeverEntersValuePool() (runs: 128, calls: 8192, reverts: 53)
+
+╭---------------------+------------+-------+---------+----------╮
+| Contract            | Selector   | Calls | Reverts | Discards |
++===============================================================+
+| ConservationHandler | mint       | 2776  | 0       | 0        |
+|---------------------+------------+-------+---------+----------|
+| ConservationHandler | mixedBatch | 2786  | 53      | 0        |
+|---------------------+------------+-------+---------+----------|
+| ConservationHandler | replayLast | 2630  | 0       | 0        |
+╰---------------------+------------+-------+---------+----------╯
+
+[PASS] invariant_entityNonceMatchesAcceptedCount() (runs: 128, calls: 8192, reverts: 53)
+
+╭---------------------+------------+-------+---------+----------╮
+| Contract            | Selector   | Calls | Reverts | Discards |
++===============================================================+
+| ConservationHandler | mint       | 2776  | 0       | 0        |
+|---------------------+------------+-------+---------+----------|
+| ConservationHandler | mixedBatch | 2786  | 53      | 0        |
+|---------------------+------------+-------+---------+----------|
+| ConservationHandler | replayLast | 2630  | 0       | 0        |
+╰---------------------+------------+-------+---------+----------╯
+
+[PASS] invariant_entityNonceStepsByExactlyOne() (runs: 128, calls: 8192, reverts: 53)
+
+╭---------------------+------------+-------+---------+----------╮
+| Contract            | Selector   | Calls | Reverts | Discards |
++===============================================================+
+| ConservationHandler | mint       | 2776  | 0       | 0        |
+|---------------------+------------+-------+---------+----------|
+| ConservationHandler | mixedBatch | 2786  | 53      | 0        |
+|---------------------+------------+-------+---------+----------|
+| ConservationHandler | replayLast | 2630  | 0       | 0        |
+╰---------------------+------------+-------+---------+----------╯
+
+[PASS] invariant_everyBatchConservesValue() (runs: 128, calls: 8192, reverts: 53)
+
+╭---------------------+------------+-------+---------+----------╮
+| Contract            | Selector   | Calls | Reverts | Discards |
++===============================================================+
+| ConservationHandler | mint       | 2776  | 0       | 0        |
+|---------------------+------------+-------+---------+----------|
+| ConservationHandler | mixedBatch | 2786  | 53      | 0        |
+|---------------------+------------+-------+---------+----------|
+| ConservationHandler | replayLast | 2630  | 0       | 0        |
+╰---------------------+------------+-------+---------+----------╯
+
+[PASS] invariant_replayedBatchIsRejected() (runs: 128, calls: 8192, reverts: 53)
+
+╭---------------------+------------+-------+---------+----------╮
+| Contract            | Selector   | Calls | Reverts | Discards |
++===============================================================+
+| ConservationHandler | mint       | 2776  | 0       | 0        |
+|---------------------+------------+-------+---------+----------|
+| ConservationHandler | mixedBatch | 2786  | 53      | 0        |
+|---------------------+------------+-------+---------+----------|
+| ConservationHandler | replayLast | 2630  | 0       | 0        |
+╰---------------------+------------+-------+---------+----------╯
+
+[PASS] invariant_valuePoolIsConserved() (runs: 128, calls: 8192, reverts: 53)
+
+╭---------------------+------------+-------+---------+----------╮
+| Contract            | Selector   | Calls | Reverts | Discards |
++===============================================================+
+| ConservationHandler | mint       | 2776  | 0       | 0        |
+|---------------------+------------+-------+---------+----------|
+| ConservationHandler | mixedBatch | 2786  | 53      | 0        |
+|---------------------+------------+-------+---------+----------|
+| ConservationHandler | replayLast | 2630  | 0       | 0        |
+╰---------------------+------------+-------+---------+----------╯
+
+[PASS] test_meta_conservationIsSensitive() (gas: 133234)
+[PASS] test_meta_nonceIsSensitive() (gas: 203335)
+Suite result: ok. 9 passed; 0 failed; 0 skipped; finished in 12.07s (39.04s CPU time)
+
+Ran 7 test suites in 12.07s (65.48s CPU time): 64 tests passed, 0 failed, 0 skipped (64 total tests)

@@ -1,0 +1,30 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": false,
+    "resolveJsonModule": true
+  },
+  "files": [
+    "jurisdictions/hardhat.config.ts",
+    "jurisdictions/tasks/xln-deploy.ts",
+    "jurisdictions/tasks/deploy.ts",
+    "jurisdictions/scripts/deployment/operator/standalone.ts",
+    "jurisdictions/scripts/deploy-stack.cjs",
+    "jurisdictions/scripts/deployment/dispatch.cjs",
+    "jurisdictions/scripts/deploy-chain-matrix.cjs",
+    "jurisdictions/scripts/foundation-hanko.cjs",
+    "core/__tests__/operations/release/foundation-hanko-deploy.test.ts",
+    "core/__tests__/network/jurisdiction/wrapped-native-listing.test.ts",
+    "tools/deployment/check.ts"
+  ],
+  "include": [
+    "jurisdictions/scripts/deployment/**/*.ts",
+    "jurisdictions/scripts/deployment/**/*.cjs",
+    "jurisdictions/tasks/**/*.ts",
+    "jurisdictions/typechain-types/hardhat.d.ts",
+    "core/__tests__/orchestrator/standalone-deployment/*.ts"
+  ],
+  "exclude": []
+}
