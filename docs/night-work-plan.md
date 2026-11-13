@@ -1,58 +1,70 @@
 # Current xln execution handoff
 
-The only handoff. Replace this file on each handoff; never append history (git keeps it).
-The live queue is [todo.md](../todo.md); scope and authority are in [AGENTS.md](../AGENTS.md).
-
 ## Current SHA
 
-- Release candidate: `e838188fd` (2026-10-27) — full browser E2E and `gate:release` both green.
-- Public testnet `xln.finance` (private chains 31337/31338) still serves `e4abb8c14`:
-  [rollout evidence](evidence/public-testnet-e4abb8c1-20261024.json). Not redeployed since.
-- Uncommitted work from other agents may be present in other checkouts; preserve it.
+- Deployment source commit: `ceb1d0522d20b171ca21803f152ecf3fd5875441`, `testnets_deploy`.
+- Resolve the current documentation commit with `git rev-parse HEAD`; unrelated owner edits remain dirty.
+- `main`: `019d45beb5954e77fe806d643845f6a4dca4fa82`; unchanged by this task.
+- Owner-approved MacBook M5 execution exception. Two local commits authorized; no push or public broadcast.
 
 ## Last green command
 
-- On `e838188fd`, Mac Studio
-  ([evidence](evidence/release-candidate-e838188f-20261027/result.json)):
-  - `bun run test:e2e:full`: 157/157, strict browser health 0 issues, 514 s.
-  - `bun run gate:release`: 40/40 steps.
+Read-only public preflight: 2/2 network/token/signer records, 16/16 independent
+constructor estimates, 2/2 proxy observations and reference-header matches.
+Both network records and the read-only probe invocations exited zero. Generated
+local reports are excluded from the commits; this handoff records the
+outcomes and the [operator guide](deployment/ignition-stack-design.md#next-public-preflight)
+provides the refresh command.
+
+`bun run check:deployment`: 6/6 gates, 274 Hardhat tests, 64 Foundry checks,
+93 Bun tests / 3,505 assertions.
+All 552 covered source and 181 artifact hashes still match the committed source
+content. Documentation-only recording reuses that evidence; no broader profile
+was run and no clean whole-product release is claimed.
 
 ## First red command/error
 
-- None on the candidate. Next gates are not yet run (see below).
+No unresolved failure in the selected read-only probes. The earlier missing-RPC
+error is superseded: both configured RPCs now work. The complete eleven-operation
+public deployment remains unrun, including the two bindings and signed listing.
+The Account creation call failed at 16,777,216 gas on Ethereum, then returned
+runtime at the actual 36,287,198 estimate; its exact low-gas failure reason was
+not established. This is not recorded as a deployment failure.
 
 ## Artifact path
 
-- `docs/evidence/release-candidate-e838188f-20261027/result.json`
-- Mac Studio: `/tmp/e2e-run30.log`, `/tmp/gate-release-run30.log`, `/tmp/run30/`.
+- Generated local verification reports are excluded from the commits.
+- The next deployment will create native artifacts under
+  `jurisdictions/ignition/deployments/eth-sepolia-ignition-01/`.
+- [Operator guide](deployment/ignition-stack-design.md#next-public-preflight).
 
 ## Next single command
 
-```bash
-bun run test:e2e:full && bun run gate:release
+Later public deployment execution step only; this command signs and broadcasts.
+It was checked with `--help`, not executed. Prerequisites: stand available,
+unchanged tested candidate/artifacts, intended signer/key and both RPC variables
+in `~/.config/xln/testnet-deployer.env`, fresh nonce/fee/state observations, no
+concurrent signer use and an absent fresh deployment directory. Do not print secrets.
+
+```sh
+bun run stand:run --reason ethereum-sepolia-deployment --timeout-ms 600000 -- \
+  node --env-file="$HOME/.config/xln/testnet-deployer.env" \
+  node_modules/hardhat/dist/src/cli.js --config jurisdictions/hardhat.config.ts \
+  xln-deploy --network ethereum-sepolia \
+  --parameters "$PWD/jurisdictions/ignition/parameters/ethereum-sepolia.json" \
+  --deployment-id eth-sepolia-ignition-01 --mode new
 ```
-
-Run both on one SHA. Do not wrap `gate:release` in `stand:run`: its steps take the stand
-themselves and the wrapper's default 30 s timeout kills it. `gate:release` cleans
-`.logs/e2e-parallel` and `.logs/gates`; copy a failing run's directory before starting it.
-Exact reruns that the runner demands (`BROAD_RUN_BLOCKED_EXACT_RERUN_REQUIRED`) must pass
-before a broad run starts.
-
-## Open decisions and known gaps
-
-- Owner fork (bad RPC -> pause jurisdiction): peer-originated J-dependent Account frames while a
-  jurisdiction is paused — A) per-Entity not-ready to peers, senders keep outputs in their
-  committed outbox, or B) paused set as a WAL Runtime input and Accounts withhold ACK. The local
-  command fence is ready as an unlanded patch.
-- Wallet RPC snapshot reads at a numeric height are not authenticated against a header root.
-- `anvil_reset` is still used for used dev chains; runner-owned anvil restarts would remove it.
 
 ## Remaining final gates
 
-- Public testnet redeploy of the candidate with served-SHA browser verification.
-- Native TRON (TVM) four-flow evidence; receipt-authentication trust decision is open.
-- Public Sepolia financial proof on current bytecode (real-clock disputes and exits).
-- Valid 1,000-user live TPS run (AGENTS.md TPS rules) and uninterrupted 1-hour soak.
-- `bun run gate:mainnet` on the final clean SHA, then owner-reviewed deployment packet.
-
-Mainnet readiness: UNKNOWN until every gate above passes on the same SHA.
+- Native Ethereum Sepolia execution: eight creations, two bindings, one signed
+  USDC listing; actual winning receipts with twelve confirmations, exact current
+  linked code/bindings/token/foundation and receipt/balance expense accounting.
+- Then separate fresh Arbitrum Sepolia ID `arb-sepolia-ignition-01` with its network
+  and parameter file. Preserve both attempts' journals, artifacts and results;
+  recover interruptions with the same ID and `--mode resume`.
+- Public deposits/withdrawals/Cross-J and interrupted-transfer proof remain separate.
+  Constructor estimates and local balances do not establish those outcomes.
+- Discovery/Runtime activation and TS/Rust HTTP/UI integration are deferred consumers.
+- Whole-product/mainnet acceptance still needs repository/browser/financial/release
+  gates and one clean committed source SHA. No such acceptance is claimed here.

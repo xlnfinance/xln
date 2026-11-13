@@ -1,11 +1,12 @@
 # Standalone recoverable Stack Deployment through Hardhat Ignition
 
-Status: ready-for-agent
+Status: ready-for-human
 Created: 2026-11-11
-Updated: 2026-11-13
+Updated: 2026-11-14
 Category: enhancement
-Inspected source HEAD/main: 019d45beb5954e77fe806d643845f6a4dca4fa82
-Candidate: dirty working tree on the owner-approved testnets_deploy branch
+Inspected source HEAD: 696f6f0ac67003dfffbd5625376f2e3f60256274
+Deployment source commit: ceb1d0522d20b171ca21803f152ecf3fd5875441
+Candidate: committed deployment source on the owner-approved testnets_deploy branch; unrelated owner edits remain dirty
 
 ## Problem Statement
 
@@ -137,3 +138,22 @@ Ticket [08: standalone Hardhat task](issues/08-standalone-hardhat-stack-deployme
 Continue under the owner-authorized MacBook Pro M5 and testnets_deploy exceptions, preserving unrelated dirty work and todo.md. No branch, worktree, commit, push, public signing, faucet request, deployment, store reset or external-model dispatch is authorized by this planning update. The waived external three-model rule remains waived.
 
 The historical repository check failed on two unchanged credential-URL fixtures; its cancelled and unrun gates were recorded in the deleted delivery artifacts. No current check result or release readiness is established by those records. Future proof-retention requirements above remain in force.
+
+## Local implementation completion (2026-11-13)
+
+The standalone CLI and recovery implementation is locally complete through ticket 07.
+The recorded six-gate deployment profile passed 274 Hardhat tests, 64 Foundry
+checks and 93 Bun tests / 3,505 assertions on the dirty owned candidate. Generated
+reports are excluded from these commits; no clean committed release or public
+execution is claimed. All implementation tickets are ready for human review. Public delivery
+follows the fresh preflight in the [single handoff](../../docs/night-work-plan.md).
+
+## Local test evidence retention (owner decision 2026-11-14)
+
+Exclude all generated local evidence files from these commits, including
+reports and hash maps. Keep runnable tests, verification commands and brief
+recorded results in the documentation. Local reports may remain outside the
+commit; detailed historical cases cannot be reconstructed from the recorded
+results alone. This exception applies to this task's local records only; active
+and future public deployment native journals/artifacts/receipts retain the
+requirements above.
