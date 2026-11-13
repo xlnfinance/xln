@@ -54,13 +54,18 @@ transitions, one canonical production path, no silent fallback.
 - Never invent a catalog, taxonomy, abstraction, audit campaign or intermediate gate that
   blocks an explicit production artifact, replay or TPS deliverable.
 - One implementer owns an area; a reviewer starts only after a stable diff.
-- `todo.md` is the single live queue. The single handoff,
-  [docs/night-work-plan.md](docs/night-work-plan.md), holds only: current SHA, last green
-  command, first red command/error, artifact path, next single command, remaining final gates.
+- `todo.md` is the owner's live release queue. Matt Pocock skill specs, feature tickets
+  and decision maps use `.scratch/<feature>/` without modifying `todo.md`; read
+  [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md) before tracker operations.
+  These working tracker records are the exception to the `/docs` location rule.
+  The single execution handoff, [docs/night-work-plan.md](docs/night-work-plan.md), holds
+  only: current SHA, last green command, first red command/error, artifact path,
+  next single command, remaining final gates.
 
 ## ALWAYS
 
-- Run `bun run check` before push, merge, release or a completion claim.
+- Before a completion claim, push, merge or release, use the applicable
+  [verification scope](#verification-scope).
 - Delete anything that does not improve or affect the product (fixed-bug histories, finished
   research, stale handoffs); git keeps the past. Prefer net-negative diffs.
 - Never re-propose an idea listed in [`docs/rejected-ideas.md`](docs/rejected-ideas.md) without new evidence.
@@ -186,7 +191,8 @@ transitions, one canonical production path, no silent fallback.
   synchronization controller; synchronization never discards or overwrites them.
 - No `wip:` commits. Commit only owned paths with `git commit -- <paths>`. Before a shared-tree
   commit, stop concurrent writers, run formatting and `git diff --check`. Failed verification is
-  not a release-ready commit. Never push without relevant L1/L2 evidence and `bun run check`.
+  not a release-ready commit. Never push without relevant L1/L2 evidence and the green
+  [applicable verification profile](#verification-scope).
 - Release evidence names a committed SHA checked on a clean tree; durable evidence lives under
   `docs/evidence/`, never only in `/tmp`. Auditors may use a read-only checkout at an immutable SHA.
 
@@ -220,6 +226,28 @@ transitions, one canonical production path, no silent fallback.
 - Never launch Codex Security scans unless the owner names them; "audit", "review" or "check
   Solidity" means ordinary manual review.
 
+## VERIFICATION SCOPE
+
+Owner decision 2026-11-13; this scope prevails over broader check requirements in
+FinTS and older plans for qualifying changes. Financial safety standards remain mandatory.
+
+- **EVM contracts and standalone deployment only:** green `bun run check:deployment`
+  plus owning focused checks replaces `bun run check` for task completion, push, merge
+  and testnet contract deployment. This includes deployment recovery tickets 04–07.
+  Unrelated repository failures remain recorded product-release constraints, not blockers
+  requiring repairs or another global run for this scope.
+- **Broader changes or a whole-XLN/mainnet release:** require green `bun run check` and
+  the owning financial/recovery/release gates. Classify by affected behavior and consumers:
+  R/E/A transitions, consensus, storage, shared Hanko/crypto protocol semantics or application
+  API/UI behavior outside deployment require the broader path. A `core/` location,
+  transitive import or generated contract-artifact destination alone does not expand scope.
+- Run focused checks first, then the applicable profile once per executable candidate.
+  For documentation-only updates within this scope, validate the diff and links; reuse
+  green evidence only when covered executable source, configuration, tests and artifacts
+  are unchanged. Report scoped readiness separately from whole-product acceptance.
+- Stand ownership, artifact/bytecode review, network preflight, signing authority and
+  applicable financial/recovery gates retain their existing requirements.
+
 ## STAND, VERIFICATION AND PERFORMANCE
 
 - Check `bun run stand:status` before every HLT, benchmark, recorder, replay or heavy E2E. Wired
@@ -228,7 +256,8 @@ transitions, one canonical production path, no silent fallback.
   `XLN_STAND_LOCK_DISABLED=1`. A performance number counts only if the lock was held throughout.
   After a timeout kill the exact process group and children before another measurement.
 - Smallest failing boundary first: L1 unit/vector or first divergent frame; L2 focused
-  production-equivalent scenario; L3 related suite, then `bun run check` once per candidate.
+  production-equivalent scenario; L3 related suite, then the
+  [applicable verification profile](#verification-scope) once per executable candidate.
 - Budgets: 30 s default, up to 60 s for ordinary verification; 180 s for the HLT recorder, exact
   replay, live economic stand and Solidity generation under the lock; complete E2E/release runs
   up to 2 h; uninterrupted 1 h soak within 90 min. Inspect prior receipts before choosing a
