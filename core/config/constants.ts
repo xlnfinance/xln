@@ -71,8 +71,8 @@ export const LIMITS = {
   MAX_ACCOUNT_SWAP_OFFERS: 50,
 
   /**
-   * Same-j offers become one signed DeltaTransformer program. Twenty offers
-   * preserve a full 10x2 price ladder while leaving storage-proof headroom.
+   * Same-j offers become one signed DeltaTransformer program. Thirty-two offers
+   * preserve a full price ladder on both sides while leaving storage-proof headroom.
    * More market depth belongs in additional maker Entity Accounts.
    */
   MAX_ACCOUNT_SAME_J_SWAP_OFFERS: 32,
@@ -161,8 +161,6 @@ export const HTLC = {
   /** Maximum hops for HTLC routing (prevents loops) */
   MAX_HOPS: 100,
 
-  /** Default HTLC expiry (baseline, may be raised per-route) */
-  DEFAULT_EXPIRY_MS: 30_000,
 } as const;
 
 // ═══════════════════════════════════════════════════════════════
@@ -185,20 +183,8 @@ export const SWAP_CONSTANTS = {
 // ═══════════════════════════════════════════════════════════════
 
 export const TIMING = {
-  /** Runtime tick interval (how often runtime.ts processes inputs) */
-  TICK_INTERVAL_MS: 100,
-
   /** Maximum allowed clock drift between entities (30 seconds) */
   TIMESTAMP_DRIFT_MS: 30_000,
-
-  /** Proposal timeout before new proposer elected (10 seconds) */
-  PROPOSAL_TIMEOUT_MS: 10_000,
-
-  /** Withdrawal request timeout before auto-reject */
-  WITHDRAWAL_TIMEOUT_MS: 60_000, // 1 minute
-
-  /** Dispute period on-chain (blocks) */
-  DISPUTE_PERIOD_BLOCKS: 100, // ~20 minutes on Ethereum
 
   /** Crontab execution interval */
   CRONTAB_INTERVAL_MS: 1000, // 1 second
@@ -242,8 +228,6 @@ export const BLOCKCHAIN = {
    */
   JBLOCK_LIVENESS_INTERVAL: 100,
 
-  /** Maximum gas price willing to pay (in gwei) */
-  MAX_GAS_PRICE_GWEI: 300,
 } as const;
 
 // ═══════════════════════════════════════════════════════════════
@@ -251,17 +235,9 @@ export const BLOCKCHAIN = {
 // ═══════════════════════════════════════════════════════════════
 
 export const TOKENS = {
-  /** Token ID 0 is reserved (invalid) */
-  RESERVED_TOKEN_ID: 0,
-
-  /** Token ID 1 is native token (ETH, MATIC, etc.) */
-  NATIVE_TOKEN_ID: 1,
-
   /** Maximum token ID (65535 = uint16 max) */
   MAX_TOKEN_ID,
 
-  /** Default decimal places for display */
-  DEFAULT_DECIMALS: 18,
 } as const;
 
 // ═══════════════════════════════════════════════════════════════
@@ -284,11 +260,6 @@ export const PERFORMANCE = {
   /** Always log blockchain errors */
   LOG_BLOCKCHAIN_ERRORS: true,
 
-  /** Batch size for database writes */
-  DB_BATCH_SIZE: 100,
-
-  /** Snapshot interval for persistence (every N frames) */
-  SNAPSHOT_INTERVAL: 100,
 } as const;
 
 // ═══════════════════════════════════════════════════════════════

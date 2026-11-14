@@ -207,9 +207,10 @@ transitions, one canonical production path, no silent fallback.
 
 ## REVIEW AND EXTERNAL MODELS
 
-- External auditors/models run only when the owner explicitly requests them. Owner 2026-10-26
-  requested it for all work: every bug and its fix are confirmed by at least three different
-  AIs, each leg smoke-tested on a known answer first. Subscriptions first:
+- External auditors/models run only when the owner explicitly requests them. Owner 2026-11-14:
+  a change lands after a green full Studio verify; the three-AI quorum of 2026-10-26 is no
+  longer required. When the owner does request a review, each leg is smoke-tested on a known
+  answer first. Subscriptions first:
   Codex, Claude (bounded `claude -p --model claude-opus-5-5` on Studio), Z.ai via pi
   `zai-coding-cn`. All paid external-model calls share USD 10 per rolling hour across
   providers, agents, harnesses and retries, administered by the sole integrator as the single

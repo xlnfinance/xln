@@ -22,20 +22,6 @@ The live queue is [todo.md](../todo.md); scope and authority are in [AGENTS.md](
   since dispute events carry the full proof body.
 - The tests-first red test from `~/xln-status` (typed salvage zero-fill status): no implementation yet.
 
-## Next, in order
-
-1. React wallet: the same keys-preserving reset. Unknown: how an existing vault unlocks after a
-   redeploy (`bootHostedVault` with `stack: null` throws `WALLET_LOCAL_STATE_MISSING`). Reproduce
-   in a browser on Studio before changing code.
-2. Custom transformer clause on one Account, explicit counterparty acceptance, TS and Rust in
-   parity. No Solidity change. TS keeps the `AccountExternalSubcontract` slot; Rust has none
-   (`rscore/crates/engine/src/state/mod.rs` holds only lending covenants). Reference for the retired
-   TS path: commit `a06a30ec0`.
-3. Hub mirror rule and route-wide clause install.
-4. One capacity bar and a Pro toggle (on by default) in both wallets.
-5. North star wording in `intro.md`, `readme.md`, glossary: 51% of world value.
-6. Mainnet gates in `todo.md`, items 2 to 13.
-
 ## Next single command
 
 ```bash

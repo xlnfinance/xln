@@ -13,11 +13,16 @@ Testnet evidence never authorizes real-funds activation.
 
 ## Blockers, in order
 
+0. Dispute-proof replay after finalization (audit 2026-11-14, reproduced). `Depository` zeroes
+   collateral and ondelta but only advances the nonce, so a proof signed before the dispute
+   with a higher nonce opens a second dispute and settles its whole offdelta from reserves.
+   Evidence and counterexample: [docs/evidence/dispute-replay-20261114](docs/evidence/dispute-replay-20261114/readme.md).
+   Needs an owner decision on the contract fix; no real funds before it lands.
 1. Done on `e838188fd`: full browser E2E 157/157 and `gate:release` 40/40 on one SHA
    ([evidence](docs/evidence/release-candidate-e838188f-20261027/result.json)). Keep it green
    on every later candidate.
-2. Same-J Swap, Cross-swap and Lending: browserless financial scenarios plus owning React
-   E2E on one immutable candidate. Public `xln.finance` proves only import, faucet,
+2. Same-J Swap, Cross-swap and Lending: browserless financial scenarios plus owning E2E in
+   both wallets on one immutable candidate. Public `xln.finance` proves only import, faucet,
    reserve, pay, credit and reload (6/6 on `e4abb8c14`).
 3. Native TRON: genuine TVM/native RPC/event/finality evidence for all four flows. The
    validating-node trust decision for receipt authentication is open in
@@ -55,12 +60,17 @@ Testnet evidence never authorizes real-funds activation.
 - MML v0 formula in `docs/intro.md`: unaffiliated obligations only; a hub-routed payment
   counts once, on the commercial edge.
 - Owner: 10 conversations with OTC/MM/payout firms → at least 2 written intents.
+- React wallet: the keys-preserving reset of retired testnet state that the Svelte wallet has.
+- Custom transformer clause on one Account with explicit counterparty acceptance, TS and Rust
+  in parity, no Solidity change; then the hub mirror rule and route-wide install.
+- One capacity bar and a Pro toggle (on by default) in both wallets.
+- Mission wording in `docs/intro.md`, `readme.md` and the glossary: 51% of world value.
 
 ## Release evidence contract
 
 The candidate is publishable only after all of the following are green on the same bytes
-and the independent contract/runtime audit (each bug and fix confirmed by >=3 different
-AIs; external sign-off optional) reports no blocker:
+and the independent contract/runtime audit reports no blocker (owner 2026-11-14: a green
+full Studio verify lands a change; the three-AI quorum is no longer required):
 
 - `bun run check`
 - `bun run gate:release`
