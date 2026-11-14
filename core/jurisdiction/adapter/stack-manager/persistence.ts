@@ -6,7 +6,7 @@
 
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 import { status } from '@nomicfoundation/ignition-core';
 import { getAddress } from 'ethers';
 import { createRequire } from 'node:module';

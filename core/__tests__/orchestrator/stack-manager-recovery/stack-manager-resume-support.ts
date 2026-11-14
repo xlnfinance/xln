@@ -34,8 +34,10 @@ export const executionPid = (callerPid: number): number => {
   while (rows.some(row => !owned.has(row.pid) && owned.has(row.parent))) {
     rows.filter(row => owned.has(row.parent)).forEach(row => owned.add(row.pid));
   }
-  const matches = rows.filter(row => owned.has(row.pid)
-    && /node.*hardhat.*(?:xln-chain-stack|xln-deploy)/.test(row.command));
+  const matches = rows.filter(
+    row =>
+      owned.has(row.pid) && /^(?:\S*\/)?node\s+.*\bhardhat\b.*\b(?:xln-chain-stack|xln-deploy)\b/.test(row.command),
+  );
   if (matches.length !== 1) throw new Error(`RESUME_EXECUTION_CHILD_AMBIGUOUS:caller=${callerPid}:count=${matches.length}`);
   return matches[0]!.pid;
 };
