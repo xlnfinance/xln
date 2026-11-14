@@ -1,36 +1,43 @@
-# Current xln execution handoff
+# Handoff
 
-## Current SHA
+The only handoff. Replace this file on each handoff; never append history (git keeps it).
+The live queue is [todo.md](../todo.md); scope and authority are in [AGENTS.md](../AGENTS.md).
 
-Main/origin: `019d45beb5954e77fe806d643845f6a4dca4fa82`. Owned uncommitted source: `docs/evidence/rpc-outage-reopen-20261103/candidate7/source-manifest.json`.
-Public last handed-off SHA: `ffff30b4ff8a36ec336ab83a3df89d19d7c4ed21`; fresh public verification remains pending.
-Sole source owner: Studio Codex session `01a1a071-3204-7220-9981-137b3681677e`.
+- Main, origin and both Macs: `167d66b8b` (2026-11-14), clean trees.
+- Last green command: pre-push full verify on `167d66b8b` (`VERIFY_PASS`), Mac Studio.
+- First red command: none on main.
+- Owner 2026-11-14: land after a green full Studio verify without the three-AI quorum. One
+  operator drives Studio over `ssh mac-studio`; the old codex drivers stay held.
 
-## Last green command
+## Landed today
 
-`bun run stand:run --reason owner-rpc-final-trace-o1 --timeout-ms 900000 -- bun core/scripts/operations/production/local-prod-smoke.ts`
-with exact command/environment in the private job: outage+reload browser 1/1, 0 skipped/flaky, production runtime semantics + private QA diagnostics; successful private trace retained0600.
-Focused L122/22 (101 assertions), full `bun run check` exit0 on candidate7, QA bundle build exit0.
+- `02c6a88f8`, `3cd8c5380`, `0f08a4f08`: the 17-day uncommitted tree (Svelte wallet parity, J RPC
+  replacement recovery, registry-backed orderbook dimensions, evidence).
+- `ef2c5ed90`, `d9cd92b59`, `91fbfaa47`: typed ids and unit boundaries from `~/xln-status`.
+- `167d66b8b`: keys-preserving reset of retired testnet state, Svelte wallet only.
 
-## First red command/error
+## Not landed, on purpose
 
-Run8 offline unlock, run10 global catch-up, run12 stale RPC display and run13 missing secondary signer are closed by run14; review lifetime AMENDs are closed by run15 and22 focused tests.
-Full check1 failed category tags (focused fix274/274 and lint green); full check2 passed on candidate4; full check3 rejected the new WeakMap. Replaced with an explicitly cleaned Map; collection guard/lint/22-test reruns are green. Fresh full check4 passed on candidate7 (exit0); soundcheck10/10 and source38/38. Three-different-AI review pending: external allowance has $10 sent/unresolved, $0 available; preserve the historical $100 hold. This is not a clean-SHA release certificate.
-Normal restore <=1000ms, native TRON and global financial/recovery/release evidence remain unverified on this candidate.
+- `~/xln-watcher9` (dispute calldata recovery): superseded. Its files no longer exist on main
+  since dispute events carry the full proof body.
+- The tests-first red test from `~/xln-status` (typed salvage zero-fill status): no implementation yet.
 
-## Artifact path
+## Next, in order
 
-`docs/evidence/rpc-outage-reopen-20261103/candidate7/result.json`; private job `/Users/zigota/agent-jobs/xln-global-owner-20261104`.
-Preserved P1 case: `/Users/zigota/agent-jobs/xln-claude-e2e-20261023/opus-mainnet-closure-sequence-20261024/phase-107-owner-testnet-20261103/p1-case`.
-PIDs2502/2536 stay alive. Onchain deadline1793810746 = 2026-11-04T16:45:46Z; use actual chain timestamp, no time travel.
+1. React wallet: the same keys-preserving reset. Unknown: how an existing vault unlocks after a
+   redeploy (`bootHostedVault` with `stack: null` throws `WALLET_LOCAL_STATE_MISSING`). Reproduce
+   in a browser on Studio before changing code.
+2. Custom transformer clause on one Account, explicit counterparty acceptance, TS and Rust in
+   parity. No Solidity change. TS keeps the `AccountExternalSubcontract` slot; Rust has none
+   (`rscore/crates/engine/src/state/mod.rs` holds only lending covenants). Reference for the retired
+   TS path: commit `a06a30ec0`.
+3. Hub mirror rule and route-wide clause install.
+4. One capacity bar and a Pro toggle (on by default) in both wallets.
+5. North star wording in `intro.md`, `readme.md`, glossary: 51% of world value.
+6. Mainnet gates in `todo.md`, items 2 to 13.
 
 ## Next single command
 
-Compile nine current TRON artifacts under the stand lock, then actual native graph/economic/import on one fresh private ledger.
-
-## Remaining final gates
-
-Freeze actual owning case/transaction IDs and evidence on one candidate; complete EVM + genuine native TVM financial/lending/finality/exits and immutable WAL W1/W4 edge/recovery coverage.
-Finish P1 external Account payout at eligibility; verify original-wallet assertions/cold import/reload, actual25-chapter tutorial outcomes, desktop/mobile/theme and valid1000-user H1 TPS.
-Stable scoped manual review and >=3 different AI bug/fix confirmations; fresh required check/contracts/operator/browser/release evidence, normal owned commit/hooks/push, backup/rollback and coherent TESTNET deploy/public-byte/wallet verification.
-Then complete mainnet-only operational/public gates and the fresh unsigned dependency/actions/signing/funding/cost packet. Unspecified real-funds operations remain owner-only. Canceled generic full158/full-unit/hour-soak/hourwait campaigns stay canceled.
+```bash
+ssh mac-studio 'cd ~/xln && bun run stand:status'
+```
