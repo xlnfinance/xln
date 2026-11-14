@@ -272,7 +272,7 @@ export async function openFirstHubAccount(
       await sendEntity(entityId, signerId, [
         {
           type: 'openAccount',
-          // Owner default: the user extends 10,000 whole tokens of credit to
+          // Owner default: the user extends 10,000 USD of credit to
           // its hub, so incoming payments arrive without collateral. Nothing
           // raises it later; a full limit is shown and raised by the user.
           data: {

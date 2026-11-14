@@ -85,7 +85,7 @@ test('a session replaced while waiting for the relay sends nothing and shows no 
   expect(shown).toEqual([]);
 });
 
-test('the first hub Account extends the default 10,000-token credit line to the hub', async () => {
+test('the first hub Account extends the default 10,000 USD credit line to the hub', async () => {
   sends.length = 0;
   shown.length = 0;
   let session = true;

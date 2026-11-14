@@ -24,7 +24,7 @@ work committed beside it is never rolled back.
 
 ## The log line to watch
 - TS: `runtime.input_discard` → `entity_input.discarded` (error level, always emitted), and
-  `REMOTE_INPUT_REJECTED` / `FRAME_CONSENSUS_FAILED` halts in fail-fast mode.
+  `REMOTE_INPUT_REJECTED` halts in fail-fast mode.
 - TS: `runtime.entity_inputs` → `entity_input.rejected` (local ingress) / `entity_input.discarded`
   (remote ingress) with `inputIndex` and `rejectionCode` (error level, so it survives the
   production WARN threshold). The E2E fatal-log scanner treats these as audit lines, not halts:
@@ -36,7 +36,7 @@ work committed beside it is never rolled back.
   rejects the same tx and evicts it identically instead of failing with
   `ENTITY_REPLAY_CONTEXT_MISSING` (company-ipo scenario, 2-of-3 board, seed-dependent).
 - Rust: stderr `[ERROR][reject] entity tx rejected and dropped …` and
-  `[ERROR][reject] inbound account frame rejected and dropped …`.
+  `[ERROR][reject] inbound account input rejected and dropped …`.
 
 Every such line in a test, scenario or stand run is a bug to investigate (fail-fast makes
 it a halt). In production it is the audit trail of peers to inspect.
@@ -53,8 +53,8 @@ it a halt). In production it is the audit trail of peers to inspect.
   `core/runtime/mempool/entity-inputs.ts`, which records `peer-evidence` for the loop.
 - Rust `entity-kernel/src/error.rs` `reject_fail_fast()` + `EntityKernelError::RejectedEntityTx`
   (handlers return it **before any mutation**), `kernel.rs` (cross-J tx drop),
-  `resident.rs reject_failed_inbound_frames` (peer Account frame drop).
+  `resident.rs collect_rejected_inbound_inputs` (peer Account input drop).
 
-TS drops the whole remote input origin and retries the round without it; Rust drops the
-rejected tx and continues the frame. Multi-tx remote inputs carrying one rejected tx can
-therefore differ between the two in log-and-drop mode; in fail-fast mode both halt.
+Both engines evict exactly the rejected tx and keep the rest of the signer's queue: TS in
+`core/runtime/mempool/entity-inputs.ts`, Rust in `kernel.rs` and `resident.rs`. In fail-fast
+mode both halt.
