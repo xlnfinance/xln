@@ -15,8 +15,11 @@
     "jurisdictions/scripts/deployment/dispatch.cjs",
     "jurisdictions/scripts/deploy-chain-matrix.cjs",
     "jurisdictions/scripts/foundation-hanko.cjs",
+    "jurisdictions/scripts/usdc-reserve-roundtrip.ts",
     "core/__tests__/operations/release/foundation-hanko-deploy.test.ts",
     "core/__tests__/network/jurisdiction/wrapped-native-listing.test.ts",
+    "core/__tests__/network/jurisdiction/usdc-reserve-roundtrip.test.ts",
+    "core/__tests__/network/jurisdiction/usdc-reserve-roundtrip-evidence.test.ts",
     "tools/deployment/check.ts"
   ],
   "include": [

@@ -8,7 +8,7 @@ const quantity = (value: unknown): bigint => {
   return BigInt(value);
 };
 
-const receiptExpense = async (provider: JsonRpcProvider, hash: string) => {
+export const receiptExpense = async (provider: JsonRpcProvider, hash: string) => {
   const raw: unknown = await provider.send('eth_getTransactionReceipt', [hash]);
   if (raw === null) return { transactionHash: hash, status: 'unmined' as const };
   const receipt = record(raw);

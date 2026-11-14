@@ -20,6 +20,8 @@ const owningTests = [
   'core/__tests__/orchestrator/stack-manager-validation.test.ts',
   'core/__tests__/orchestrator/stack-manager-ignition-anvil.test.ts',
   'core/__tests__/network/jurisdiction/wrapped-native-listing.test.ts',
+  'core/__tests__/network/jurisdiction/usdc-reserve-roundtrip.test.ts',
+  'core/__tests__/network/jurisdiction/usdc-reserve-roundtrip-evidence.test.ts',
 ];
 
 const nativeTests = (): string[] => {
@@ -137,7 +139,7 @@ const gates = (): Gate[] => [
     '--keep-test-artifacts', '--', 'forge', 'test', '--match-contract',
     'DepositoryInvariants|DepositoryConservationInvariants|DebtLifecycleInvariants|HashLadderInvariants|HankoThresholdInvariants|TransformerAllowanceInvariants|DisputeIngressGasTest'], timeoutMs: 300_000 },
   { name: 'native', command: ['bun', cleanup, '--reason=deployment-native', '--keep-test-artifacts', '--',
-    'bun', 'test', ...nativeTests(), ...owningTests], timeoutMs: 900_000 },
+    'bun', 'test', ...nativeTests(), ...owningTests], timeoutMs: 1_200_000 },
 ];
 
 const sourceIdentity = (files: string[]) => {
@@ -210,7 +212,7 @@ const main = async (): Promise<void> => {
   if (mode !== 'all') throw new Error(`DEPLOYMENT_CHECK_MODE_INVALID:${mode}`);
   console.log(standLockStatus());
   if (inheritedStandLock()) return runProfile();
-  const child = Bun.spawn(['bun', 'tools/stand-lock.ts', 'run', '--reason=deployment-check', '--timeout-ms=1200000',
+  const child = Bun.spawn(['bun', 'tools/stand-lock.ts', 'run', '--reason=deployment-check', '--timeout-ms=1500000',
     '--', 'bun', 'tools/deployment/check.ts'], { cwd: root, stdout: 'inherit', stderr: 'inherit' });
   process.exitCode = await child.exited;
 };
