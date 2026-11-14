@@ -86,7 +86,7 @@ test('term loan spends principal, repays partially then fully, and keeps saver m
     await expect(borrower.getByTestId('lending-borrow-preview')).toContainText('Maximum repayment: 2.08 USDC');
     await expect(borrower.getByTestId('lend-submit')).toBeDisabled();
     const receive = borrower.getByTestId('receive-spectrum');
-    await receive.getByRole('button', { name: 'Accept it as credit instead', exact: true }).click();
+    await receive.getByRole('button', { name: '0% collateral', exact: true }).click();
     await receive.getByRole('checkbox').uncheck();
     await borrower.getByTestId('receive-spectrum-confirm').click();
     await expect.poll(async () => (await readAccount(borrower, borrowerIds)).credit).toBe('102000000');
@@ -139,6 +139,7 @@ test('term loan spends principal, repays partially then fully, and keeps saver m
     await expect(page.getByTestId('payment-notification')).toContainText('Received');
     await page.getByRole('button', { name: 'Dismiss payment notification' }).click();
     await borrower.getByTestId('tour-chapter').selectOption('repay');
+    await lending(borrower);
     await borrower.getByTestId('lending-repay-amount').fill('1');
     await borrower.getByTestId('lending-repay').click();
     await expect.poll(async () => (await loans(borrower, borrowerIds))[0]?.repaidAmount).toBe('1000000');

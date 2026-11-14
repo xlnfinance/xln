@@ -11,6 +11,8 @@ import { ReceiveCapacity } from '../components/ReceiveCapacity';
 import { walletHelp } from '@xln/frontend/lib/utils/ui/walletHelp';
 import { useApp } from '../runtime/store';
 import { sendEntityTxs, waitFor } from '../runtime/tx';
+import { getJson, postJson } from '../runtime/http';
+import { fetchLendingState } from '../runtime/financial/lending-http';
 import { requestCreditFacility } from '../runtime/credit-officer/request';
 import { formatAmount, formatMoney, parseAmount } from '../runtime/format';
 import { getTokenMeta } from '../runtime/token-meta';
@@ -22,7 +24,6 @@ import {
 	buildLendingBorrowTx,
 	buildLendingOfferTx,
 	bankOfferFor,
-	fetchLendingState,
 	type LendingState,
 	type TermId,
 } from '../runtime/financial/lending';
@@ -123,7 +124,7 @@ export function Lending() {
 					&& facility.expiresAt > Date.now() && facility.jNonce === hub?.doc.state.jNonce);
 				if (!approved && termId !== 'demand') {
 					const submitted = await requestCreditFacility({ hubEntityId: hubId, borrowerEntityId: wallet.entityId,
-						tokenId, amount, termId }, setCreditDecision);
+						tokenId, amount, termId }, setCreditDecision, { getJson, postJson });
 					if (submitted) await waitFor(async () => {
 						const committed = await fetchLendingState({ hubEntityId: hubId, userEntityId: wallet.entityId, tokenId });
 						return committed.facilities.some(facility => facility.borrowerEntityId === wallet.entityId

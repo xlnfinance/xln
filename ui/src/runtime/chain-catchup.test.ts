@@ -10,6 +10,7 @@ import { createEmptyEnv, startRuntimeLoop, stopRuntimeLoopAndWait } from '@xln/c
 import { getRuntimeCommandReadiness } from '@xln/core/runtime/replica/lifecycle';
 import {
   chainSyncText,
+  claimChainCatchupOwnership,
   createChainCatchupProbe,
   isChainCatchupCancelled,
   openAfterChainCatchup,
@@ -19,12 +20,84 @@ import {
 type DrainStatus = ReturnType<typeof getJWatcherDrainStatus>;
 type Target = Parameters<typeof getJWatcherDrainStatus>[1];
 
+test('a stale session cannot steal the current wallet catch-up operation', async () => {
+  const env = createEmptyEnv(`chain-catchup-stale-claim-${process.pid}-${Date.now()}`);
+  setRuntimeDeliveryReady(env, false);
+  const drained = Promise.withResolvers<void>();
+  const owns = claimChainCatchupOwnership(() => true);
+  let started = false;
+  const current = openAfterChainCatchup(
+    { setRuntimeDeliveryReady },
+    env,
+    () => true,
+    owns,
+    async poll => {
+      await drained.promise;
+      poll();
+    },
+    () => {
+      started = true;
+    },
+  ).then(
+    () => null,
+    (error: unknown) => error,
+  );
+  expect(claimChainCatchupOwnership(() => false)()).toBe(false);
+  drained.resolve();
+  expect(await current).toBeNull();
+  expect(started).toBe(true);
+  expect(env.infrastructure?.entityInputsReady).toBe(true);
+});
+
+test('a newer catch-up in the same wallet prevents the old wait opening its fence', async () => {
+  const env = createEmptyEnv(`chain-catchup-superseded-${process.pid}-${Date.now()}`);
+  setRuntimeDeliveryReady(env, false);
+  const oldDrain = Promise.withResolvers<void>();
+  const newDrain = Promise.withResolvers<void>();
+  const starts: string[] = [];
+  const open = (name: string, drained: Promise<void>, owns: () => boolean) =>
+    openAfterChainCatchup(
+      { setRuntimeDeliveryReady },
+      env,
+      () => true,
+      owns,
+      async poll => {
+        await drained;
+        poll();
+      },
+      () => {
+        starts.push(name);
+      },
+    );
+  const oldOwns = claimChainCatchupOwnership(() => true);
+  const old = open('old', oldDrain.promise, oldOwns).then(
+    () => null,
+    (error: unknown) => error,
+  );
+  const current = open(
+    'new',
+    newDrain.promise,
+    claimChainCatchupOwnership(() => true),
+  );
+  oldDrain.resolve();
+  expect(isChainCatchupCancelled(await old)).toBe(true);
+  expect(starts).toEqual([]);
+  expect(env.infrastructure?.entityInputsReady).toBe(false);
+  newDrain.resolve();
+  await current;
+  expect(starts).toEqual(['new']);
+  expect(env.infrastructure?.entityInputsReady).toBe(true);
+});
+
 test('a stalled chain catch-up is shown and keeps the fence closed until progress drains it', async () => {
   const env = createEmptyEnv(`chain-catchup-${process.pid}-${Date.now()}`);
   env.quietRuntimeLogs = true;
   setRuntimeDeliveryReady(env, false);
   startRuntimeLoop(env);
-  const payment = { runtimeTxs: [], entityInputs: [{ entityId: `0x${'ab'.repeat(32)}`, signerId: `0x${'cd'.repeat(20)}`, entityTxs: [] }] };
+  const payment = {
+    runtimeTxs: [],
+    entityInputs: [{ entityId: `0x${'ab'.repeat(32)}`, signerId: `0x${'cd'.repeat(20)}`, entityTxs: [] }],
+  };
   let through = 3;
   let nowMs = 0;
   const status = (): DrainStatus => ({
@@ -50,38 +123,55 @@ test('a stalled chain catch-up is shown and keeps the fence closed until progres
     },
   };
   const views: Array<ChainSyncView | null> = [];
-  const probe = createChainCatchupProbe(xln, env, [{ adapter: {}, targetBlock: 10 } as Target], () => 'Testnet', view => views.push(view), () => true, () => nowMs);
+  const probe = createChainCatchupProbe(
+    xln,
+    env,
+    [{ adapter: {}, targetBlock: 10 } as Target],
+    () => 'Testnet',
+    view => views.push(view),
+    () => true,
+    () => nowMs,
+  );
   const fenced = () => {
     expect(env.infrastructure?.entityInputsReady).toBe(false);
     expect(getRuntimeCommandReadiness(env, payment)).toEqual({ ready: false, reason: 'j-catchup' });
   };
   try {
-    await openAfterChainCatchup(xln, env, probe, () => true, async poll => {
-      expect(poll()).toBe(false);
-      expect(views.at(-1)).toEqual({ state: 'syncing', jurisdiction: 'Testnet', through: 3, target: 10 });
-      // No progress for the shared drain deadline: the stall is shown, the fence stays closed.
-      nowMs = 60_000;
-      expect(poll()).toBe(false);
-      expect(views.at(-1)).toEqual({ state: 'stalled', jurisdiction: 'Testnet', through: 3, target: 10 });
-      expect(chainSyncText({ state: 'stalled', jurisdiction: 'Testnet', through: 3, target: 10 })).toContain('not progressing');
-      nowMs = 90_000;
-      expect(poll()).toBe(false);
-      fenced();
-      // Progress resumes: the deadline resets and the view returns to syncing.
-      through = 7;
-      expect(poll()).toBe(false);
-      expect(views.at(-1)).toEqual({ state: 'syncing', jurisdiction: 'Testnet', through: 7, target: 10 });
-      fenced();
-      through = 10;
-      expect(poll()).toBe(true);
-      expect(views.at(-1)).toBeNull();
-      fenced();
-      expect(transportStarted).toBe(false);
-    }, () => {
-      // The transport starts while the fence is still closed.
-      expect(env.infrastructure?.entityInputsReady).toBe(false);
-      transportStarted = true;
-    });
+    await openAfterChainCatchup(
+      xln,
+      env,
+      probe,
+      () => true,
+      async poll => {
+        expect(poll()).toBe(false);
+        expect(views.at(-1)).toEqual({ state: 'syncing', jurisdiction: 'Testnet', through: 3, target: 10 });
+        // No progress for the shared drain deadline: the stall is shown, the fence stays closed.
+        nowMs = 60_000;
+        expect(poll()).toBe(false);
+        expect(views.at(-1)).toEqual({ state: 'stalled', jurisdiction: 'Testnet', through: 3, target: 10 });
+        expect(chainSyncText({ state: 'stalled', jurisdiction: 'Testnet', through: 3, target: 10 })).toContain(
+          'not progressing',
+        );
+        nowMs = 90_000;
+        expect(poll()).toBe(false);
+        fenced();
+        // Progress resumes: the deadline resets and the view returns to syncing.
+        through = 7;
+        expect(poll()).toBe(false);
+        expect(views.at(-1)).toEqual({ state: 'syncing', jurisdiction: 'Testnet', through: 7, target: 10 });
+        fenced();
+        through = 10;
+        expect(poll()).toBe(true);
+        expect(views.at(-1)).toBeNull();
+        fenced();
+        expect(transportStarted).toBe(false);
+      },
+      () => {
+        // The transport starts while the fence is still closed.
+        expect(env.infrastructure?.entityInputsReady).toBe(false);
+        transportStarted = true;
+      },
+    );
     expect(transportAtOpen).toEqual([true]);
     expect(env.infrastructure?.entityInputsReady).toBe(true);
     expect(getRuntimeCommandReadiness(env, payment).ready).toBe(true);
@@ -117,19 +207,37 @@ test('a lock during a stalled catch-up ends the wait silently and keeps the fenc
   let nowMs = 0;
   const views: Array<ChainSyncView | null> = [];
   const owns = () => session;
-  const probe = createChainCatchupProbe(xln, env, [target], () => 'Testnet', view => views.push(view), owns, () => nowMs);
+  const probe = createChainCatchupProbe(
+    xln,
+    env,
+    [target],
+    () => 'Testnet',
+    view => views.push(view),
+    owns,
+    () => nowMs,
+  );
   let polls = 0;
-  const result = openAfterChainCatchup(xln, env, probe, owns, async poll => {
-    for (;;) {
-      polls += 1;
-      if (poll()) return;
-      nowMs += 30_000;
-      if (polls === 3) session = false;
-    }
-  }, () => {
-    throw new Error('TRANSPORT_STARTED_FOR_LOCKED_SESSION');
-  });
-  const error = await result.then(() => null, (caught: unknown) => caught);
+  const result = openAfterChainCatchup(
+    xln,
+    env,
+    probe,
+    owns,
+    async poll => {
+      for (;;) {
+        polls += 1;
+        if (poll()) return;
+        nowMs += 30_000;
+        if (polls === 3) session = false;
+      }
+    },
+    () => {
+      throw new Error('TRANSPORT_STARTED_FOR_LOCKED_SESSION');
+    },
+  );
+  const error = await result.then(
+    () => null,
+    (caught: unknown) => caught,
+  );
   expect(isChainCatchupCancelled(error)).toBe(true);
   expect(polls).toBe(4);
   expect(views.at(-1)?.state).toBe('stalled');
@@ -142,7 +250,14 @@ test('a replaced session cannot publish into the new session view or open its fe
   let owner = 'old';
   const views: Array<{ owner: string; view: ChainSyncView | null }> = [];
   const probeFor = (name: string) =>
-    createChainCatchupProbe(xln, env, [target], () => 'Testnet', view => views.push({ owner: name, view }), () => owner === name);
+    createChainCatchupProbe(
+      xln,
+      env,
+      [target],
+      () => 'Testnet',
+      view => views.push({ owner: name, view }),
+      () => owner === name,
+    );
   const oldProbe = probeFor('old');
   expect(oldProbe()).toBe(false);
   owner = 'new';
@@ -151,9 +266,16 @@ test('a replaced session cannot publish into the new session view or open its fe
   expect(() => oldProbe()).toThrow('WALLET_LOCKED');
   expect(views.map(entry => entry.owner)).toEqual(['old', 'new']);
   let started = false;
-  const opened = await openAfterChainCatchup(xln, env, () => true, () => owner === 'old', async () => {}, () => {
-    started = true;
-  }).then(
+  const opened = await openAfterChainCatchup(
+    xln,
+    env,
+    () => true,
+    () => owner === 'old',
+    async () => {},
+    () => {
+      started = true;
+    },
+  ).then(
     () => true,
     (caught: unknown) => !isChainCatchupCancelled(caught),
   );

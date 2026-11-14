@@ -720,8 +720,10 @@ test('payment panel submits RuntimeInput through shared command path', () => {
   expect(accountWorkspaceSource).toContain('{submitRuntimeInput}');
 });
 
-test('lending has one React signer command path and no retired observer mutation panel', () => {
-  expect(existsSync('frontend/src/lib/components/Entity/payments/LendingPanel.svelte')).toBe(false);
+test('both wallets submit lending through signed Runtime admission', () => {
+  const svelte = readFileSync('frontend/src/lib/components/Entity/lending/LendingPanel.svelte', 'utf8');
+  expect(svelte).toContain('await submitRuntimeInput({');
+  expect(svelte).toContain('LENDING_SIGNER_ENTITY_MISMATCH');
   const screen = readFileSync('ui/src/screens/Lending.tsx', 'utf8');
   const repay = readFileSync('ui/src/components/LendingRepay.tsx', 'utf8');
   const commands = readFileSync('ui/src/runtime/financial/lending.ts', 'utf8');
@@ -732,8 +734,7 @@ test('lending has one React signer command path and no retired observer mutation
   }
   expect(screen).not.toContain("postLending('/api/lending/");
   const guide = readFileSync('frontend/src/lib/tutorial/WalletGuide.svelte', 'utf8');
-  expect(guide).toContain("selected.route === '/ui/lend'");
-  expect(guide).toContain('window.location.assign(selected.route)');
+  expect(guide).not.toContain('window.location.assign');
 });
 
 // f85f450e5 deleted the faucet ingress-receipt plumbing end to end: the server

@@ -414,10 +414,9 @@ test('localhost debug env surfaces expose RuntimeView with matching live runtime
   expect(publishSource).toContain('liveRuntimeEnv?.infrastructure?.loopActive');
   expect(publishSource).toContain('if (projectedRuntimeEnv && !projectedRuntimeMatchesSelection) return null;');
   expect(publishSource).toContain('projectedRuntimeMatchesSelection ? projectedRuntimeEnv : null');
-  // The retired Svelte wallet prop must not return; the observer publishes the
-  // selection-bound snapshot through the canonical getter asserted below.
-  expect(viewSource).not.toContain('liveEnvResolver=');
-  expect(viewSource).not.toContain('UserMode');
+  // The Svelte wallet (owner 2026-11-09) receives the same selection-bound resolver
+  // that backs the canonical debug getter asserted below.
+  expect(viewSource).toContain('liveEnvResolver={resolveLocalDebugEnv}');
 
   const debugGetterStart = viewSource.indexOf("registerDebugSurface('liveRuntimeSnapshot'");
   const debugGetterEnd = viewSource.indexOf("registerDebugSurface('publishLiveRuntimeSnapshot'", debugGetterStart);

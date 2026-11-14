@@ -10,6 +10,7 @@ import type { RuntimeReplica } from '@xln/core/api/public/runtime-module';
 import { getXLN } from './xln-loader';
 import { useApp } from './store';
 import { restoreFreshRuntime, type RuntimeRecoveryCandidate } from './restore';
+import { prepareWalletSignerKeys } from './wallet-signers';
 import {
   listUnresolvedRemoteRuntimeCommandIntents,
   markRemoteRuntimeCommandIntentAccepted,
@@ -154,7 +155,12 @@ export async function connectEmbedded(
       env = await navigator.locks.request(`xln-wallet-bootstrap:${runtimeId}`, () =>
         recovery
           ? restoreFreshRuntime(xln, seed, recovery)
-          : xln.main(runtimeSeed ?? seed, { numericSignerPrewarmCount: 1, jCatchupFence: true }),
+          : xln.main(runtimeSeed ?? seed, {
+              numericSignerPrewarmCount: 1,
+              jCatchupFence: true,
+              tolerateUnreachableJurisdictions: true,
+              prepareLocalSigners: (target, input) => prepareWalletSignerKeys(xln, seed, target, input),
+            }),
       );
       installHostedLivenessObserver(env);
       currentEnv = env;

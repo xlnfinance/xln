@@ -1,6 +1,8 @@
 import { sendRuntimeInput } from './commands';
 import { JsonRpcProvider } from 'ethers';
 import { getEmbeddedEnv } from './adapter';
+import { getXLN } from './xln-loader';
+import { resumeWalletChainCatchup } from './hosted';
 import { waitFor } from './tx';
 import { CONTRACT_FIELDS, networkInput, type NetworkDraft } from './network-input';
 export { CONTRACT_FIELDS, type NetworkDraft } from './network-input';
@@ -16,20 +18,37 @@ export async function connectNetwork(draft: NetworkDraft): Promise<void> {
   // the runtime ever sees a conflicting jurisdiction.
   const depository = draft.contracts.depository.trim().toLowerCase();
   for (const [existingName, replica] of env.state.jReplicas.entries()) {
-    if (Number(replica.chainId) === Number(draft.chainId) && String(replica.contracts?.depository ?? '').toLowerCase() === depository) {
+    if (
+      Number(replica.chainId) === Number(draft.chainId) &&
+      String(replica.contracts?.depository ?? '').toLowerCase() === depository
+    ) {
       throw new Error(`This network is already connected as ${existingName}`);
     }
   }
   const provider = new JsonRpcProvider(draft.rpc.trim(), undefined, { batchMaxCount: 1 });
   try {
     const network = await provider.getNetwork();
-    if (network.chainId !== BigInt(draft.chainId)) throw new Error('RPC chain id does not match the configured network');
+    if (network.chainId !== BigInt(draft.chainId))
+      throw new Error('RPC chain id does not match the configured network');
     for (const key of CONTRACT_FIELDS) {
-      if (await provider.getCode(draft.contracts[key].trim()) === '0x') throw new Error(`No deployed contract at ${key}`);
+      if ((await provider.getCode(draft.contracts[key].trim())) === '0x')
+        throw new Error(`No deployed contract at ${key}`);
     }
   } finally {
     provider.destroy();
   }
   await sendRuntimeInput(input);
   await waitFor(() => env.state.jReplicas.has(name), `Connect ${name}`);
+}
+
+/**
+ * Reach an existing network through an RPC the owner chooses, e.g. when the RPC
+ * its Hub published is down. Chain id and contracts stay those already signed
+ * into this wallet; the runtime refuses an endpoint that does not serve them.
+ */
+export async function replaceNetworkRpc(name: string, rpc: string): Promise<void> {
+  const env = getEmbeddedEnv();
+  if (!env) throw new Error('Network configuration requires a wallet running on this device');
+  await (await getXLN()).replaceJurisdictionRpc(env, name, rpc.trim(), { owns: () => getEmbeddedEnv() === env });
+  if (getEmbeddedEnv() === env) void resumeWalletChainCatchup(env);
 }

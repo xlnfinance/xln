@@ -37,6 +37,7 @@ test('Svelte cross tutorial uses a visible quote and proves delivery with a pers
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto('/app');
+  await page.getByRole('button', { name: 'Create or restore a personal wallet', exact: true }).click();
   const name = `cross-guide-${crypto.randomUUID()}`;
   await page.locator('#name').fill(name);
   await page.getByLabel('Secret passphrase', { exact: true }).fill('Disposable cross tutorial E2E 2026!');
@@ -50,7 +51,11 @@ test('Svelte cross tutorial uses a visible quote and proves delivery with a pers
   await page.getByTestId('wallet-tutorial').click();
   await page.getByTestId('tour-chapter').selectOption('cross');
   await expect(page.getByTestId('tour')).toHaveAttribute('data-step', 'cross');
-  await page.getByTestId('swap-ticket-to-network').selectOption({ label: `${name} (Tron)` });
+  const targetOption = page.getByTestId('swap-ticket-to-network').locator('option').filter({ hasText: /\(Tron\)$/ });
+  await expect(targetOption).toHaveCount(1);
+  const targetId = await targetOption.getAttribute('value');
+  if (!targetId) throw new Error('CROSS_TUTORIAL_TARGET_MISSING');
+  await page.getByTestId('swap-ticket-to-network').selectOption(targetId);
   await page.getByTestId('swap-ticket-to-token').selectOption('3');
   await page.getByTestId('swap-ticket-amount').fill('25');
   await expect(page.getByTestId('swap-ticket-use-market')).toBeEnabled();
@@ -75,7 +80,7 @@ test('Svelte cross tutorial uses a visible quote and proves delivery with a pers
   await page.getByTestId('swap-ticket-amount').fill('12');
   await expect(page.getByTestId('swap-ticket-amount')).toBeFocused();
   await page.getByTestId('context-current').click();
-  await page.getByTestId('context-entity-row').filter({ hasText: name }).and(page.locator(`[data-entity-id="${evidence.targetEntityId}"]`)).click();
+  await page.getByTestId('context-entity-row').and(page.locator(`[data-entity-id="${evidence.targetEntityId}"]`)).click();
   await expect(page.getByTestId('jurisdiction-banner')).toContainText('Tron');
   await expect(page.getByTestId('tour')).toHaveAttribute('data-step', 'cross');
   await expect(page.getByTestId('account-preview').first()).toContainText(formatUnits(evidence.filledTarget, 6));

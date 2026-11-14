@@ -39,10 +39,6 @@
     index = next;
     localStorage.setItem(key, String(index));
     const selected = WALLET_LESSONS[index]!;
-    if (selected.route === '/ui/lend') {
-      window.location.assign(selected.route);
-      return;
-    }
     onNavigate(selected.route, selected.id);
   }
 </script>
@@ -65,9 +61,9 @@
     <header><span>{index + 1} / {WALLET_LESSONS.length}</span><button type="button" data-testid="tour-exit" aria-label="Pause tutorial" on:click={() => setActive(false)}>×</button></header>
     <label>Chapter <select aria-label="Tutorial chapter" data-testid="tour-chapter" value={lesson.id} on:change={event => select(WALLET_LESSONS.findIndex(chapter => chapter.id === event.currentTarget.value))}>{#each WALLET_LESSONS as chapter, i}<option value={chapter.id}>{i + 1}. {chapter.title}</option>{/each}</select></label>
     <p class="lesson-value" data-testid="tour-value">{lesson.value}</p>
-    <p data-testid="tour-prerequisite"><strong>Before you start: </strong>{lesson.prerequisite}</p>
+    <p data-testid="tour-prerequisite"><strong>Before you start:</strong>{' '}{lesson.prerequisite}</p>
     <p data-testid="tour-hint">{instruction}</p>
-    <p data-testid="tour-result"><strong>Check the result: </strong>{lesson.outcome}</p>
+    <p data-testid="tour-result"><strong>Check the result:</strong>{' '}{lesson.outcome}</p>
     <details><summary>Why it works · example</summary><p>{lesson.example}</p></details>
     {#if lesson.id === 'company'}<button type="button" data-testid="tour-create-company" on:click={onCreateEntity}>Create an entity</button>{/if}
     <footer>

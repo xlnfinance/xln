@@ -23,9 +23,10 @@ export async function withHubAdapter<T>(
   read: (adapter: RemoteRuntimeAdapter) => Promise<T>,
 ): Promise<T> {
   const standRoot = process.env['XLN_RDB_ROOT'];
-  if (!standRoot) throw new Error('Cross market observation requires XLN_RDB_ROOT');
+  const manifestPath = process.env['XLN_RUNTIME_IMPORT_MANIFEST_PATH'] ?? (standRoot ? join(standRoot, 'prod-mesh', 'runtime-import-manifest.json') : null);
+  if (!manifestPath) throw new Error('Cross market observation requires a runtime import manifest');
   const manifest: unknown = JSON.parse(
-    readFileSync(join(standRoot, 'prod-mesh', 'runtime-import-manifest.json'), 'utf8'),
+    readFileSync(manifestPath, 'utf8'),
   );
   const entry = decodeRuntimeManifestEntries(manifest).find(candidate => candidate.label === hubLabel);
   if (!entry) throw new Error('Cross market hub runtime unavailable');

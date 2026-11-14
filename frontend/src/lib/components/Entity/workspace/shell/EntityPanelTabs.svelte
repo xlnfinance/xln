@@ -816,7 +816,7 @@ $: if (assetWorkspaceTab === "move" && moveToEndpoint === "account") {
 }
 $: configureTokenOptions = buildConfigureTokenOptions({
   reserveTokenIds: replica?.state?.reserves?.keys?.() || [],
-  activeTokenIds: replica?.state.accounts.get(workspaceAccountId)?.state.deltas.keys() ?? [],
+  activeTokenIds: workspaceAccountId ? replica?.state.accounts.get(workspaceAccountId)?.state.deltas.keys() ?? [] : [],
   getTokenInfo,
   compareSymbols: compareTokenSymbols,
 });

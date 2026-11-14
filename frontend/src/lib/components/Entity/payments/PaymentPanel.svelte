@@ -1361,6 +1361,9 @@
           <label
             class="route-option"
             class:selected={selectedRouteIndex === index}
+            data-testid="payment-route"
+            data-sender-amount={route.senderAmount.toString()}
+            data-selected={selectedRouteIndex === index}
             data-route-path={route.path.map((hopId) => String(hopId || '').toLowerCase()).join(',')}
             data-route-index={index}
           >

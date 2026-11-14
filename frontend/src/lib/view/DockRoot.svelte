@@ -567,8 +567,8 @@
       type="button"
       class="dock-exit-btn"
       data-testid="dock-exit-user-mode"
-      on:click={() => window.location.assign('/ui/')}
-      title="Open the React wallet"
+      on:click={() => window.location.assign('/app')}
+      title="Open the Svelte wallet"
     >
       Wallet
     </button>

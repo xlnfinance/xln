@@ -12,13 +12,14 @@ import type { Parties } from './financial-evidence';
 
 export async function readBankOwnerConnection(page: Page, hubId: string) {
   const root = process.env['XLN_RDB_ROOT'];
-  if (!root) throw new Error('BANK_POLICY_STAND_REQUIRED');
+  const manifestPath = process.env['XLN_RUNTIME_IMPORT_MANIFEST_PATH'] ?? (root ? join(root, 'prod-mesh/runtime-import-manifest.json') : null);
+  if (!manifestPath) throw new Error('BANK_POLICY_STAND_REQUIRED');
   const response = await page.request.get('/api/health');
   expect(response.ok()).toBe(true);
   const health: AggregatedHealth = await response.json();
   const hub = health.hubs?.find(value => value.entityId === hubId);
   if (!hub?.runtimeId) throw new Error('BANK_POLICY_HUB_MISSING');
-  const entries = decodeRuntimeManifestEntries(JSON.parse(readFileSync(join(root, 'prod-mesh/runtime-import-manifest.json'), 'utf8')));
+  const entries = decodeRuntimeManifestEntries(JSON.parse(readFileSync(manifestPath, 'utf8')));
   const entry = entries.find(value => value.label === hub.name);
   if (!entry) throw new Error('BANK_POLICY_OWNER_BINDING_MISSING');
   return { hub, entry };

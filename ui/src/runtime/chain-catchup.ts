@@ -30,6 +30,16 @@ export const assertSessionOwned = (owns: () => boolean): void => {
   if (!owns()) throw new Error(CANCELLED);
 };
 
+let activeCatchup: symbol | null = null;
+
+/** A newer RPC repair supersedes the older wait even within the same wallet. */
+export const claimChainCatchupOwnership = (ownsSession: () => boolean): (() => boolean) => {
+  if (!ownsSession()) return () => false;
+  const claim = Symbol('wallet-chain-catchup');
+  activeCatchup = claim;
+  return () => activeCatchup === claim && ownsSession();
+};
+
 const authenticatedThrough = (status: DrainStatus): number =>
   Math.min(
     status.targetBlock,
@@ -72,7 +82,11 @@ export const createChainCatchupProbe = (
     }
     let stalled = false;
     try {
-      progress = xln.observeJWatcherDrainProgress(progress, statuses.map(xln.getJWatcherDrainProgressKey).join('|'), now());
+      progress = xln.observeJWatcherDrainProgress(
+        progress,
+        statuses.map(xln.getJWatcherDrainProgressKey).join('|'),
+        now(),
+      );
     } catch (error) {
       if (!(error instanceof Error) || !error.message.startsWith(STALLED)) throw error;
       stalled = true;

@@ -191,14 +191,10 @@ const readCrossRecoveryProof = (page: Page, parties: CrossParties, orderId: stri
     { parties, orderId, atHeight },
   );
 
-// The maker's committed projection is read through a privileged runtime
-// connection, whose address comes from a runtime import manifest that only the
-// local-prod-smoke stand writes, at <XLN_RDB_ROOT>/prod-mesh. The dev stack
-// keeps neither that layout nor a lasting manifest, so on any other stand this
-// test states what it needs rather than failing for the wrong reason.
+// Observe the real maker through its authenticated runtime import manifest.
 test.skip(
-  !process.env['XLN_RDB_ROOT'],
-  'needs the local-prod-smoke stand: XLN_RDB_ROOT with a prod-mesh runtime import manifest',
+  !process.env['XLN_RDB_ROOT'] && !process.env['XLN_RUNTIME_IMPORT_MANIFEST_PATH'],
+  'requires the running stand runtime import manifest',
 );
 
 for (const scenario of [
@@ -508,7 +504,7 @@ for (const scenario of [
     // new draft must not send it, and navigation makes no draft-preservation claim.
     await page.getByTestId('swap-give').fill('1');
     await page.getByTestId('swap-want').fill('1');
-    await expect(feeDisclosure.getByRole('link')).toHaveAttribute('href', `/accounts/${targetHubId}`);
+    await expect(feeDisclosure.getByRole('link')).toHaveAttribute('href', `${new URL(page.url()).pathname.startsWith('/ui/') ? '/ui' : ''}/accounts/${targetHubId}`);
     await feeDisclosure.getByRole('link').click();
     await expect(page).toHaveURL(new RegExp(`/accounts/${targetHubId}$`));
     await expect(page.getByTestId('account-manage')).toBeEnabled();

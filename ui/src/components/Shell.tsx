@@ -12,6 +12,8 @@ import { Guide } from './guide/Guide';
 import { useExternalWalletSync } from '../runtime/financial/external';
 import { useWallet } from '../runtime/views';
 import { Logo } from './Logo';
+import { NetworkRpc } from './Networks';
+import { getEmbeddedEnv } from '../runtime/adapter';
 import { observeFundingBatches } from '../runtime/financial/funding-submission';
 import { useRecoverySync } from '../runtime/recovery-sync';
 
@@ -140,6 +142,7 @@ export function Shell({ children }: { children: ReactNode }) {
                 <button className="btn" onClick={assets.retry}>
                   Retry
                 </button>
+                <AssetRpcRecovery name={wallet.jurisdiction} onReplaced={assets.retry} />
               </>
             )}
           </section>
@@ -164,4 +167,10 @@ export function Shell({ children }: { children: ReactNode }) {
       <Toasts />
     </div>
   );
+}
+
+/** The published RPC may be the stopped Hub's gateway: the owner must still reach the chain. */
+function AssetRpcRecovery({ name, onReplaced }: { name: string; onReplaced: () => void }) {
+  const published = getEmbeddedEnv()?.state.jReplicas.get(name)?.rpcs?.[0];
+  return published ? <NetworkRpc name={name} published={published} onReplaced={onReplaced} /> : null;
 }

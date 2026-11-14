@@ -6,7 +6,7 @@ import type { TokenDecimals } from '@xln/core/account/tx/units';
  */
 import type { EntityTx } from '@xln/core/api/public/runtime-module';
 import { computeLendingInterest, normalizeInterestBps, normalizeLendingTerm, lendingLoanMaximumAmount } from '@xln/core/lendbook/state';
-import type { AccountView } from '../views';
+import type { LendingRisk } from '@xln/core/account/validation/lending-risk';
 import { parseAmount } from '../format';
 import { decodeLendingBankTerms, decodeLendingFacility } from '@xln/core/lendbook/policy';
 import type { LendingTermId, LendingBankTerms, LendingFacility, LendingLoan as CoreLendingLoan } from '@xln/core/types/finance/lending';
@@ -26,7 +26,7 @@ export function previewLendingTerms(amount: string, rate: string, decimals: Toke
   }
 }
 
-export function previewSavingsRisk(hub: AccountView, tokenId: number, amount: string, rate: string, decimals: TokenDecimals) {
+export function previewSavingsRisk(hub: { doc: { lendingRisk: LendingRisk }; isLeft: boolean }, tokenId: number, amount: string, rate: string, decimals: TokenDecimals) {
   const quote = previewLendingTerms(amount, rate, decimals);
   if (!quote || !quote.ok) return quote;
   const risk = hub.doc.lendingRisk.get(tokenId);
@@ -134,22 +134,6 @@ const interest = (value: unknown): number => {
 };
 
 const term = normalizeLendingTerm;
-
-export async function fetchLendingState(input: {
-  hubEntityId: string;
-  userEntityId: string;
-  tokenId: number;
-  requestId?: string;
-}): Promise<LendingState> {
-  const { getJson } = await import('../http');
-  const result = await getJson('/api/lending/state', {
-    hubEntityId: input.hubEntityId,
-    userEntityId: input.userEntityId,
-    tokenId: String(input.tokenId),
-    ...(input.requestId ? { requestId: input.requestId } : {}),
-  });
-  return decodeLendingState(result, input);
-}
 
 export function decodeLendingState(
   result: Record<string, unknown>,

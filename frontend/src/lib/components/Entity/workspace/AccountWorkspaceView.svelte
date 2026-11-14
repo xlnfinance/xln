@@ -15,6 +15,7 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
   import LiveRequiredState from './shell/LiveRequiredState.svelte';
   import MoveWorkspace from '../MoveWorkspace.svelte';
   import { getMovePrimaryActionLabel as routeMovePrimaryActionLabel } from '../move-routes';
+  import LendingPanel from '../lending/LendingPanel.svelte';
   import PaymentPanel from '../payments/PaymentPanel.svelte';
   import PendingBatchNotice from '../payments/PendingBatchNotice.svelte';
   import ReceivePanel from '../payments/ReceivePanel.svelte';
@@ -197,6 +198,7 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
     { id: 'receive', icon: ArrowDownLeft, label: 'Receive' },
     { id: 'swap', icon: Repeat, label: 'Swap' },
     { id: 'move', icon: Landmark, label: 'Move' },
+    { id: 'lending', icon: Landmark, label: 'Lending' },
     { id: 'history', icon: Activity, label: 'History' },
     { id: 'configure', icon: SettingsIcon, label: 'Manage' },
     { id: 'activity', icon: Activity, label: 'Activity' },
@@ -367,6 +369,8 @@ import type { EntityReadView } from '#lib/components/Entity/core/entity-panel-ty
       toastMoveError={handleMoveWorkspaceError}
     />
 
+  {:else if accountWorkspaceTab === 'lending'}
+    <LendingPanel entityId={replica?.entityId || tab.entityId} {replica} accountIds={workspaceAccountIds} {entityNames} isLive={activeIsLive} {submitRuntimeInput} />
   {:else if accountWorkspaceTab === 'history'}
     <SettlementPanel
       entityId={replica?.state?.entityId || tab.entityId}

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { loadRuntimeIncident, type IncidentLookup } from '@xln/frontend/lib/debug/runtime-incident';
 import { useApp } from '../runtime/store';
 import './runtime-command-gate.css';
@@ -52,6 +53,7 @@ export function RuntimeCommandGate() {
     <aside className="runtime-command-gate" data-testid="runtime-command-gate" role="status">
       <strong>Runtime paused · financial actions disabled</strong>
       <span data-testid="runtime-command-gate-reason">{reason || 'readiness unavailable'}</span>
+      {reason === 'j-catchup' && <Link to="/settings">Review RPCs for every network</Link>}
       {runtimeId && <IncidentEvidence key={`${runtimeId}|${reason}`} runtimeId={runtimeId} />}
     </aside>
   );

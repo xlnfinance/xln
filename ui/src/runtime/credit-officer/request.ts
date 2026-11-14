@@ -1,4 +1,3 @@
-import { getJson, postJson } from '../http';
 import { decodeCreditRequest, type CreditRequest } from '@xln/core/orchestrator/credit-officer/proof';
 
 function solve(request: CreditRequest, bits: number): Promise<CreditRequest> {
@@ -40,11 +39,15 @@ export async function requestCreditFacility(
     termId: '1h' | '1d' | '1m';
   },
   notice: (text: string) => void,
+  transport: {
+    getJson: (path: string, params: Record<string, string>) => Promise<Record<string, unknown>>;
+    postJson: (path: string, body: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  },
 ): Promise<boolean> {
-  const status = await getJson('/api/credit-officer/status', {});
+  const status = await transport.getJson('/api/credit-officer/status', {});
   if (status['enabled'] === false) return false;
   const params = { ...input, amount: input.amount.toString(), tokenId: String(input.tokenId) };
-  const challenge = await getJson('/api/credit-officer/challenge', params);
+  const challenge = await transport.getJson('/api/credit-officer/challenge', params);
   if (typeof challenge['day'] !== 'string' || typeof challenge['bits'] !== 'number')
     throw new Error('Invalid credit challenge');
   notice('Computing proof of work for this borrowing request…');
@@ -53,7 +56,7 @@ export async function requestCreditFacility(
     challenge['bits'],
   );
   notice('Credit officer is checking committed account history…');
-  const decision = await postJson('/api/credit-officer/approve', proof);
+  const decision = await transport.postJson('/api/credit-officer/approve', proof);
   if (decision['approved'] !== true) throw new Error(`Credit officer denied: ${String(decision['reason'])}`);
   notice('Credit officer submitted approval. Waiting for bank commitment…');
   return true;

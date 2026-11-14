@@ -18,9 +18,8 @@ import type {
 } from '@xln/core/api/public/runtime-module';
 import type { RuntimeRecoverySignerV1 } from '@xln/core/storage/recovery/bundle/types';
 import { withRuntimeCommittedRead } from '@xln/core/runtime/frame/lifecycle/writer-lock';
-import { deriveJurisdictionSignerIndex } from '@xln/core/jurisdiction/machine/config/signer-derivation';
 import { Wallet } from 'ethers';
-import { deriveAddress, derivePrivateKey } from './keys';
+import { derivePrivateKey, walletSignerIndex } from './keys';
 import { requireBackupCapacity, requireBackupTransportCapacity } from './backup-size';
 
 /** `tower`: an encrypted copy leaves this device. `local`: nothing does. */
@@ -28,7 +27,16 @@ export type RecoveryMode = 'tower' | 'local';
 export type RecoveryConfig = { mode: RecoveryMode; towers: string[] };
 
 /** What the tower says about itself before we trust it with anything. */
-export type TowerHealth = { towerId: string; signerAddress: string; maxStoredBytesPerLookupKey: number; maxAppointmentBytes: number; lookupKeys: number; sweepEnabled: boolean; pushEnabled: boolean; pushSender: string };
+export type TowerHealth = {
+  towerId: string;
+  signerAddress: string;
+  maxStoredBytesPerLookupKey: number;
+  maxAppointmentBytes: number;
+  lookupKeys: number;
+  sweepEnabled: boolean;
+  pushEnabled: boolean;
+  pushSender: string;
+};
 
 /** What the tower says it actually holds for us, read back from the tower, not from our own hopes. */
 export type TowerCoverage = {
@@ -44,10 +52,17 @@ const STORAGE_KEY = 'xln-ui-recovery';
 const EMPTY: RecoveryConfig = { mode: 'local', towers: [] };
 
 function validateRecovery(value: unknown): RecoveryConfig {
-  if (!value || typeof value !== 'object' || !('mode' in value) || !('towers' in value)
-    || (value.mode !== 'tower' && value.mode !== 'local') || !Array.isArray(value.towers)
-    || !value.towers.every(url => typeof url === 'string')
-    || (value.mode === 'tower' && value.towers.length === 0)) throw new Error('RECOVERY_CONFIG_INVALID');
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    !('mode' in value) ||
+    !('towers' in value) ||
+    (value.mode !== 'tower' && value.mode !== 'local') ||
+    !Array.isArray(value.towers) ||
+    !value.towers.every(url => typeof url === 'string') ||
+    (value.mode === 'tower' && value.towers.length === 0)
+  )
+    throw new Error('RECOVERY_CONFIG_INVALID');
   return { mode: value.mode, towers: value.towers.map(normalizeTowerUrl) };
 }
 
@@ -60,7 +75,7 @@ const readAll = (): Record<string, RecoveryConfig> => {
 };
 
 export function readRecovery(vaultId: string | null): RecoveryConfig {
-  return vaultId ? readAll()[vaultId] ?? EMPTY : EMPTY;
+  return vaultId ? (readAll()[vaultId] ?? EMPTY) : EMPTY;
 }
 
 export function saveRecovery(vaultId: string, config: RecoveryConfig): RecoveryConfig {
@@ -175,10 +190,8 @@ export function recoverySigners(env: RuntimeReplica, seed: string): RuntimeRecov
     const address = String(replica.signerId).toLowerCase();
     if (signers.some(signer => signer.address === address)) continue;
     const jurisdiction = String(replica.state?.config?.jurisdiction?.name || '').trim();
-    const candidate = jurisdiction ? deriveJurisdictionSignerIndex(jurisdiction) : 0;
-    const derivationIndex =
-      deriveAddress(seed, 0) === address ? 0 : deriveAddress(seed, candidate) === address ? candidate : -1;
-    if (derivationIndex < 0) throw new Error(`RECOVERY_SIGNER_DERIVATION_UNKNOWN:${address}`);
+    const derivationIndex = walletSignerIndex(seed, address, jurisdiction);
+    if (derivationIndex === null) throw new Error(`RECOVERY_SIGNER_DERIVATION_UNKNOWN:${address}`);
     signers.push({
       index: signers.length,
       derivationIndex,
@@ -276,9 +289,11 @@ export async function backupToTowers(
           headers: { 'content-type': 'application/json' },
           body,
         });
-        const payload = asRecord(await response.json().catch(() => {
-          throw new Error(`Recovery service returned an invalid response (HTTP ${response.status}).`);
-        }));
+        const payload = asRecord(
+          await response.json().catch(() => {
+            throw new Error(`Recovery service returned an invalid response (HTTP ${response.status}).`);
+          }),
+        );
         if (!response.ok || payload['ok'] !== true)
           throw new Error(String(payload['error'] || `HTTP_${response.status}`));
         const receipt = payload['receipt'];

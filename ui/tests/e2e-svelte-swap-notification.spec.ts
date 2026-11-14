@@ -24,6 +24,7 @@ for (const width of [1280, 390]) test(`Svelte swap completion leaves the form us
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto('/app');
+  await page.getByRole('button', { name: 'Create or restore a personal wallet', exact: true }).click();
   await page.locator('#name').fill(`swap-notice-${crypto.randomUUID()}`);
   await page.getByLabel('Secret passphrase', { exact: true }).fill('Disposable swap notification E2E 2026!');
   await page.getByRole('button', { name: 'Derive wallet', exact: true }).click();

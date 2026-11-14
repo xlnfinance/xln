@@ -42,7 +42,7 @@ export function Gate() {
     id: string;
     name: string;
     seed?: string;
-    open: (seed: string, stack: Stack) => Promise<void>;
+    open: (seed: string, stack: Stack | null) => Promise<void>;
   } | null>(null);
 
   /** The xln stack serving this page (local orchestrator or xln.finance); null on a static host. */
@@ -244,6 +244,7 @@ export function Gate() {
         name: vaultOptions.vaultName,
         seed,
         open: async (unlocked, currentStack) => {
+          if (!currentStack) throw new Error(NO_STACK);
           await bootHostedVault(unlocked, { ...vaultOptions, stack: currentStack, ...(recovery ? { recovery } : {}) });
           rememberTower(vaultId);
         },
@@ -299,7 +300,6 @@ export function Gate() {
         id: vault.id,
         name: vault.name,
         open: async (seed, currentStack) => {
-          if (vault.kind === 'test') assertDemoNetwork(currentStack.jurisdictions.map(chain => chain.chainId));
           await bootHostedVault(seed, {
             runtimeId: vault.id,
             vaultId: vault.id,
@@ -317,8 +317,6 @@ export function Gate() {
     }
     if (vault.kind === 'test') {
       void run(async () => {
-        if (!stack) throw new Error(NO_STACK);
-        assertDemoNetwork(stack.jurisdictions.map(chain => chain.chainId));
         if (!vault.deviceProtection)
           throw new Error('This device no longer has this test wallet key. Restore with its recovery phrase.');
         setBusyStep('Opening your test wallet');
@@ -330,7 +328,7 @@ export function Gate() {
           vaultName: vault.name,
           kind: 'test',
           selfLabel: vault.name,
-          stack,
+          stack: stack ?? null,
           onStep: setBusyStep,
         });
       });
@@ -365,8 +363,7 @@ export function Gate() {
         {...passwordEntry}
         status={busyStep}
         onOpen={async seed => {
-          if (!stack) throw new Error(NO_STACK);
-          await passwordEntry.open(seed, stack);
+          await passwordEntry.open(seed, stack ?? null);
         }}
         onBack={() => {
           setPasswordEntry(null);

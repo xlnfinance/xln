@@ -63,7 +63,7 @@ test('DockRoot defaults to Graph, Architect and jurisdiction tools', () => {
   expect(source).toContain('export let requestedPanelId: string | null = null');
   expect(source).toContain('appStateOperations.clearDockPanelRequest(panelId)');
   expect(source).toContain("import RemoteRuntimeManager from '#lib/components/Runtime/RemoteRuntimeManager.svelte'");
-  expect(source).toContain("window.location.assign('/ui/')");
+  expect(source).toContain("window.location.assign('/app')");
   expect(source).toContain('showDockTimeMachine = !embedMode || $settings.showTimeMachine');
 });
 

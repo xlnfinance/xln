@@ -813,7 +813,7 @@
     <button
       class="dock-toggle-btn"
       data-testid="network-machine-mode-toggle"
-      on:click={() => window.location.assign('/ui/')}
+      on:click={() => window.location.assign('/app')}
     >
       Wallet
     </button>

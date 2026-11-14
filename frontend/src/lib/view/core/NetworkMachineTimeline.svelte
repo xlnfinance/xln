@@ -241,7 +241,7 @@
   </select>
   <select aria-label="NetworkMachine playback speed" value={String(speed)} on:change={updateSpeed}><option value="0.5">0.5×</option><option value="1">1×</option><option value="2">2×</option><option value="5">5×</option></select>
   <button class="refresh" data-testid="network-machine-refresh" title="Reload runtime indexes" disabled={$networkMachineRuntime.loading} on:click={() => void refresh()}><RefreshCw size={13} /></button>
-  <button class="dock" data-testid="network-machine-mode-toggle" on:click={() => window.location.assign('/ui/')}>Wallet</button>
+  <button class="dock" data-testid="network-machine-mode-toggle" on:click={() => window.location.assign('/app')}>Wallet</button>
 </div>
 {#if $networkMachinePresentation}
   <PresentationNarration

@@ -7,6 +7,8 @@ test(
   async ({ page }) => {
     test.setTimeout(60_000);
     await page.goto('/app');
+    await expect(page).toHaveURL(/\/app$/);
+    await page.getByRole('button', { name: 'Create or restore a personal wallet', exact: true }).click();
     await page.locator('#name').fill(`tutorial-${crypto.randomUUID()}`);
     await page.getByLabel('Secret passphrase', { exact: true }).fill('Disposable tutorial test wallet 2026!');
     await page.getByRole('button', { name: 'Derive wallet', exact: true }).click();
