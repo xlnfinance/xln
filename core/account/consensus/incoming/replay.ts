@@ -277,6 +277,17 @@ const rebuildDuplicateCommittedAckFrame = async (
   events: string[],
   securityContext: AccountInputSecurityContext,
 ): Promise<HandleAccountInputResult> => {
+  // With a successor pending, currentFrameHanko signs that successor, not this
+  // head. A peer holds our committed head and its own ACK Hanko for it, so it can
+  // always send this input; it is a sender-caused reject, never local corruption.
+  // The peer still receives the ACK for this head inside our pending ack_frame.
+  if (account.pendingFrame) {
+    return rejectAccountInput(
+      'ACCOUNT_INPUT_FRAME_HANKO_INVALID',
+      `DUPLICATE_ACK_SUCCESSOR_PENDING:height=${receivedHeight}`,
+      events,
+    );
+  }
   const frameHanko = await requireCurrentFrameHanko(
     account,
     frameHash,
