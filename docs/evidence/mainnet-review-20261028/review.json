@@ -1,0 +1,216 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "host": "Mac Studio",
+    "repository": "/Users/zigota/xln",
+    "branch": "main",
+    "sha": "de76307eef8abfccba286b4bfba78c682fb3300d",
+    "tree": "ccc7e2295d31a3a0fdd05962aa9f59808e3063bc",
+    "cleanAtReviewStart": true,
+    "base": "e838188fd",
+    "commitsSinceBase": 135,
+    "changedFiles": 956,
+    "insertions": 29975,
+    "deletions": 15561,
+    "commitsSince20261026": 173
+  },
+  "scope": "Review of the recent change inventory, focused production code paths and available verification. Not a line-by-line audit of all 956 files, not an exhaustive security scan, and not release approval.",
+  "verdict": "MAINNET_BLOCKED",
+  "checks": [
+    {
+      "name": "bun run check",
+      "source": "rerun in this review",
+      "exitCode": 0,
+      "artifact": "check.log.gz",
+      "details": "Includes source, frontend, UI types and 16 Foundry invariant tests. Compilation/tests do not certify financial atomicity."
+    },
+    {
+      "name": "Focused Cross-j/dispute settlement tests",
+      "source": "rerun in this review",
+      "exitCode": 0,
+      "passed": 89,
+      "failed": 0,
+      "assertions": 477,
+      "files": 5,
+      "artifact": "focused.log.gz"
+    },
+    {
+      "name": "Cross-j delayed Source witness counterexample",
+      "source": "rerun against production TS functions in this review",
+      "outcome": "VULNERABILITY_REPRODUCED",
+      "artifact": "crossj-result.json",
+      "reproduction": "bun docs/evidence/mainnet-review-20261028/reproduce.ts",
+      "limit": "Tests the real ladder verifier and settlement projection with synthetic deterministic fixtures. No new transaction was sent to a chain."
+    },
+    {
+      "name": "Existing exact-SHA clean-tree verification receipt",
+      "source": "existing receipt inspected; not rerun here",
+      "artifact": "existing-verify.json",
+      "passed": true,
+      "details": "Check and Hardhat suite passed with identical clean before/after SHA and tree."
+    },
+    {
+      "name": "Existing Studio verification summary",
+      "source": "existing logs inspected; not all rerun here",
+      "artifact": "existing-summary.txt",
+      "stagesPassed": 9,
+      "stagesTotal": 9,
+      "coreUnitReportedPass": 5204,
+      "uiUnitPass": 890,
+      "hardhatPass": 265,
+      "limit": "Core count is summed from saved per-directory summaries. This is not an independent rerun of those suites."
+    },
+    {
+      "name": "Full browser and release integration on assessed SHA",
+      "status": "UNKNOWN",
+      "lastRetainedGreen": {
+        "sha": "e838188fd",
+        "browserPassed": 157,
+        "releaseStepsPassed": 40
+      }
+    },
+    {
+      "name": "One-hour soak and final mainnet gate on assessed SHA",
+      "status": "UNKNOWN"
+    },
+    {
+      "name": "Public served source",
+      "source": "read-only HTTPS /api/health",
+      "sha": "ffff30b4ff8a36ec336ab83a3df89d19d7c4ed21",
+      "clean": true,
+      "commitsBehindAssessedMain": 175,
+      "limit": "Source identity observation only; not a browser/user-journey pass."
+    }
+  ],
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "P0",
+      "status": "REPRODUCED_ON_ASSESSED_MAIN",
+      "title": "Cross-j source and target reveal windows do not establish atomicity",
+      "trigger": "Target starts at 100 with window 10; Source starts at 110 with window 10; Source hub generates a valid full witness and first publishes at 120.",
+      "result": {
+        "sourcePayout": "1000",
+        "targetPayout": "0"
+      },
+      "references": [
+        "core/extensions/cross-j/index.ts:983",
+        "core/extensions/cross-j/index.ts:1006",
+        "core/account/pull-registry-settlement.ts:185",
+        "jurisdictions/contracts/DeltaTransformer.sol:381"
+      ],
+      "next": "Integrate the existing reviewed Cross-j fix through its sole integrator; revalidate deadline assumptions, actual contract execution, both native chain flows, late delivery and restart. Do not create a competing protocol implementation.",
+      "existingReview": {
+        "bug": "q51 all three reviewers confirmed the bug",
+        "latestFix": "q62 reports all three confirmations for candidate 1236921d9526fc0fd6b4443f0c1bca921db64b39 outside assessed main",
+        "limits": "Existing review artifacts were read, no new model calls. Their smoke-test provenance/cost was not recertified; agreement is not release evidence. Latest fix was not applied or independently rerun here."
+      }
+    },
+    {
+      "id": "R2",
+      "severity": "P1",
+      "status": "EXPLICITLY_UNAVAILABLE",
+      "title": "Native TRON watchtower submission is unavailable",
+      "references": [
+        "core/watchtower/submission-support.ts:13",
+        "core/__tests__/security/dispute/dispute-review-counterexamples.test.ts:176"
+      ],
+      "next": "Implement native appointment submission and prove an offline-wallet stale-state counter-dispute through genuine TVM, finality and restore. Keep unsupported appointments rejected until executable protection exists."
+    },
+    {
+      "id": "R3",
+      "severity": "P1",
+      "status": "STATIC_PATH_CONFIRMED_INTEGRATION_OPEN",
+      "title": "Current EVM retry path preserves the old signed wire when fees rise",
+      "references": [
+        "core/runtime/j-submit/j-submit.ts:543",
+        "core/runtime/j-submit/j-submit.ts:694",
+        "core/runtime/j-submit/j-submit-state.ts:355"
+      ],
+      "next": "Finish existing same-nonce replacement work with payer-authorized absolute fee ceilings, wallet authorization, reconciliation of every competing hash and crash recovery. The q61 cap patch has two AMEND reviews because production Speed up did not raise the ceiling; do not treat that patch as complete.",
+      "limit": "No public gas-spike transaction was executed in this review; the q61 defect is in an external candidate, not assessed main."
+    },
+    {
+      "id": "R4",
+      "severity": "RELEASE_GATE",
+      "status": "EVIDENCE_STALE_OR_MISSING",
+      "title": "Current main, last integrated green candidate and public deployment differ",
+      "next": "After integrating blockers, freeze one clean SHA, run complete financial scenarios, exact WAL replay, full owning React E2E, release gate, native four-flow suite, current-bytecode public dispute/exit proofs, valid load, uninterrupted soak, deployment and rollback evidence."
+    }
+  ],
+  "improvements": [
+    {
+      "priority": 1,
+      "area": "Integration and release evidence",
+      "proposal": "Reconcile the existing queue with exact-SHA receipts and served SHA; preserve one implementer and one stand. Existing fixes should reach a checked main milestone before new broad work.",
+      "evidence": "135 commits after retained full integrated green; public source is 175 commits behind assessed main."
+    },
+    {
+      "priority": 2,
+      "area": "Dispute lifecycle",
+      "proposal": "Separate event decoding, authenticated dispute selection, queued exit planning and event application inside the existing canonical path, using small functions with explicit ownership. Preserve ordered effects and root/recovery vectors.",
+      "evidence": "core/entity/tx/j-events.ts is 1840 lines and now also owns pending-proposal exit queuing. This is maintainability evidence, not a measured performance bottleneck."
+    },
+    {
+      "priority": 3,
+      "area": "Submission lifecycle",
+      "proposal": "After the fee replacement integration, keep one lifecycle coordinator for durable intent and reconciliation, with EVM fee and TRON expiry decisions at their respective adapter boundaries. Remove repeated batch cloning only where ownership/equivalence is proven; do not introduce a shared reducer across R/E/A.",
+      "evidence": "core/runtime/j-submit/j-submit.ts is 773 lines; j-broadcast.ts is 339 lines."
+    },
+    {
+      "priority": 4,
+      "area": "Receipt processing",
+      "proposal": "Measure current import, reload and command readiness separately. Optimize redundant decode/hash work only after profiling; retain independent observation and reorg-fence assertions.",
+      "evidence": "reader.ts calls readCanonicalBlocks before and after receipt collection; the second pass has a correctness role. Old 32.1/20.1-second queue timings predate later unlock changes."
+    },
+    {
+      "priority": 5,
+      "area": "Scope discipline",
+      "proposal": "Keep React as the wallet and Svelte as the retained static/landing surface. Rust parity remains separate from the TS launch barrier. Avoid a general rewrite while financial integration is unresolved.",
+      "evidence": "Three recent cleanup commits already remove 4862 lines net; current Rust explicitly rejects unported lending. Deleting Svelte wholesale is an owner-rejected proposal."
+    }
+  ],
+  "positiveChanges": [
+    "DisputeStarted carries the authenticated proof body, removing calldata-recovery parsing.",
+    "Pending-proposal exits retain the authenticated body and refresh responder secrets from the paybook.",
+    "Payment patches bind reveal evidence to the watched Depository, preserve unresolved outbound locks and enforce ACK/timelock handling.",
+    "Same-J matcher fixes handle FOK reservations, IOC zero fills and unfinanceable makers.",
+    "The tutorial checks committed financial outcomes; testnet credit-officer flows have owning E2E.",
+    "Canonical USD pricing and branded token units reduce duplicated financial conversions.",
+    "Three cleanup commits a9ca52c42, b07fb0a85 and 5aea6f030 remove 4862 lines net."
+  ],
+  "staleQueueCorrections": [
+    "Native RPC attestation trust is already approved; docs/tron-native-test-plan.md:236 explicitly says not to reopen it.",
+    "Money ABI direction is already approved; current code has wide integers. Deployment/boundary proof remains required.",
+    "The public served SHA observed here differs from the handoff.",
+    "Do not remove the receipt reorg fence merely because the queue calls the second pass duplicate."
+  ],
+  "notDone": [
+    "No runtime/contract implementation changed",
+    "No commit/push/deploy",
+    "No new external-model calls or charges",
+    "No fresh full E2E/native/soak/public financial transaction run",
+    "No overall readiness percentage assigned"
+  ],
+  "recordedAt": "2026-10-28T13:47:22.409Z",
+  "artifacts": {
+    "reproduce.ts": {
+      "sha256": "10b058b3bb3990a1841a4e6a86fda54ffa3486841e8d7fa3e9178b75c0db9d7f"
+    },
+    "check.log.gz": {
+      "sha256": "bfd336c0ff368a46719282462853fdc2a43318e6ae096ff263d75d8827e50f7e"
+    },
+    "focused.log.gz": {
+      "sha256": "25e365b3f14f43bfa17f60ad756f775e4c31e79e40c32c56c211231f09a48a73"
+    },
+    "crossj-result.json": {
+      "sha256": "b80a6d50425533244bbc7d408361bc2c12c2bd096612978510ea802f04c31f32"
+    },
+    "existing-summary.txt": {
+      "sha256": "3a7ee79da7005be46a66a6bdaa2acd0a0ec4def103eebd5709ac8f9b6e5f02ca"
+    },
+    "existing-verify.json": {
+      "sha256": "b67dc06e4f4a399dcc524c3cd57d16f8b26bb18a18714c0e594163aab0f5e833"
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "at": "2026-11-03T17:33:40.940905+00:00",
+  "baseSHA": "019d45beb5954e77fe806d643845f6a4dca4fa82",
+  "sourceManifestSHA256": "0d31476fe7043019aa6357eca1ab1d7f225124b97fd83969dec27b37e4836c9a",
+  "sourceHashesMatchedAfterCheck": 29,
+  "bunRunCheck": {
+    "exitCode": 0,
+    "command": "bun run check",
+    "proof": "check.log.gz",
+    "privateLog": "/Users/zigota/agent-jobs/xln-global-owner-20261104/rpc-milestone-check4.log"
+  },
+  "focusedL1": {
+    "passed": 22,
+    "required": 22,
+    "assertions": 101,
+    "exitCode": 0,
+    "proof": "focused-l1.log.gz"
+  },
+  "browser": {
+    "passed": 1,
+    "required": 1,
+    "skipped": 0,
+    "flaky": 0,
+    "exitCode": 0,
+    "proof": "result.json",
+    "traceManifest": "/Users/zigota/agent-jobs/xln-global-owner-20261104/o1-run16-trace-manifest.json"
+  },
+  "differentAIFamiliesConfirmed": 1,
+  "requiredDifferentAIFamilies": 3,
+  "reviewBoundary": "Current $10 grant entirely held by20 sent unresolved attempts; historical $100 retained; no final invoice/no-send0 receipt permits release",
+  "releaseAuthority": false,
+  "limitations": [
+    "Owned uncommitted source; no clean-SHA final release certificate",
+    "Other two AI families, full global native/financial/recovery/browser/performance/operator gates pending",
+    "P1 real-clock Account payout still pending eligibility; not the own-reserve Control A",
+    "No push/deploy; public source/bytes not freshly certified"
+  ]
+}

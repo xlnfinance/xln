@@ -1,0 +1,86 @@
+{
+  "afterDeposit": {
+    "__xlnType": "BigInt",
+    "value": "89999999876060150"
+  },
+  "afterWithdrawal": {
+    "__xlnType": "BigInt",
+    "value": "89999999875659510"
+  },
+  "before": {
+    "__xlnType": "BigInt",
+    "value": "89999999880241750"
+  },
+  "deposit": {
+    "blockNumber": 10,
+    "blockTimeStamp": 1793727471000,
+    "contractResult": [
+      ""
+    ],
+    "contract_address": "41fb75759b1db30abfea581c7656b0801366a13c18",
+    "fee": 2181600,
+    "id": "20e065b05a21191733c6d19a436bd02668b873efb636106327c43d40f96e82ef",
+    "log": [
+      {
+        "address": "fb75759b1db30abfea581c7656b0801366a13c18",
+        "data": "00000000000000000000000000000000000000000000000000000000001e8480",
+        "topics": [
+          "e1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c",
+          "0000000000000000000000007e5f4552091a69125d5dfcb7b8c2659029395bdf"
+        ]
+      }
+    ],
+    "receipt": {
+      "energy_fee": 2181600,
+      "energy_usage_total": 21816,
+      "net_usage": 284,
+      "result": "SUCCESS"
+    }
+  },
+  "depositedAmount": {
+    "__xlnType": "BigInt",
+    "value": "2000000"
+  },
+  "retained": {
+    "__xlnType": "BigInt",
+    "value": "1000000"
+  },
+  "withdrawal": {
+    "blockNumber": 13,
+    "blockTimeStamp": 1793727480000,
+    "contractResult": [
+      ""
+    ],
+    "contract_address": "41fb75759b1db30abfea581c7656b0801366a13c18",
+    "fee": 1400640,
+    "id": "12e51953dae59f1530986b4fea8da8d02bf5b204ee36e3c4352c7467d6e2db27",
+    "log": [
+      {
+        "address": "fb75759b1db30abfea581c7656b0801366a13c18",
+        "data": "00000000000000000000000000000000000000000000000000000000000f4240",
+        "topics": [
+          "7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65",
+          "0000000000000000000000007e5f4552091a69125d5dfcb7b8c2659029395bdf"
+        ]
+      }
+    ],
+    "receipt": {
+      "energy_fee": 1397500,
+      "energy_usage_total": 13975,
+      "net_fee": 3140,
+      "result": "SUCCESS"
+    }
+  },
+  "withdrawnAmount": {
+    "__xlnType": "BigInt",
+    "value": "1000000"
+  },
+  "wrapped": {
+    "base58": "TYtoKRvRyR6wEhRhttCrWqbN3WxhNRP92Q",
+    "deploymentBlock": 7,
+    "evm": "0xfb75759b1db30abfea581c7656b0801366a13c18",
+    "hex41": "0x41fb75759b1db30abfea581c7656b0801366a13c18",
+    "runtimeCodeHash": "0xa025d56a9930e947ce79b8183c99dd08c22fd4e3dacb9890f8183954b1c90412",
+    "transactionHash": "9a35597291511b2796cc357c54b8ad6d2d5ba57180f58d249bf3cdec108a086e"
+  }
+}

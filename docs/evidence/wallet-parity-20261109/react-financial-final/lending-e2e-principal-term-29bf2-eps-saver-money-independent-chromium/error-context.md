@@ -1,0 +1,252 @@
+# Instructions
+
+- Following Playwright test failed.
+- Explain why, be concise, respect Playwright best practices.
+- Provide a snippet of code with the fix, if possible.
+
+# Test info
+
+- Name: lending/e2e-principal.spec.ts >> term loan spends principal, repays partially then fully, and keeps saver money independent
+- Location: ui/tests/lending/e2e-principal.spec.ts:45:0
+
+# Error details
+
+```
+Test timeout of 60000ms exceeded.
+```
+
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - link "Skip to content" [ref=e4] [cursor=pointer]:
+    - /url: "#wallet-content"
+  - navigation "Primary" [ref=e5]:
+    - generic [ref=e10]: xln
+    - link "Home" [ref=e11] [cursor=pointer]:
+      - /url: /ui/
+    - link "Activity" [ref=e16] [cursor=pointer]:
+      - /url: /ui/activity
+    - link "Manage" [ref=e21] [cursor=pointer]:
+      - /url: /ui/manage
+    - link "Settings" [ref=e28] [cursor=pointer]:
+      - /url: /ui/settings
+    - generic [ref=e32]:
+      - generic [ref=e33]: Testnet
+      - generic [ref=e34]: "Frame #35"
+  - main [ref=e35]:
+    - complementary "Active jurisdiction" [ref=e36]:
+      - generic [ref=e37]:
+        - generic [ref=e38]:
+          - text: Jurisdiction ·
+          - strong [ref=e39]: Testnet
+        - generic [ref=e40]: Chain 31337
+        - button "Pause tutorial" [ref=e41] [cursor=pointer]
+      - group [ref=e42]:
+        - generic "Contract stack" [ref=e43] [cursor=pointer]
+    - region "Wallet tutorial" [ref=e44]:
+      - generic [ref=e45]:
+        - generic [ref=e46]:
+          - generic [ref=e47]:
+            - generic [ref=e48]: Tutorial · 13 / 24
+            - combobox "Tutorial chapter" [ref=e49]:
+              - option "1. Get test money"
+              - option "2. Send your first payment"
+              - option "3. Try a swap"
+              - option "4. Find your payment and swap"
+              - option "5. Know your jurisdiction"
+              - option "6. Swap across networks"
+              - option "7. Request a payment"
+              - option "8. Connect to a hub"
+              - option "9. Set credit limits"
+              - option "10. Move and settle money"
+              - option "11. Withdraw to your wallet"
+              - option "12. Lend and withdraw"
+              - option "13. Borrow with a known cost" [selected]
+              - option "14. Repay a loan"
+              - option "15. Withdraw your savings"
+              - option "16. Protect and recover"
+              - option "17. Recover on a new device"
+              - option "18. Create a company"
+              - option "19. Manage company shares"
+              - option "20. Understand company control"
+              - option "21. Credit and collateral"
+              - option "22. Request collateral"
+              - option "23. Keep your signed proofs"
+              - option "24. Exit through a dispute"
+              - option "Finish Keep practising"
+          - button "Pause tutorial" [ref=e50] [cursor=pointer]
+        - paragraph [ref=e54]: Choose Borrow and request 2 test USDC. With the testnet credit officer enabled, the wallet computes proof of work and shows its decision. Wait for committed facility approval and an active loan below before continuing. A denial is not a funded loan.
+        - generic [ref=e55]:
+          - group [ref=e56]:
+            - generic "How this works" [ref=e57] [cursor=pointer]
+          - generic [ref=e58]:
+            - button "Previous chapter" [ref=e59] [cursor=pointer]: ←
+            - button "Skip exercise" [ref=e60] [cursor=pointer]
+    - generic [ref=e62]:
+      - region "Test money faucet" [ref=e63]:
+        - generic [ref=e64]:
+          - generic [ref=e65]: Testnet faucet
+          - generic [ref=e66]: For trying payments · no real value
+        - button "Get 100 test USDC" [ref=e67] [cursor=pointer]
+        - group [ref=e68]:
+          - generic "How test money works" [ref=e69] [cursor=pointer]
+      - generic [ref=e70]:
+        - generic [ref=e71]:
+          - generic [ref=e72]: Wallet · Testnet
+          - button "Active entity Main. Switch entity" [ref=e74] [cursor=pointer]:
+            - generic [ref=e75]: M
+            - generic [ref=e76]: Main
+        - button "Security and recovery" [ref=e82] [cursor=pointer]
+      - combobox "Balance asset" [ref=e86]:
+        - option "All assets · USD estimate" [selected]
+        - option "USDC"
+      - generic [ref=e87]:
+        - generic [ref=e88]:
+          - region "Your balance" [ref=e89]:
+            - generic [ref=e90]:
+              - generic [ref=e91]:
+                - text: Balance
+                - generic [ref=e92]: · Balance
+              - generic [ref=e93]: $102.00
+              - generic [ref=e95]:
+                - button "Pay" [ref=e96] [cursor=pointer]
+                - button "Receive" [ref=e100] [cursor=pointer]
+                - button "Swap" [ref=e104] [cursor=pointer]
+                - button "Add money" [ref=e108] [cursor=pointer]
+                - button "Move" [ref=e111] [cursor=pointer]
+            - generic [ref=e114]:
+              - generic [ref=e115]:
+                - text: Payment address
+                - button "0xa05b…72a4" [ref=e119]
+              - generic [ref=e121]:
+                - text: Confirmed frame
+                - strong [ref=e122]: "#35"
+          - region "Balance breakdown" [ref=e123]:
+            - heading "How your money is held" [level=3] [ref=e124]
+            - generic [ref=e128]:
+              - generic [ref=e130]:
+                - generic [ref=e131]: Backed by collateral
+                - strong [ref=e133]: $0.00
+              - generic [ref=e134]:
+                - generic [ref=e135]:
+                  - generic [ref=e136]: Without collateral
+                  - strong [ref=e138]: $102.00
+                - paragraph [ref=e139]: Repayment depends on the other party.
+              - generic [ref=e141]:
+                - generic [ref=e142]: Blockchain wallet
+                - strong [ref=e144]: $0.00
+              - generic [ref=e146]:
+                - generic [ref=e147]: Contract reserve
+                - strong [ref=e149]: $0.00
+            - paragraph [ref=e150]: Fixed reference prices, not live market value.
+          - region "Credit limits" [ref=e151]:
+            - generic [ref=e152]:
+              - heading "Credit limits" [level=3] [ref=e153]
+              - generic [ref=e154]: Not a balance
+            - generic [ref=e155]:
+              - generic [ref=e156]:
+                - generic [ref=e157]: You extend
+                - strong [ref=e158]: $103.00
+              - generic [ref=e163]:
+                - generic [ref=e164]: Their debt to you $102.00
+                - generic [ref=e165]: Unused $1.00
+            - generic [ref=e166]:
+              - generic [ref=e167]:
+                - generic [ref=e168]: Extended to you
+                - strong [ref=e169]: $0.00
+              - generic [ref=e171]:
+                - generic [ref=e172]: Your debt to them $0.00
+                - generic [ref=e173]: Unused $0.00
+            - paragraph [ref=e174]: "Solid: debt already used. Outline: unused limit. Credit does not guarantee repayment."
+          - generic [ref=e175]:
+            - region "Assets" [ref=e176]:
+              - heading "Assets" [level=3] [ref=e178]
+              - generic [ref=e179]:
+                - button "USDC USD Coin 102.00" [expanded] [ref=e180] [cursor=pointer]:
+                  - generic [aria-hidden] [ref=e181]: $
+                  - generic [ref=e182]:
+                    - generic [ref=e183]: USDC
+                    - generic [ref=e184]: USD Coin
+                  - generic [ref=e185]: "102.00"
+                - button "H1 Payment hub · Testnet Your balance on this account 102.00 USDC Collateral-backed 0.00 USDC At risk 102.00 USDC Can send now 102.00 USDC Can receive now 1.00 USDC View account and adjust limits →" [ref=e195] [cursor=pointer]:
+                  - generic [ref=e196]:
+                    - generic [ref=e197]:
+                      - generic [ref=e198]:
+                        - text: H1
+                        - generic [ref=e199]: Payment hub
+                        - generic [ref=e200]: · Testnet
+                      - generic [ref=e201]: Your balance on this account
+                    - generic [ref=e202]: 102.00 USDC
+                  - generic [ref=e204]:
+                    - generic [ref=e208]:
+                      - generic [ref=e209]:
+                        - text: Collateral-backed
+                        - generic [ref=e211]: 0.00 USDC
+                      - generic [ref=e212]:
+                        - text: At risk
+                        - generic [ref=e214]: 102.00 USDC
+                    - generic [ref=e215]:
+                      - generic [ref=e216]:
+                        - text: Can send now
+                        - strong [ref=e217]: 102.00 USDC
+                      - generic [ref=e218]:
+                        - text: Can receive now
+                        - strong [ref=e219]: 1.00 USDC
+                    - generic [ref=e220]: View account and adjust limits →
+              - button "Show 2 assets with zero balance" [ref=e221] [cursor=pointer]
+            - region "Recent activity" [ref=e222]:
+              - generic [ref=e223]:
+                - heading "Recent activity" [level=3] [ref=e224]
+                - button "View all" [ref=e225] [cursor=pointer]
+              - generic [ref=e226]:
+                - button "Payment pending From H1 2 USDC in flight" [ref=e228] [cursor=pointer]:
+                  - generic [ref=e233]: Payment pending
+                  - generic [ref=e234]: From H1
+                  - generic [ref=e235]: 2 USDC
+                  - generic [ref=e236]: in flight
+                - button "Received 08:53 +100 USDC settled" [ref=e239] [cursor=pointer]:
+                  - generic [ref=e244]: Received
+                  - generic [ref=e245]: 08:53
+                  - generic [ref=e246]: +100 USDC
+                  - generic [ref=e247]: settled
+        - complementary "Wallet details" [ref=e249]:
+          - generic [ref=e250]:
+            - heading "Payment capacity" [level=3] [ref=e251]
+            - generic [ref=e253]:
+              - text: $102.00
+              - paragraph [ref=e254]: Spendable now across all accounts, credit included
+          - generic [ref=e255]:
+            - heading "Connected accounts" [level=3] [ref=e256]
+            - generic [ref=e257]:
+              - button "H H1 Payment connection" [ref=e258] [cursor=pointer]:
+                - generic [ref=e259]:
+                  - generic [ref=e260]: H
+                  - generic [ref=e261]:
+                    - generic [ref=e262]: H1
+                    - generic [ref=e263]: Payment connection
+              - button "Connect another account" [ref=e266] [cursor=pointer]
+          - generic [ref=e267]:
+            - heading "Resources" [level=3] [ref=e268]
+            - generic [ref=e269]:
+              - button "Security and recovery Keys, proofs, watchtowers" [ref=e270] [cursor=pointer]:
+                - generic [ref=e275]:
+                  - text: Security and recovery
+                  - generic [ref=e276]: Keys, proofs, watchtowers
+              - button "Assets and deposits On-chain wallet, reserve, faucets" [ref=e277] [cursor=pointer]:
+                - generic [ref=e282]:
+                  - text: Assets and deposits
+                  - generic [ref=e283]: On-chain wallet, reserve, faucets
+              - button "Lending Lend to a hub pool or borrow" [ref=e284] [cursor=pointer]:
+                - generic [ref=e288]:
+                  - text: Lending
+                  - generic [ref=e289]: Lend to a hub pool or borrow
+              - button "Ownership Board, shares, takeovers" [ref=e290] [cursor=pointer]:
+                - generic [ref=e297]:
+                  - text: Ownership
+                  - generic [ref=e298]: Board, shares, takeovers
+          - generic [ref=e299]:
+            - heading "Entity ID" [level=3] [ref=e300]
+            - button "0xa05bfd194013eb12e4c0b8ccf5941db4b8b09022193149b447af8a55736372a4" [ref=e302]
+            - paragraph [ref=e306]: Your payment address. Share it to get paid.
+```

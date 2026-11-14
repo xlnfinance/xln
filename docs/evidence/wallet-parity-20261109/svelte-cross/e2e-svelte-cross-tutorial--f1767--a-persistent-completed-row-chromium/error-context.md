@@ -1,0 +1,391 @@
+# Instructions
+
+- Following Playwright test failed.
+- Explain why, be concise, respect Playwright best practices.
+- Provide a snippet of code with the fix, if possible.
+
+# Test info
+
+- Name: e2e-svelte-cross-tutorial.spec.ts >> Svelte cross tutorial uses a visible quote and proves delivery with a persistent completed row
+- Location: ui/tests/e2e-svelte-cross-tutorial.spec.ts:35:0
+
+# Error details
+
+```
+Test timeout of 60000ms exceeded.
+```
+
+# Page snapshot
+
+```yaml
+- main [ref=e5]:
+  - complementary "Active jurisdiction" [ref=e6]:
+    - generic [ref=e7]:
+      - generic [ref=e8]:
+        - text: Jurisdiction ·
+        - strong [ref=e9]: Testnet
+      - generic [ref=e10]: Chain 31337
+      - button "Pause tutorial" [active] [ref=e11] [cursor=pointer]
+    - group [ref=e12]:
+      - generic "Contract stack" [ref=e13] [cursor=pointer]
+  - region "Wallet tutorial" [ref=e14]:
+    - generic [ref=e15]:
+      - generic [ref=e16]: 6 / 20
+      - button "Pause tutorial" [ref=e17] [cursor=pointer]: ×
+    - generic [ref=e18]:
+      - text: Chapter
+      - combobox "Tutorial chapter" [ref=e19] [cursor=pointer]:
+        - option "1. Get test money"
+        - option "2. Send a payment"
+        - option "3. Swap and manage orders"
+        - option "4. Read your receipts"
+        - option "5. Know your jurisdiction"
+        - option "6. Swap across networks" [selected]
+        - option "7. Request a payment"
+        - option "8. Connect to a hub"
+        - option "9. Set credit limits"
+        - option "10. Move and settle money"
+        - option "11. Withdraw to your wallet"
+        - option "12. Lend and withdraw"
+        - option "13. Borrow with a known cost"
+        - option "14. Repay a loan"
+        - option "15. Protect and recover"
+        - option "16. Recover on a new device"
+        - option "17. Create a company"
+        - option "18. Manage company shares"
+        - option "19. Understand company control"
+        - option "20. Exit through a dispute"
+    - paragraph [ref=e20]: Exchange assets into your own account in another jurisdiction without giving a bridge custody of your wallet.
+    - paragraph [ref=e21]:
+      - strong [ref=e22]: "Before you start:"
+      - text: Keep both network identities in this wallet, with accepted hub accounts and receiving capacity on the destination.
+    - paragraph [ref=e23]: In Swap choose From network and To network, then From token and To token. A USDC → USDT pair may have a direct market even when WETH does not. Inspect the route and minimum receive, submit a small test order and stay online. Inspect both legs; use Clear + Close when available. An unmatched order is not a completed swap.
+    - paragraph [ref=e24]:
+      - strong [ref=e25]: "Check the result:"
+      - text: Verify the source debit AND destination credit. An open cross-network order is not delivered money.
+    - group [ref=e26]:
+      - generic "Why it works · example" [ref=e27] [cursor=pointer]
+    - generic [ref=e28]:
+      - button "Previous" [ref=e29] [cursor=pointer]
+      - button "Next chapter" [ref=e30] [cursor=pointer]
+    - text: Explore at your pace. Only confirmed receipts and balances prove an operation completed.
+  - generic [ref=e31]:
+    - generic [ref=e33]:
+      - button "cross-guide-5ddd9b75-5ce8-4ba6-bf7c-a60aeaf04eae" [ref=e37] [cursor=pointer]:
+        - generic [ref=e38]:
+          - generic "Testnet" [ref=e40]: L
+          - generic [ref=e41]:
+            - generic [ref=e42]: cross-guide-5ddd9b75-5ce8-4ba6-bf7c-a60aeaf04eae
+            - generic [ref=e43]: cross-guide-5ddd9b75-5ce8-4ba6-bf7c-a60aeaf04eae · Testnet
+          - generic [aria-hidden] [ref=e44]: ›
+        - generic [aria-hidden] [ref=e45]: cross-guide-5ddd9b75-5ce8-4ba6-bf7c-a60aeaf04eae
+      - generic [ref=e46]:
+        - paragraph [ref=e47]: Entity
+        - button "0x1ed502583d6bf9c0bb29d96654475909d2857487fc81ca626cb1a541f9eda67b" [ref=e48] [cursor=pointer]
+    - generic [ref=e51]:
+      - generic [ref=e52]: $100.00
+      - 'generic "Total balance includes external funds, reserves, signed account balances and hub-reported lending deposits. Frozen funds remain yours; drawn account debt is deducted. Example: 80 USDC in your account + 20 in lending = 100 total. Available to pay excludes lending deposits and includes unused credit; a 50 USDC credit limit does not make you 50 USDC richer. Unpaid term loans, including agreed interest, are also deducted; their schedules are shown in Lending. USD values use reference prices, not executable swap quotes." [ref=e53]': Total balance
+      - generic [ref=e54]: "Available to pay: $100.00 · includes credit"
+      - group [ref=e55]:
+        - generic "Balance explained" [ref=e56]
+  - navigation [ref=e57]:
+    - button "Assets" [ref=e58] [cursor=pointer]
+    - button "Accounts" [ref=e61] [cursor=pointer]
+    - button "Ownership" [ref=e64] [cursor=pointer]
+    - button "Settings" [ref=e67] [cursor=pointer]
+  - generic [ref=e70]:
+    - generic [ref=e72]:
+      - generic [ref=e73]: 1 Accounts
+      - generic [ref=e76]:
+        - generic [ref=e77]: "0x23d8a399a44479f8f140e4c0b6049ab2e5bdf3ddf05e10e8e51b0821ee6121b7"
+        - generic [ref=e78]:
+          - generic "0x23d8a399a44479f8f140e4c0b6049ab2e5bdf3ddf05e10e8e51b0821ee6121b7" [ref=e80]: H1 (Testnet)
+          - button "#3 0%" [ref=e86] [cursor=pointer]:
+            - generic [ref=e88]: "#3"
+            - generic [ref=e89]: 0%
+        - generic [ref=e90]:
+          - generic [ref=e93] [cursor=pointer]:
+            - generic [ref=e94]:
+              - generic [ref=e95]:
+                - generic [ref=e96]: $
+                - generic [ref=e97]:
+                  - generic [ref=e98]: USDC
+                  - generic [ref=e99]: USD Coin
+                - button "Faucet" [ref=e100]
+              - generic [ref=e101]:
+                - generic "Out capacity" [ref=e102]:
+                  - generic [ref=e103]:
+                    - generic [ref=e104]: "100"
+                    - generic [ref=e105]: ~$100
+                - generic "In capacity" [ref=e106]:
+                  - generic [ref=e107]:
+                    - generic [ref=e108]: ← Receivable
+                    - generic [ref=e109]: 9,900
+            - button [ref=e110]
+          - generic [ref=e119] [cursor=pointer]:
+            - generic [ref=e120]:
+              - generic [ref=e121]:
+                - generic [ref=e122]: E
+                - generic [ref=e123]:
+                  - generic [ref=e124]: WETH
+                  - generic [ref=e125]: Wrapped Ether
+                - button "Faucet" [ref=e126]
+              - generic [ref=e127]:
+                - generic "Out capacity" [ref=e128]: "0"
+                - generic "In capacity" [ref=e131]:
+                  - generic [ref=e132]:
+                    - generic [ref=e133]: ← Receivable
+                    - generic [ref=e134]: "0"
+            - button [ref=e135]
+          - generic [ref=e140] [cursor=pointer]:
+            - generic [ref=e141]:
+              - generic [ref=e142]:
+                - generic [ref=e143]: $
+                - generic [ref=e144]:
+                  - generic [ref=e145]: USDT
+                  - generic [ref=e146]: Tether USD
+                - button "Faucet" [ref=e147]
+              - generic [ref=e148]:
+                - generic "Out capacity" [ref=e149]: "0"
+                - generic "In capacity" [ref=e152]:
+                  - generic [ref=e153]:
+                    - generic [ref=e154]: ← Receivable
+                    - generic [ref=e155]: "0"
+            - button [ref=e156]
+    - generic [ref=e159]:
+      - navigation "Account workspace" [ref=e160]:
+        - button "Open Account" [ref=e161] [cursor=pointer]
+        - button "Pay" [ref=e164] [cursor=pointer]
+        - button "Receive" [ref=e167] [cursor=pointer]
+        - button "Swap" [ref=e170] [cursor=pointer]
+        - button "Move" [ref=e173] [cursor=pointer]
+        - button "History" [ref=e176] [cursor=pointer]
+        - button "Manage" [ref=e179] [cursor=pointer]
+        - button "Activity" [ref=e182] [cursor=pointer]
+        - button "Appearance" [ref=e185] [cursor=pointer]
+      - group [ref=e188]:
+        - generic "How this works" [ref=e189] [cursor=pointer]
+    - generic [ref=e191]:
+      - generic [ref=e192]:
+        - generic [ref=e193]:
+          - generic [ref=e194]:
+            - generic "Hub counterparty" [ref=e195] [cursor=pointer]:
+              - generic [ref=e196]: H1
+              - generic [ref=e197]: H1 (Testnet)
+              - combobox "Hub counterparty" [ref=e199]:
+                - option "H1 (Testnet)" [selected]
+            - button "Hide book" [pressed] [ref=e200] [cursor=pointer]
+          - generic [ref=e201]:
+            - generic [ref=e202]: You pay
+            - generic [ref=e204]:
+              - generic [ref=e205]:
+                - generic [ref=e206] [cursor=pointer]:
+                  - generic [ref=e207]: Te
+                  - generic [ref=e208]: cross-guide-5ddd9b75-5ce8-4ba6-b (Testnet)
+                  - combobox "From network" [ref=e210]:
+                    - option "cross-guide-5ddd9b75-5ce8-4ba6-b (Testnet)" [selected]
+                    - option "cross-guide-5ddd9b75-5ce8-4ba6-b (Tron)"
+                - generic [ref=e211] [cursor=pointer]:
+                  - generic [ref=e212]: U
+                  - generic [ref=e213]: USDC
+                  - combobox "From token" [ref=e215]:
+                    - option "USDC" [selected]
+                    - option "USDT"
+                    - option "WETH"
+              - generic [ref=e216]:
+                - textbox "Amount to pay" [ref=e217]:
+                  - /placeholder: "0"
+                  - text: "100"
+                - generic [ref=e218]:
+                  - generic [ref=e219]: Available
+                  - strong [ref=e220]: "100"
+          - button "Flip tokens" [ref=e222] [cursor=pointer]: ⇅
+          - generic [ref=e223]:
+            - generic [ref=e224]: You receive
+            - generic [ref=e226]:
+              - generic [ref=e227]:
+                - generic [ref=e228] [cursor=pointer]:
+                  - generic [ref=e229]: Te
+                  - generic [ref=e230]: Same account
+                  - combobox "To network" [ref=e232]:
+                    - option "Same account" [selected]
+                    - option "cross-guide-5ddd9b75-5ce8-4ba6-b (Tron)"
+                - generic [ref=e233] [cursor=pointer]:
+                  - generic [ref=e234]: W
+                  - generic [ref=e235]: WETH
+                  - combobox "To token" [ref=e237]:
+                    - option "USDC"
+                    - option "USDT"
+                    - option "WETH" [selected]
+              - generic [ref=e238]:
+                - generic [ref=e239]: "0.039992"
+                - generic [ref=e240]:
+                  - generic [ref=e241]: Capacity
+                  - strong [ref=e242]: "0"
+          - generic [ref=e243]:
+            - generic [ref=e244]:
+              - generic [ref=e245]: Rate
+              - textbox "Limit rate" [ref=e246]: "2500.5000"
+              - generic [ref=e247]: USDC
+            - button "Rate down" [ref=e248] [cursor=pointer]: −
+            - button "Rate up" [ref=e249] [cursor=pointer]: +
+            - button "Market" [ref=e250] [cursor=pointer]
+          - generic [ref=e251]:
+            - button "Route Same account USDC -> WETH" [ref=e252] [cursor=pointer]:
+              - generic [ref=e253]: Route
+              - strong [ref=e254]: Same account
+              - emphasis [ref=e255]: USDC -> WETH
+            - generic [ref=e256]:
+              - generic "cross-guide-5ddd9b75-5ce8-4ba6-b -> H1 -> H1 -> cross-guide-5ddd9b75-5ce8-4ba6-b" [ref=e257]: Testnet
+              - emphasis [ref=e258]: via H1 (Testnet)
+          - generic [ref=e259]:
+            - generic [ref=e260]:
+              - text: Maximum fee
+              - strong [ref=e261]: 0.0000039992 WETH
+            - generic [ref=e262]:
+              - text: Minimum receive
+              - strong [ref=e263]: 0.0399880008 WETH
+          - paragraph [ref=e264]: Placing this swap will auto-activate WETH and set inbound capacity to 0.039992 WETH (+0.039992).
+          - button "Swap USDC to WETH" [ref=e265] [cursor=pointer]
+        - generic [ref=e266]:
+          - generic [ref=e267]:
+            - generic [ref=e268]:
+              - generic [ref=e269]: Orderbook
+              - generic [ref=e270] [cursor=pointer]:
+                - strong [ref=e271]: WETH-USDC (Testnet)
+                - combobox "Orderbook pair" [ref=e272]:
+                  - option "WETH-USDC (Testnet)" [selected]
+                  - option "USDC-USDT (Testnet)"
+                  - option "WETH-USDT (Testnet)"
+                - text: ⌄
+            - button "Selected" [ref=e273] [cursor=pointer]
+          - generic [ref=e275]:
+            - generic [ref=e276]:
+              - generic [ref=e277]: Spread
+              - generic [ref=e278]: "1.0000"
+              - generic [ref=e279]: (0.039%)
+              - generic [ref=e280]: Last
+              - generic [ref=e281]: No trade
+            - generic [ref=e282]:
+              - generic [ref=e283]:
+                - generic [ref=e284]: Acct
+                - generic [ref=e285]: Price
+                - generic [ref=e286]: Amount
+                - generic [ref=e287]: Total
+              - generic [ref=e288]:
+                - button "2508.0000 30.6 196.35" [ref=e289] [cursor=pointer]:
+                  - generic "H1" [ref=e291]
+                  - generic [ref=e292]: "2508.0000"
+                  - generic [ref=e293]: "30.6"
+                  - generic [ref=e294]: "196.35"
+                - button "2506.2500 28.05 165.75" [ref=e295] [cursor=pointer]:
+                  - generic "H1" [ref=e297]
+                  - generic [ref=e298]: "2506.2500"
+                  - generic [ref=e299]: "28.05"
+                  - generic [ref=e300]: "165.75"
+                - button "2505.0000 25.5 137.7" [ref=e301] [cursor=pointer]:
+                  - generic "H1" [ref=e303]
+                  - generic [ref=e304]: "2505.0000"
+                  - generic [ref=e305]: "25.5"
+                  - generic [ref=e306]: "137.7"
+                - button "2503.7500 22.95 112.2" [ref=e307] [cursor=pointer]:
+                  - generic "H1" [ref=e309]
+                  - generic [ref=e310]: "2503.7500"
+                  - generic [ref=e311]: "22.95"
+                  - generic [ref=e312]: "112.2"
+                - button "2503.0000 20.4 89.25" [ref=e313] [cursor=pointer]:
+                  - generic "H1" [ref=e315]
+                  - generic [ref=e316]: "2503.0000"
+                  - generic [ref=e317]: "20.4"
+                  - generic [ref=e318]: "89.25"
+                - button "2502.5000 17.85 68.85" [ref=e319] [cursor=pointer]:
+                  - generic "H1" [ref=e321]
+                  - generic [ref=e322]: "2502.5000"
+                  - generic [ref=e323]: "17.85"
+                  - generic [ref=e324]: "68.85"
+                - button "2502.0000 15.3 51" [ref=e325] [cursor=pointer]:
+                  - generic "H1" [ref=e327]
+                  - generic [ref=e328]: "2502.0000"
+                  - generic [ref=e329]: "15.3"
+                  - generic [ref=e330]: "51"
+                - button "2501.5000 13.6 35.7" [ref=e331] [cursor=pointer]:
+                  - generic "H1" [ref=e333]
+                  - generic [ref=e334]: "2501.5000"
+                  - generic [ref=e335]: "13.6"
+                  - generic [ref=e336]: "35.7"
+                - button "2501.0000 11.9 22.1" [ref=e337] [cursor=pointer]:
+                  - generic "H1" [ref=e339]
+                  - generic [ref=e340]: "2501.0000"
+                  - generic [ref=e341]: "11.9"
+                  - generic [ref=e342]: "22.1"
+                - button "2500.5000 10.2 10.2" [ref=e343] [cursor=pointer]:
+                  - generic "H1" [ref=e345]
+                  - generic [ref=e346]: "2500.5000"
+                  - generic [ref=e347]: "10.2"
+                  - generic [ref=e348]: "10.2"
+              - button "2500.5000" [ref=e349] [cursor=pointer]
+              - generic [ref=e351]:
+                - button "2499.5000 10.2 10.2" [ref=e352] [cursor=pointer]:
+                  - generic "H1" [ref=e354]
+                  - generic [ref=e355]: "2499.5000"
+                  - generic [ref=e356]: "10.2"
+                  - generic [ref=e357]: "10.2"
+                - button "2499.0000 11.9 22.1" [ref=e358] [cursor=pointer]:
+                  - generic "H1" [ref=e360]
+                  - generic [ref=e361]: "2499.0000"
+                  - generic [ref=e362]: "11.9"
+                  - generic [ref=e363]: "22.1"
+                - button "2498.5000 13.6 35.7" [ref=e364] [cursor=pointer]:
+                  - generic "H1" [ref=e366]
+                  - generic [ref=e367]: "2498.5000"
+                  - generic [ref=e368]: "13.6"
+                  - generic [ref=e369]: "35.7"
+                - button "2498.0000 15.3 51" [ref=e370] [cursor=pointer]:
+                  - generic "H1" [ref=e372]
+                  - generic [ref=e373]: "2498.0000"
+                  - generic [ref=e374]: "15.3"
+                  - generic [ref=e375]: "51"
+                - button "2497.5000 17.85 68.85" [ref=e376] [cursor=pointer]:
+                  - generic "H1" [ref=e378]
+                  - generic [ref=e379]: "2497.5000"
+                  - generic [ref=e380]: "17.85"
+                  - generic [ref=e381]: "68.85"
+                - button "2497.0000 20.4 89.25" [ref=e382] [cursor=pointer]:
+                  - generic "H1" [ref=e384]
+                  - generic [ref=e385]: "2497.0000"
+                  - generic [ref=e386]: "20.4"
+                  - generic [ref=e387]: "89.25"
+                - button "2496.2500 22.95 112.2" [ref=e388] [cursor=pointer]:
+                  - generic "H1" [ref=e390]
+                  - generic [ref=e391]: "2496.2500"
+                  - generic [ref=e392]: "22.95"
+                  - generic [ref=e393]: "112.2"
+                - button "2495.0000 25.5 137.7" [ref=e394] [cursor=pointer]:
+                  - generic "H1" [ref=e396]
+                  - generic [ref=e397]: "2495.0000"
+                  - generic [ref=e398]: "25.5"
+                  - generic [ref=e399]: "137.7"
+                - button "2493.7500 28.05 165.75" [ref=e400] [cursor=pointer]:
+                  - generic "H1" [ref=e402]
+                  - generic [ref=e403]: "2493.7500"
+                  - generic [ref=e404]: "28.05"
+                  - generic [ref=e405]: "165.75"
+                - button "2492.0000 30.6 196.35" [ref=e406] [cursor=pointer]:
+                  - generic "H1" [ref=e408]
+                  - generic [ref=e409]: "2492.0000"
+                  - generic [ref=e410]: "30.6"
+                  - generic [ref=e411]: "196.35"
+            - generic [ref=e412]:
+              - generic [ref=e413]: B 50.00%
+              - generic [ref=e417]: 50.00% S
+            - generic [ref=e418]:
+              - generic "Book built from 1 source" [ref=e419]: "Hub: 0x23d8a399a44479f8f140e4c0b6049ab2e5bdf3ddf05e10e8e51b0821ee6121b7"
+              - 'button "Updated: 19:41:27.269" [ref=e420] [cursor=pointer]'
+      - generic [ref=e421]:
+        - generic [ref=e423]:
+          - heading "Same-network orders" [level=4] [ref=e424]
+          - tablist "Swap orders" [ref=e425]:
+            - button "Open (0)" [pressed] [ref=e426] [cursor=pointer]
+            - button "Closed (0)" [ref=e427] [cursor=pointer]
+        - generic [ref=e428]: No open orders yet.
+```

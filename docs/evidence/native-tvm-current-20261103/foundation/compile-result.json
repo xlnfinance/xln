@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-03T17:37:01.363884+00:00",
+  "command": "bun run stand:run --reason owner-native-current-nine-artifacts --timeout-ms180000 -- bun jurisdictions/scripts/compile-tron.cjs --contracts=Account,DepositoryBounds,HashLadderRegistry,NftCustody,DeltaTransformer,HankoVerifier,EntityProvider,Depository,ERC20Mock --quiet",
+  "exitCode": 0,
+  "artifactCount": 9,
+  "exactSourceBindings": 87,
+  "mismatches": 0,
+  "sourceSHA": "019d45beb5954e77fe806d643845f6a4dca4fa82",
+  "runtimeManifest": "runtime-candidate7-manifest.json",
+  "compileLog": "compile.log",
+  "artifactManifestSHA256": "a54bfd93721f20e34def7dc5f6b22b1aec325bf0ce783a0fd08bd37e5d1a73a6",
+  "manualBytecodeReview": "Compiler/settings/current source bindings verified9/9; runtime templates Account23198/Depository23891 bytes; linked native deployment and actual TVM execution remain pending. No Solidity source, compiler pin, dependency lock or frozen registry changed."
+}

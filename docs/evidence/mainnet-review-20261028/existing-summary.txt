@@ -1,0 +1,10 @@
+install rc=0 1s
+contracts-sync rc=0 0s
+check rc=0 36s
+contracts-test rc=0 55s
+cargo rc=0 48s
+rscore-differential rc=0 2s
+xlnrs-release rc=0 34s
+unit-core rc=0 562s
+unit-ui rc=0 6s
+DONE

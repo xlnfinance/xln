@@ -1,0 +1,323 @@
+{
+  "apiOrigin": "http://127.0.0.1:20024",
+  "baseURL": "http://127.0.0.1:20022",
+  "blockedAlert": "Could not load your assets.\n\nTOKEN_REGISTRY_FETCH_FAILED:server response 502 Bad Gateway (request={ }, response={ }, error=null, info={ \"requestUrl\": \"http://localhost:20022/rpc\", \"responseBody\": \"\", \"responseStatus\": \"502 Bad Gateway\" }, code=SERVER_ERROR, version=6.17.0)\n\nRetry\n\nRPC http://127.0.0.1:20022/rpc\n\nUse another RPC for this chain\nVerify and use",
+  "broadcastClickMs": {
+    "fromExitClick": 1383,
+    "fromShutdown": 7299
+  },
+  "browserToasts": [
+    "Your hub account is frozen by a dispute. Connect another hub below to receive test money.",
+    "Loading recent activity…"
+  ],
+  "controlA": {
+    "externalGasDeltaWei": {
+      "__xlnType": "BigInt",
+      "value": "0"
+    },
+    "externalUsdcDelta": {
+      "__xlnType": "BigInt",
+      "value": "100000000"
+    },
+    "gasUsed": {
+      "__xlnType": "BigInt",
+      "value": "146318"
+    },
+    "kind": "own J-reserve to external (no Account dispute; NOT the Account exit)",
+    "reserveAfter": {
+      "__xlnType": "BigInt",
+      "value": "0"
+    },
+    "spendableMs": {
+      "fromMoveClick": 1957,
+      "fromShutdown": 10936
+    },
+    "status": 1,
+    "tx": "0xc7123cf9b1ad2053ab255520ee28ad545fbab9e5ec14a2f8eb36fa3bbca342ff"
+  },
+  "down": {
+    "alive": [
+      false,
+      false,
+      false
+    ],
+    "apiHealth": "unreachable: ECONNREFUSED: Unable to connect. Is the computer able to access the url?",
+    "independentChainBlock": 53,
+    "ports": [
+      {
+        "port": 20024,
+        "result": "unreachable: ECONNREFUSED: Unable to connect. Is the computer able to access the url?"
+      },
+      {
+        "port": 20030,
+        "result": "unreachable: ECONNREFUSED: Unable to connect. Is the computer able to access the url?"
+      },
+      {
+        "port": 20023,
+        "result": "unreachable: ECONNREFUSED: Unable to connect. Is the computer able to access the url?"
+      }
+    ],
+    "provenDownMs": 1530,
+    "signals": [
+      {
+        "pid": 15429,
+        "ports": [
+          20024
+        ],
+        "role": "api+rpc-gateway",
+        "signal": "SIGTERM"
+      },
+      {
+        "pid": 15545,
+        "ports": [
+          20030
+        ],
+        "role": "hub:H1",
+        "signal": "exited-with-parent"
+      },
+      {
+        "pid": 15822,
+        "ports": [
+          20023
+        ],
+        "role": "watchtower",
+        "signal": "SIGTERM"
+      }
+    ],
+    "towerHealth": "unreachable: ECONNREFUSED: Unable to connect. Is the computer able to access the url?",
+    "walletRpcGateway": "HTTP 502"
+  },
+  "externalAddress": "0x22d548bebda2bc07affae7430fa8dbf98da25542",
+  "externalGasBefore": {
+    "__xlnType": "BigInt",
+    "value": "10041981820000000"
+  },
+  "externalUsdcBefore": {
+    "__xlnType": "BigInt",
+    "value": "0"
+  },
+  "funded": {
+    "accountHeight": 4,
+    "accountRoot": "0x91c03f0f07ffd6ec6345a7c21be6d044c44181dbe10000788606ca4478398894",
+    "batch": {
+      "finalizations": 0,
+      "operations": 0,
+      "sent": false
+    },
+    "collateral": "100000000",
+    "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+    "dispute": null,
+    "disputeConfig": {
+      "leftResponseSeconds": 3600,
+      "rightResponseSeconds": 86400
+    },
+    "entityId": "0x88c221f8f8fdad16a7aeea58e759bd23179f146ffd4ba7d3abffa05ea5d6d3d0",
+    "height": 22,
+    "incomingDebt": "0",
+    "jNonce": 0,
+    "lastFinalizedJHeight": 52,
+    "mempool": 0,
+    "offdelta": "0",
+    "ondelta": "0",
+    "ownValue": "100000000",
+    "pending": false,
+    "reserve": "100000000",
+    "sentBatch": null,
+    "signerId": "0x22d548bebda2bc07affae7430fa8dbf98da25542",
+    "status": "active",
+    "timestamp": 1793723208833
+  },
+  "fundedChain": {
+    "collateral": "100000000",
+    "disputeHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "nonce": "0",
+    "ondelta": "0",
+    "peerReserve": "1999800000000",
+    "reserve": "100000000",
+    "timeout": 0
+  },
+  "hubId": "0x4fe561d6e82f8fd2661a685f6f299031f414d07a65b51b8613695119c39d347c",
+  "lastWalletState": {
+    "accountHeight": 4,
+    "accountRoot": "0x91c03f0f07ffd6ec6345a7c21be6d044c44181dbe10000788606ca4478398894",
+    "batch": {
+      "finalizations": 0,
+      "operations": 0,
+      "sent": true
+    },
+    "collateral": "100000000",
+    "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+    "dispute": {
+      "disputeTimeout": 0,
+      "finalizeQueued": false,
+      "initialNonce": 2,
+      "initialProofbodyHash": "0x5f9418efec46ee56d84aeff53015646dc0a7a270b32a501d896e6a011b2e63f6",
+      "initialProposerIsLeft": false,
+      "jNonce": 0,
+      "observedOnChain": false,
+      "startedByLeft": false,
+      "starterCounterProofCommitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "disputeConfig": {
+      "leftResponseSeconds": 3600,
+      "rightResponseSeconds": 86400
+    },
+    "entityId": "0x88c221f8f8fdad16a7aeea58e759bd23179f146ffd4ba7d3abffa05ea5d6d3d0",
+    "height": 25,
+    "incomingDebt": "0",
+    "jNonce": 0,
+    "lastFinalizedJHeight": 53,
+    "mempool": 0,
+    "offdelta": "0",
+    "ondelta": "0",
+    "ownValue": "100000000",
+    "pending": false,
+    "reserve": "100000000",
+    "sentBatch": {
+      "batchHash": "0x95ee6b8a6edc9029e2d4fc783652363bd823dd4d60dff34ee4f6a364cbbd4ecb",
+      "nonce": 2
+    },
+    "signerId": "0x22d548bebda2bc07affae7430fa8dbf98da25542",
+    "status": "disputed",
+    "timestamp": 1793723221655
+  },
+  "reload": {
+    "alert": "Could not load your assets.\n\nJURISDICTION_ADAPTER_UNAVAILABLE\n\nRetry\n\nRPC http://127.0.0.1:20022/rpc\n\nUse another RPC for this chain\nVerify and use",
+    "ms": 6869,
+    "state": {
+      "accountHeight": 4,
+      "accountRoot": "0x91c03f0f07ffd6ec6345a7c21be6d044c44181dbe10000788606ca4478398894",
+      "batch": {
+        "finalizations": 0,
+        "operations": 0,
+        "sent": false
+      },
+      "collateral": "100000000",
+      "depository": "0xa513e6e4b8f2a923d98304ec87f64353c4d5c853",
+      "dispute": {
+        "batchNonce": 2,
+        "disputeStartTimestamp": 1793723219,
+        "disputeTimeout": 1793813219,
+        "finalizeQueued": false,
+        "initialNonce": 2,
+        "initialProofbodyHash": "0x5f9418efec46ee56d84aeff53015646dc0a7a270b32a501d896e6a011b2e63f6",
+        "initialProposerIsLeft": false,
+        "jNonce": 2,
+        "observedBlockNumber": 55,
+        "observedOnChain": true,
+        "startedByLeft": false,
+        "starterCounterProofCommitment": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "disputeConfig": {
+        "leftResponseSeconds": 3600,
+        "rightResponseSeconds": 86400
+      },
+      "entityId": "0x88c221f8f8fdad16a7aeea58e759bd23179f146ffd4ba7d3abffa05ea5d6d3d0",
+      "height": 38,
+      "incomingDebt": "0",
+      "jNonce": 2,
+      "lastFinalizedJHeight": 56,
+      "mempool": 0,
+      "offdelta": "0",
+      "ondelta": "0",
+      "ownValue": "100000000",
+      "pending": false,
+      "reserve": "0",
+      "sentBatch": null,
+      "signerId": "0x22d548bebda2bc07affae7430fa8dbf98da25542",
+      "status": "disputed",
+      "timestamp": 1793723231881
+    }
+  },
+  "rpc": "http://127.0.0.1:20020",
+  "rpcSwitch": {
+    "fromShutdown": 4271,
+    "independentRpc": "http://127.0.0.1:20020",
+    "ms": 2737,
+    "network": "Testnet"
+  },
+  "shutdownWallClock": "2026-11-03T16:26:54.381Z",
+  "start": {
+    "blockNumber": 55,
+    "blockTimestamp": 1793723219,
+    "disputeTimeout": {
+      "__xlnType": "BigInt",
+      "value": "1793813219"
+    },
+    "gasUsed": {
+      "__xlnType": "BigInt",
+      "value": "354212"
+    },
+    "leftResponseSeconds": {
+      "__xlnType": "BigInt",
+      "value": "3600"
+    },
+    "nonce": {
+      "__xlnType": "BigInt",
+      "value": "2"
+    },
+    "observedMs": {
+      "fromExitClick": 3000,
+      "fromShutdown": 8917
+    },
+    "rightResponseSeconds": {
+      "__xlnType": "BigInt",
+      "value": "86400"
+    },
+    "status": 1,
+    "txHash": "0x8fd1a434b9d6bf4a41675f17c9ea01ed6f8d3a127896146aaf2ab09797853f87"
+  },
+  "startedChain": {
+    "collateral": "100000000",
+    "disputeHash": "0xd87d772bffbe7fba978276cb11fefc9bc9e1d29bb53633133726d217063c1ab0",
+    "nonce": "2",
+    "ondelta": "0",
+    "peerReserve": "1999800000000",
+    "reserve": "100000000",
+    "timeout": 1793813219
+  },
+  "targets": [
+    {
+      "pid": 15429,
+      "ports": [
+        20024
+      ],
+      "role": "api+rpc-gateway"
+    },
+    {
+      "pid": 15545,
+      "ports": [
+        20030
+      ],
+      "role": "hub:H1"
+    },
+    {
+      "pid": 15822,
+      "ports": [
+        20023
+      ],
+      "role": "watchtower"
+    }
+  ],
+  "towerOrigin": "http://127.0.0.1:20023",
+  "wallet": {
+    "entityId": "0x88c221f8f8fdad16a7aeea58e759bd23179f146ffd4ba7d3abffa05ea5d6d3d0",
+    "runtimeId": "0x22d548bebda2bc07affae7430fa8dbf98da25542"
+  },
+  "walletRpc": [
+    {
+      "commitment": null,
+      "name": "Testnet",
+      "rpcs": [
+        "http://127.0.0.1:20022/rpc"
+      ]
+    },
+    {
+      "commitment": null,
+      "name": "Tron",
+      "rpcs": [
+        "http://127.0.0.1:20022/rpc2"
+      ]
+    }
+  ]
+}

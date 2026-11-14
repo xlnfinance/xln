@@ -1,0 +1,45 @@
+{
+  "at": "2026-11-03T16:32:01.336599+00:00",
+  "baseSHA": "019d45beb5954e77fe806d643845f6a4dca4fa82",
+  "candidate": "owned uncommitted source pinned by source-manifest.json; no clean-SHA release certificate",
+  "runtimeSemantics": "production",
+  "diagnostics": true,
+  "artifactScope": "private QA artifact; distinct from diagnostics-off shipped UI",
+  "focusedL1": {
+    "passed": 13,
+    "required": 13,
+    "assertions": 62,
+    "exitCode": 0
+  },
+  "runtimeTypes": {
+    "exitCode": 0
+  },
+  "uiTypes": {
+    "exitCode": 0
+  },
+  "qaBuild": {
+    "exitCode": 0
+  },
+  "browser": {
+    "id": "O1 fully secured user-Hub Account starts its unilateral exit, and own reserve reaches the external address, while Hub, API/RPC gateway and tower are down",
+    "stats": {
+      "startTime": "2026-11-03T16:26:37.835Z",
+      "duration": 35129.627,
+      "expected": 1,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "exitCode": 0,
+    "proof": "hub-outage-exit.json",
+    "clock": "real wall/chain time; signed windows unchanged",
+    "chains": "31337 and 31338 Anvil EVM simulators; no native TRON claim"
+  },
+  "limitations": [
+    "Actual Account payout awaits preserved P1 onchain eligibility 1793810746 (2026-11-04T16:45:46Z)",
+    "Unilateral dispute START and independent own-reserve Control A are distinct from Account payout",
+    "Full bun run check pending; three different AI review pending; no push/deploy yet",
+    "This outage/reload timing includes manual RPC repairs, not a <=1000ms normal restore certificate"
+  ],
+  "privateJob": "/Users/zigota/agent-jobs/xln-global-owner-20261104"
+}

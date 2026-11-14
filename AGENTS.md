@@ -12,13 +12,15 @@ transitions, one canonical production path, no silent fallback.
 - Engine: TypeScript is canonical. The Rust freeze is lifted (2026-10-14): `rscore/` may be
   edited and committed; tag `rscore-freeze-f1464e84e` is history, not a lock. Rust gates return
   to `check` only after `bun run rscore:check` is green on that commit. Never stash Rust work.
-- Wallet: React `ui/` is the only wallet. Svelte `frontend/` is frozen: no new wallet
-  features; only landing/static copy and build health change there.
+- Wallets (owner 2026-11-09): Svelte `frontend/` at `/app` and React `ui/` at `/ui/`
+  are equally important, actively maintained wallets. Neither is frozen. Required financial
+  flows must have functional parity and owning tests in both, using the canonical runtime.
+  Never redirect one wallet to the other or delete either wallet as obsolete.
 - Required launch flows: Pay, same-J Swap, Cross-swap and Lending on EVM and native TRON, as
   fast browserless financial scenarios plus all owning browser E2E. Two EVM simulators do not
   establish TVM support. Testnet evidence is not real-funds activation authority.
 - Lending reopens the existing signed bank/facility/term-loan/savings product through canonical
-  production admission and React, preserving exact money, authority, deadlines and recovery.
+  production admission and both wallets, preserving exact money, authority, deadlines and recovery.
   Do not invent oracle liquidation, insurance or cross-J fungible collateral.
 - The agent may create a dedicated Sepolia signer, obtain test ETH and deploy current contracts
   without another signing question. Mainnet is open to all participants using their own funds:
@@ -250,7 +252,9 @@ transitions, one canonical production path, no silent fallback.
 ## TYPESCRIPT AND CODE STYLE
 
 - Validate at source, fail fast, trust at use. Avoid defensive `?.` after validation.
-- Functional/declarative code, immutable updates, functions <30 lines, files <300 lines. No
+- Functional/declarative code, immutable updates. Size target: functions <30 lines, files
+  <300 lines. Enforced by `bun run check`: no Runtime/Entity/Account helper over 100 lines,
+  no production function over 150, no file over 3,000; the debt lists only shrink. No
   single-use abstractions or ones that hide protocol ownership.
 - `safeStringify` for BigInt, `buffersEqual` for buffers, `getAvailableJurisdictions()` for
   contract addresses. `ui`/`frontend` are UI only; runtime owns logic. `localhost:8080` is the

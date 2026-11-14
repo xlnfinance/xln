@@ -1,0 +1,21 @@
+{
+  "artifactDir": "/Users/zigota/agent-jobs/xln-global-owner-20261104/qa-artifact-5",
+  "files": [
+    {
+      "bytes": 2067,
+      "path": "index.html",
+      "sha256": "bc8ce1eb0a76f32448370aca02e04d1efa708a7d8dc883ffa26c27421a33a3df"
+    },
+    {
+      "bytes": 5703988,
+      "path": "runtime.js",
+      "sha256": "21b404aee3cff78fd9dbf94ab50eab87855ac4f1baf160554c1d2411bb7e6230"
+    },
+    {
+      "bytes": 1407612,
+      "path": "account-worker.js",
+      "sha256": "78c9daf2c8e5d780f71e540c1dd40c047cef1e7e7e47dd2cc323b9e2506985ab"
+    }
+  ],
+  "origin": "http://127.0.0.1:20022"
+}

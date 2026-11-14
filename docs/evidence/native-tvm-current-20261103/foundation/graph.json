@@ -1,0 +1,113 @@
+{
+  "chain": {
+    "id": "xln-native-local",
+    "name": "XLN Native Private TVM",
+    "kind": "tron",
+    "chainId": 2414086651,
+    "currency": "TRX",
+    "defaultRpc": "http://127.0.0.1:18545/jsonrpc",
+    "defaultFullHost": "http://127.0.0.1:19090",
+    "defaultSolidityHost": "http://127.0.0.1:19091",
+    "usdtAddress": "TJpybx5ySHWjKzYPrGkGXuJUHtQorHPVVy",
+    "wrappedNativeAddress": "TYtoKRvRyR6wEhRhttCrWqbN3WxhNRP92Q"
+  },
+  "preflight": {
+    "url": "http://127.0.0.1:18545/jsonrpc",
+    "chainId": 2414086651
+  },
+  "network": "xln-native-local",
+  "chainId": 2414086651,
+  "entityProviderDeploymentBlock": 19,
+  "contracts": {
+    "account": "0x97500c85c3adafc331c645c1eb16d721f72051fe",
+    "depositoryBounds": "0x44f7647fed83eab91e646339298159307a91ad1a",
+    "hashLadderRegistry": "0x0920cb94c706eee7c80df9a9a2d06a760ebfa703",
+    "nftCustody": "0x7ac6f4f052ae71464e779e05e3be5a8a8ca1bda9",
+    "hankoVerifier": "0x8f78e2045bdef0aa9517714f40f184c3a3ea556b",
+    "entityProvider": "0x48cbc3e3708006c161884376a99d944666cbb511",
+    "depository": "0x80027b610eda2988cbc98e40a7904b98deb88866",
+    "deltaTransformer": "0x0212aad9fdd120a4391f5091cc169f5ae64349e7"
+  },
+  "tronContracts": {
+    "account": {
+      "base58": "TPmGvvQUggodcT2MfWwXf3TruC4VwHmtgb",
+      "hex41": "0x4197500c85c3adafc331c645c1eb16d721f72051fe",
+      "evm": "0x97500c85c3adafc331c645c1eb16d721f72051fe",
+      "deploymentBlock": 16,
+      "transactionHash": "961467e04aed548740b8e4a6bd59d5a791fc8a7e63d7f0050cd08a50fb379925",
+      "runtimeCodeHash": "0x19379861d8542262772abd9942ec8f866587aca52869fa85f051f87c1903569d"
+    },
+    "depositoryBounds": {
+      "base58": "TGFsKEwCQ8sU5NDmFeAmNWDN87TUdrHBU4",
+      "hex41": "0x4144f7647fed83eab91e646339298159307a91ad1a",
+      "evm": "0x44f7647fed83eab91e646339298159307a91ad1a",
+      "deploymentBlock": 16,
+      "transactionHash": "14e81cbc9ed1cee0bf967701a1a5aced9a8e973455f202e246fecb98d8980f40",
+      "runtimeCodeHash": "0xd9cedc9c61e29dfeea85b378e9b654b14747105e6b0ebc147a86c3b835ebc823"
+    },
+    "hashLadderRegistry": {
+      "base58": "TAoUNSPmkyPBHBLtop4GFfhxQYrcxTgpiE",
+      "hex41": "0x410920cb94c706eee7c80df9a9a2d06a760ebfa703",
+      "evm": "0x0920cb94c706eee7c80df9a9a2d06a760ebfa703",
+      "deploymentBlock": 16,
+      "transactionHash": "cc41622049e9458c07c07e9ae7ba6fb8f80f3d93e143febee9ee7a155fdbf55e",
+      "runtimeCodeHash": "0x07c4c08903cfac87f05c06a10da6c18fcdc948289e55c700c3ffcc59a914d2c4"
+    },
+    "nftCustody": {
+      "base58": "TMAPnDryNyZ4JCAJ7nwqX5iK73aXYRtvMF",
+      "hex41": "0x417ac6f4f052ae71464e779e05e3be5a8a8ca1bda9",
+      "evm": "0x7ac6f4f052ae71464e779e05e3be5a8a8ca1bda9",
+      "deploymentBlock": 16,
+      "transactionHash": "f9b2ecaa96d77a14c1d45439829391f901cee54f34114c40d096d6367765a6a2",
+      "runtimeCodeHash": "0xb6e9d46ade519aa7f41bdcb7050bc021038c8e4b79846656b5e7c8f9ddbdc78d"
+    },
+    "hankoVerifier": {
+      "base58": "TP3pSacpL4gfceKsaHHg6jLCs4JVWNQuCe",
+      "hex41": "0x418f78e2045bdef0aa9517714f40f184c3a3ea556b",
+      "evm": "0x8f78e2045bdef0aa9517714f40f184c3a3ea556b",
+      "deploymentBlock": 16,
+      "transactionHash": "377a8dedebd7a7d6ca40a97bd9376647785a1338b3593c0eb53b84b3850b06fe",
+      "runtimeCodeHash": "0xa605be43622148cd23a6596e9586a4496a30e891937634081e22e22bfe0a98e3"
+    },
+    "entityProvider": {
+      "base58": "TGc7kixvv1UfGYFkNJcyLVAiUL141D7ZC3",
+      "hex41": "0x4148cbc3e3708006c161884376a99d944666cbb511",
+      "evm": "0x48cbc3e3708006c161884376a99d944666cbb511",
+      "deploymentBlock": 19,
+      "transactionHash": "0cfe8a9efc67c7d258ddcf29568646ee6c61a815282b528a60822e42e80ef34b",
+      "runtimeCodeHash": "0xcf442001a9892ec6b91e288d14aefd762743e68dee39f45020cbe1a69b2f0480"
+    },
+    "depository": {
+      "base58": "TMe4U4ZSXgkpJGEJXwnP6k2PKd5rPYjbZb",
+      "hex41": "0x4180027b610eda2988cbc98e40a7904b98deb88866",
+      "evm": "0x80027b610eda2988cbc98e40a7904b98deb88866",
+      "deploymentBlock": 22,
+      "transactionHash": "82f96ecb8aeeffcc9557d9470230e6f3edb4b9738ca86a07388a8b234b18e601",
+      "runtimeCodeHash": "0xd8b9e7fcb3078d9bca0a63ea6ebfe40c1272d4586bfdd8dc3939705d6e68a1f9"
+    },
+    "deltaTransformer": {
+      "base58": "TAAAiUY5PLJQKhHMV5frYgMTWbakJXJVUV",
+      "hex41": "0x410212aad9fdd120a4391f5091cc169f5ae64349e7",
+      "evm": "0x0212aad9fdd120a4391f5091cc169f5ae64349e7",
+      "deploymentBlock": 16,
+      "transactionHash": "e0abf50619b92af47fc9d715d55c9eef81837951a0ebec7c999e62755907a34e",
+      "runtimeCodeHash": "0xad8957e4160995fcb2d93794eb7075578197a19eea3576d42fabf9a0628383ef"
+    }
+  },
+  "registeredTokens": {
+    "USDT": {
+      "base58": "TJpybx5ySHWjKzYPrGkGXuJUHtQorHPVVy",
+      "hex41": "0x41612a9eb32346e6c966b033923a6386f9d01a67e6",
+      "evm": "0x612a9eb32346e6c966b033923a6386f9d01a67e6",
+      "tokenId": 1,
+      "decimals": 6
+    },
+    "WTRX": {
+      "base58": "TYtoKRvRyR6wEhRhttCrWqbN3WxhNRP92Q",
+      "hex41": "0x41fb75759b1db30abfea581c7656b0801366a13c18",
+      "evm": "0xfb75759b1db30abfea581c7656b0801366a13c18",
+      "tokenId": 2,
+      "decimals": 6
+    }
+  }
+}

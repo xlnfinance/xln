@@ -1,0 +1,20 @@
+{
+  "reproduced": true,
+  "scope": "production TS ladder verification and settlement projection; not a fresh on-chain exploit",
+  "results": {
+    "source": {
+      "start": 110,
+      "windowEnd": 120,
+      "revealAt": 120,
+      "ratio": 65535,
+      "received": "1000"
+    },
+    "target": {
+      "start": 100,
+      "windowEnd": 110,
+      "revealAt": 120,
+      "ratio": 0,
+      "received": "0"
+    }
+  }
+}

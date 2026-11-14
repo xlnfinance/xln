@@ -1,0 +1,11 @@
+{
+  "qaArtifact": "/Users/zigota/agent-jobs/xln-global-owner-20261104/qa-artifact-6",
+  "sourceBuiltAgainst": "/Users/zigota/agent-jobs/xln-global-owner-20261104/reopen-candidate6-manifest.json",
+  "sourceUsedByOwningGate": "/Users/zigota/agent-jobs/xln-global-owner-20261104/reopen-candidate7-manifest.json",
+  "difference": [
+    "core/scripts/operations/production/browser/wallet-gate.ts"
+  ],
+  "runtimeAndUIBlobEquality": true,
+  "reason": "Only Node-side gate runner gained validated optional --trace=on. No runtime/UI source byte changed after QA6 build.",
+  "at": "2026-11-03T17:26:26.698046+00:00"
+}

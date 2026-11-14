@@ -1,0 +1,81 @@
+{
+  "at": "2026-11-03T17:29:31.685895+00:00",
+  "baseSHA": "019d45beb5954e77fe806d643845f6a4dca4fa82",
+  "candidate": "owned uncommitted source; exact29-path SHA256 manifest; not a clean-SHA release certificate",
+  "runtimeSemantics": "production",
+  "diagnostics": true,
+  "artifactScope": "private QA artifact6; runtime/UI byte equality to candidate7; Node-side harness gained validated --trace=on",
+  "focusedL1": {
+    "passed": 22,
+    "required": 22,
+    "assertions": 101,
+    "exitCode": 0
+  },
+  "runtimeTypes": {
+    "exitCode": 0
+  },
+  "uiTypes": {
+    "exitCode": 0
+  },
+  "qaBuild": {
+    "exitCode": 0
+  },
+  "browser": {
+    "id": "O1 fully secured user-Hub Account starts its unilateral exit, and own reserve reaches the external address, while Hub, API/RPC gateway and tower are down",
+    "stats": {
+      "startTime": "2026-11-03T17:27:03.765Z",
+      "duration": 40497.482,
+      "expected": 1,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "exitCode": 0,
+    "proof": "hub-outage-exit.json",
+    "additionalAssertions": [
+      "both EVM RPCs repaired before global command readiness",
+      "selected live RPC displayed after Settings remount before and after reload",
+      "offline password unlock restores same disputed Account/100USDC collateral/root"
+    ],
+    "clock": "real wall/chain time; signed90000s unchanged",
+    "chains": "31337 and31338 Anvil EVM simulators; no native TRON claim",
+    "privateTrace": {
+      "path": "/Users/zigota/agent-jobs/xln-global-owner-20261104/o1-run16/stand/wallet-artifacts/e2e-hub-outage-exit-O1-ful-5d6c3--gateway-and-tower-are-down-chromium/trace.zip",
+      "bytes": 14991501,
+      "sha256": "cf918ec8412fe42f62645b54c16bf77ea7dc201b7163d122f3e7143c8d357cdc",
+      "mode": "0600",
+      "sensitivity": "private test wallet trace; never copy raw into source/public evidence"
+    }
+  },
+  "closedRegressions": [
+    "offline operator catalog dependence",
+    "wrong chain503/504 classified transient",
+    "same-session catch-up operation race",
+    "Settings remount stale RPC display",
+    "secondary local EOA missing before ordered WAL replay/live loop",
+    "stale session stealing current catch-up ownership",
+    "failed concurrent RPC overwriting another binding",
+    "older verified completion overriding newer accepted endpoint",
+    "pending repair attaching after wallet lock"
+  ],
+  "limitations": [
+    "Actual Account payout still awaits preserved P1 deadline1793810746 (2026-11-04T16:45:46Z)",
+    "Dispute START and own J-reserve Control A are not Account payout",
+    "Full bun run check and >=3 different AI reviews pending; no commit/push/deploy",
+    "8361ms outage reload includes manual repairs and is not a <=1000ms normal restore certificate",
+    "Original-wallet diagnostics-off trace and all six financial cases remain separate/outstanding"
+  ],
+  "privateJob": "/Users/zigota/agent-jobs/xln-global-owner-20261104",
+  "review": {
+    "CodexV1": "AMEND then exact lifetime RED->GREEN",
+    "CodexV2": "six BUG/FIX CONFIRM on candidate5",
+    "CodexV3": "six BUG/FIX CONFIRM retained after only WeakMap->explicit-cleanupMap delta; same financial/runtime bytes as candidate7",
+    "traceHarness": "validated optional --trace=on; exact current CLI option observed, successful trace retained0600",
+    "differentAIQuorum": "one Codex family only; external allowance $10 held/$0 available, historical $100 preserved"
+  },
+  "fullCheckHistory": {
+    "check2": "exit0 candidate4",
+    "check3": "exit1 candidate5 WeakMap policy; fixed without gate edit; canceled siblings not semantic failures",
+    "check4": "pending current candidate7"
+  }
+}

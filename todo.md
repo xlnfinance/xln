@@ -7,8 +7,8 @@ backlog; long-term work belongs in `docs/roadmap.md`. Scope and authority come f
 
 ## Release scope
 
-Pay, same-J Swap, Cross-swap and Lending on EVM and native TRON, served by the React
-`ui/` wallet. Open participation with users' own funds; no protocol monetary cap.
+Pay, same-J Swap, Cross-swap and Lending on EVM and native TRON, with functional parity
+and owning tests in both wallets: React `ui/` and Svelte `frontend/`. Open participation with users' own funds; no protocol monetary cap.
 Testnet evidence never authorizes real-funds activation.
 
 ## Blockers, in order

@@ -73,6 +73,21 @@ rules. Normative TypeScript and state-machine safety remains in
 - **Outbox** is the flat ordered external output of one sealed Runtime frame.
   It is published only after that frame is durable.
 
+## Mission and measurement
+
+- **MML** is the mission: by 2050, make the accounts supporting 51% of world GDP
+  provable and capable of dispute on underlying programmable J-machines. The
+  canonical statement is [intro.md](intro.md#mission).
+- **MML counting rule:** only obligations between unaffiliated Entities count. A
+  hub-routed payment counts once, on the commercial edge; hub hops, operators,
+  market makers, affiliated transfers and test entities never count.
+- **MML is not** payment turnover, TPS, account count, deposits or credit limits.
+  The GDP attribution method is not yet specified.
+- **MML edges** is the XLN-1000 `M` axis, the current measurable proxy: USD-days
+  of outstanding |Δ| between unaffiliated Entities on a public J, secured ×1 and
+  unsecured ×0.5. Formula: [xln1000.md](xln1000.md); ledger:
+  [evidence/mml/unaffiliated-edges.json](evidence/mml/unaffiliated-edges.json).
+
 ## Forbidden synonyms
 
 - Do not use `channel`, `wave`, `round`, `receipt`, `delivery sequence` or

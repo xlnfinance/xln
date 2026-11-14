@@ -1,0 +1,94 @@
+{
+  "before": {
+    "amount": {
+      "__xlnType": "BigInt",
+      "value": "1000000"
+    },
+    "externalBefore": {
+      "__xlnType": "BigInt",
+      "value": "1000000000000"
+    },
+    "nonceBefore": {
+      "__xlnType": "BigInt",
+      "value": "0"
+    },
+    "reserveBefore": {
+      "__xlnType": "BigInt",
+      "value": "0"
+    }
+  },
+  "deposit": {
+    "args": {
+      "entity": "0x0000000000000000000000000000000000000000000000000000000000000001",
+      "newBalance": {
+        "__xlnType": "BigInt",
+        "value": "1000000"
+      },
+      "tokenId": {
+        "__xlnType": "BigInt",
+        "value": "1"
+      }
+    },
+    "blockHash": "0x0000000000000026b008ed8d51dc53f13b7f5561c1c64fb2d26d9e90079d370e",
+    "blockNumber": 38,
+    "logIndex": 1,
+    "name": "ReserveUpdated",
+    "transactionHash": "0xad752c25b0c731a5a334262db9f6a1e496c5579627adf17027857d32d3e61723"
+  },
+  "externalAfter": {
+    "__xlnType": "BigInt",
+    "value": "1000000000000"
+  },
+  "nonceAfter": {
+    "__xlnType": "BigInt",
+    "value": "2"
+  },
+  "reserveAfter": {
+    "__xlnType": "BigInt",
+    "value": "0"
+  },
+  "reserveFunded": {
+    "__xlnType": "BigInt",
+    "value": "1000000"
+  },
+  "stage": "complete",
+  "withdrawal": {
+    "blockNumber": 39,
+    "events": [
+      {
+        "args": {
+          "entity": "0x0000000000000000000000000000000000000000000000000000000000000001",
+          "newBalance": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "tokenId": {
+            "__xlnType": "BigInt",
+            "value": "1"
+          }
+        },
+        "blockHash": "0x0000000000000027f6f968d08d79d8aa1471dc0784d71aa52384e393cfbe8a3d",
+        "blockNumber": 39,
+        "logIndex": 0,
+        "name": "ReserveUpdated",
+        "transactionHash": "0xb9b08961ca671ab6de3170889a4d27fc6b2e259193531267c39cedc905983bac"
+      },
+      {
+        "args": {
+          "batchHash": "0x2e4fc190fad54543c4b89ef15aa7d528d5ac89dbcc71f7ddc91e8c4328e968f9",
+          "entityId": "0x0000000000000000000000000000000000000000000000000000000000000001",
+          "nonce": {
+            "__xlnType": "BigInt",
+            "value": "2"
+          }
+        },
+        "blockHash": "0x0000000000000027f6f968d08d79d8aa1471dc0784d71aa52384e393cfbe8a3d",
+        "blockNumber": 39,
+        "logIndex": 2,
+        "name": "HankoBatchProcessed",
+        "transactionHash": "0xb9b08961ca671ab6de3170889a4d27fc6b2e259193531267c39cedc905983bac"
+      }
+    ],
+    "txHash": "0xb9b08961ca671ab6de3170889a4d27fc6b2e259193531267c39cedc905983bac"
+  }
+}

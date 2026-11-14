@@ -1,0 +1,67 @@
+{
+  "at": "2026-11-03T17:18:12.061983+00:00",
+  "baseSHA": "019d45beb5954e77fe806d643845f6a4dca4fa82",
+  "candidate": "owned uncommitted source; exact29-path SHA256 manifest; not a clean-SHA release certificate",
+  "runtimeSemantics": "production",
+  "diagnostics": true,
+  "artifactScope": "private QA artifact5; distinct from diagnostics-off shipped UI",
+  "focusedL1": {
+    "passed": 22,
+    "required": 22,
+    "assertions": 101,
+    "exitCode": 0
+  },
+  "runtimeTypes": {
+    "exitCode": 0
+  },
+  "uiTypes": {
+    "exitCode": 0
+  },
+  "qaBuild": {
+    "exitCode": 0
+  },
+  "browser": {
+    "id": "O1 fully secured user-Hub Account starts its unilateral exit, and own reserve reaches the external address, while Hub, API/RPC gateway and tower are down",
+    "stats": {
+      "startTime": "2026-11-03T17:16:33.716Z",
+      "duration": 38076.297000000006,
+      "expected": 1,
+      "skipped": 0,
+      "unexpected": 0,
+      "flaky": 0
+    },
+    "exitCode": 0,
+    "proof": "hub-outage-exit.json",
+    "additionalAssertions": [
+      "both EVM RPCs repaired before global command readiness",
+      "selected live RPC displayed after Settings remount before and after reload",
+      "offline password unlock restores same disputed Account/100USDC collateral/root"
+    ],
+    "clock": "real wall/chain time; signed90000s unchanged",
+    "chains": "31337 and31338 Anvil EVM simulators; no native TRON claim"
+  },
+  "closedRegressions": [
+    "offline operator catalog dependence",
+    "wrong chain503/504 classified transient",
+    "same-session catch-up operation race",
+    "Settings remount stale RPC display",
+    "secondary local EOA missing before ordered WAL replay/live loop",
+    "stale session stealing current catch-up ownership",
+    "failed concurrent RPC overwriting another binding",
+    "older verified completion overriding newer accepted endpoint",
+    "pending repair attaching after wallet lock"
+  ],
+  "limitations": [
+    "Actual Account payout still awaits preserved P1 deadline1793810746 (2026-11-04T16:45:46Z)",
+    "Dispute START and own J-reserve Control A are not Account payout",
+    "Full bun run check and >=3 different AI reviews pending; no commit/push/deploy",
+    "8286ms outage reload includes manual repairs and is not a <=1000ms normal restore certificate",
+    "O1 passed trace absent under existing retain-on-failure policy; original-wallet trace remains outstanding"
+  ],
+  "privateJob": "/Users/zigota/agent-jobs/xln-global-owner-20261104",
+  "review": {
+    "CodexV1": "AMEND; source-derived races independently RED4->GREEN8; final focused22/22",
+    "CodexV2": "running against frozen29 files",
+    "differentAIQuorum": "pending; external cash allowance exhausted by unresolved sent calls"
+  }
+}

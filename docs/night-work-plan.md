@@ -1,58 +1,36 @@
 # Current xln execution handoff
 
-The only handoff. Replace this file on each handoff; never append history (git keeps it).
-The live queue is [todo.md](../todo.md); scope and authority are in [AGENTS.md](../AGENTS.md).
-
 ## Current SHA
 
-- Release candidate: `e838188fd` (2026-10-27) — full browser E2E and `gate:release` both green.
-- Public testnet `xln.finance` (private chains 31337/31338) still serves `e4abb8c14`:
-  [rollout evidence](evidence/public-testnet-e4abb8c1-20261024.json). Not redeployed since.
-- Uncommitted work from other agents may be present in other checkouts; preserve it.
+Main/origin: `019d45beb5954e77fe806d643845f6a4dca4fa82`. Owned uncommitted source: `docs/evidence/rpc-outage-reopen-20261103/candidate7/source-manifest.json`.
+Public last handed-off SHA: `ffff30b4ff8a36ec336ab83a3df89d19d7c4ed21`; fresh public verification remains pending.
+Sole source owner: Studio Codex session `01a1a071-3204-7220-9981-137b3681677e`.
 
 ## Last green command
 
-- On `e838188fd`, Mac Studio
-  ([evidence](evidence/release-candidate-e838188f-20261027/result.json)):
-  - `bun run test:e2e:full`: 157/157, strict browser health 0 issues, 514 s.
-  - `bun run gate:release`: 40/40 steps.
+`bun run stand:run --reason owner-rpc-final-trace-o1 --timeout-ms 900000 -- bun core/scripts/operations/production/local-prod-smoke.ts`
+with exact command/environment in the private job: outage+reload browser 1/1, 0 skipped/flaky, production runtime semantics + private QA diagnostics; successful private trace retained0600.
+Focused L122/22 (101 assertions), full `bun run check` exit0 on candidate7, QA bundle build exit0.
 
 ## First red command/error
 
-- None on the candidate. Next gates are not yet run (see below).
+Run8 offline unlock, run10 global catch-up, run12 stale RPC display and run13 missing secondary signer are closed by run14; review lifetime AMENDs are closed by run15 and22 focused tests.
+Full check1 failed category tags (focused fix274/274 and lint green); full check2 passed on candidate4; full check3 rejected the new WeakMap. Replaced with an explicitly cleaned Map; collection guard/lint/22-test reruns are green. Fresh full check4 passed on candidate7 (exit0); soundcheck10/10 and source38/38. Three-different-AI review pending: external allowance has $10 sent/unresolved, $0 available; preserve the historical $100 hold. This is not a clean-SHA release certificate.
+Normal restore <=1000ms, native TRON and global financial/recovery/release evidence remain unverified on this candidate.
 
 ## Artifact path
 
-- `docs/evidence/release-candidate-e838188f-20261027/result.json`
-- Mac Studio: `/tmp/e2e-run30.log`, `/tmp/gate-release-run30.log`, `/tmp/run30/`.
+`docs/evidence/rpc-outage-reopen-20261103/candidate7/result.json`; private job `/Users/zigota/agent-jobs/xln-global-owner-20261104`.
+Preserved P1 case: `/Users/zigota/agent-jobs/xln-claude-e2e-20261023/opus-mainnet-closure-sequence-20261024/phase-107-owner-testnet-20261103/p1-case`.
+PIDs2502/2536 stay alive. Onchain deadline1793810746 = 2026-11-04T16:45:46Z; use actual chain timestamp, no time travel.
 
 ## Next single command
 
-```bash
-bun run test:e2e:full && bun run gate:release
-```
-
-Run both on one SHA. Do not wrap `gate:release` in `stand:run`: its steps take the stand
-themselves and the wrapper's default 30 s timeout kills it. `gate:release` cleans
-`.logs/e2e-parallel` and `.logs/gates`; copy a failing run's directory before starting it.
-Exact reruns that the runner demands (`BROAD_RUN_BLOCKED_EXACT_RERUN_REQUIRED`) must pass
-before a broad run starts.
-
-## Open decisions and known gaps
-
-- Owner fork (bad RPC -> pause jurisdiction): peer-originated J-dependent Account frames while a
-  jurisdiction is paused — A) per-Entity not-ready to peers, senders keep outputs in their
-  committed outbox, or B) paused set as a WAL Runtime input and Accounts withhold ACK. The local
-  command fence is ready as an unlanded patch.
-- Wallet RPC snapshot reads at a numeric height are not authenticated against a header root.
-- `anvil_reset` is still used for used dev chains; runner-owned anvil restarts would remove it.
+Compile nine current TRON artifacts under the stand lock, then actual native graph/economic/import on one fresh private ledger.
 
 ## Remaining final gates
 
-- Public testnet redeploy of the candidate with served-SHA browser verification.
-- Native TRON (TVM) four-flow evidence; receipt-authentication trust decision is open.
-- Public Sepolia financial proof on current bytecode (real-clock disputes and exits).
-- Valid 1,000-user live TPS run (AGENTS.md TPS rules) and uninterrupted 1-hour soak.
-- `bun run gate:mainnet` on the final clean SHA, then owner-reviewed deployment packet.
-
-Mainnet readiness: UNKNOWN until every gate above passes on the same SHA.
+Freeze actual owning case/transaction IDs and evidence on one candidate; complete EVM + genuine native TVM financial/lending/finality/exits and immutable WAL W1/W4 edge/recovery coverage.
+Finish P1 external Account payout at eligibility; verify original-wallet assertions/cold import/reload, actual25-chapter tutorial outcomes, desktop/mobile/theme and valid1000-user H1 TPS.
+Stable scoped manual review and >=3 different AI bug/fix confirmations; fresh required check/contracts/operator/browser/release evidence, normal owned commit/hooks/push, backup/rollback and coherent TESTNET deploy/public-byte/wallet verification.
+Then complete mainnet-only operational/public gates and the fresh unsigned dependency/actions/signing/funding/cost packet. Unspecified real-funds operations remain owner-only. Canceled generic full158/full-unit/hour-soak/hourwait campaigns stay canceled.

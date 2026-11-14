@@ -1,0 +1,137 @@
+{
+  "at": "2026-11-03T17:48:54.332142+00:00",
+  "baseSHA": "019d45beb5954e77fe806d643845f6a4dca4fa82",
+  "dirty": true,
+  "currentRuntimeManifest": "runtime-candidate7-manifest.json",
+  "passed": 6,
+  "total": 6,
+  "phases": {
+    "graph": 0,
+    "economic": 0,
+    "runtime-import": 0,
+    "entity-finance": 0,
+    "entity-restore": 0,
+    "runtime-restore-after-fixture-fixes": 0
+  },
+  "priorRed": [
+    "recovery.log.gz: missing exact local Foundation signer in runtime-import fixture",
+    "runtime-restore-after-signer.log.gz: incorrectly demanded duplicate authority on unchanged restore"
+  ],
+  "artifactBindings": 87,
+  "contractsCompiled": 9,
+  "sourceMismatch": 0,
+  "scope": "Real local java-tron TVM; signed reserve roundtrip, native authenticated Runtime/Entity receipt ingestion and exact recovery",
+  "limits": [
+    "Not public deployment or release certificate",
+    "Not native Pay/Swap/Lending/Account dispute payout",
+    "Entity restore child passed within aggregate recovery command whose following Runtime child failed",
+    "deploy-graph-result private manifest was captured after economic and its mutable boot/adapter files are not original phase copies; immutable graph/log are authoritative"
+  ],
+  "files": [
+    {
+      "path": "artifacts-after-manifest.json.gz",
+      "sha256": "719d4725ad47a72780858c0429d006d5b905eaff518266460ac1158792de2e8e",
+      "bytes": 3688
+    },
+    {
+      "path": "compile-result.json",
+      "sha256": "c5d368c5df4b3a53e32b7545af41f5ef0e8688bb0b3fa8f4425c8b87a51e563e",
+      "bytes": 945
+    },
+    {
+      "path": "compile.log.gz",
+      "sha256": "bfaa0b0336327d150c41109db3414a5dd98aef642d97170995bb6061093d6cae",
+      "bytes": 228
+    },
+    {
+      "path": "deploy-graph.log.gz",
+      "sha256": "ea254f9d01eac64d964aea222edfa78b0e16a39488b237eb00ba3c0bd3a0e8f7",
+      "bytes": 2545
+    },
+    {
+      "path": "economic.json",
+      "sha256": "82f146f42b2930e5ce96cc56e2e6cae2393582bf6c210a33ca9e5fe36a2ad9c6",
+      "bytes": 2557
+    },
+    {
+      "path": "economic.log.gz",
+      "sha256": "46a616aa7e6f3ed88ba85a043e4aaa8811dadfa96f60ef85365e9d9b8380b6e5",
+      "bytes": 1853
+    },
+    {
+      "path": "entity-finance.json.gz",
+      "sha256": "df16000b523c809c8b0471bc839b2c19dd1528cb1f2f3da4668a65563b98c26c",
+      "bytes": 4704
+    },
+    {
+      "path": "entity-finance.log.gz",
+      "sha256": "2ae09b1eba8e0b658046ae7ee3d38fdaee25174668aadcacfd39556a34a44897",
+      "bytes": 2121
+    },
+    {
+      "path": "entity-restore.json.gz",
+      "sha256": "d842ae439acea2497ca73fb986bdde86230a3652e3f276fa17ebd43a3c47976a",
+      "bytes": 4894
+    },
+    {
+      "path": "graph.json",
+      "sha256": "1856ef8f4c9745c767e340b40f49c0432de2fda645c62b141f75d611baa4db67",
+      "bytes": 5084
+    },
+    {
+      "path": "recovery.log.gz",
+      "sha256": "eebaf74287a71acef1ce568e0047cf9e4c55887e5760f95e97c31c79fd65911b",
+      "bytes": 3635
+    },
+    {
+      "path": "runtime-candidate7-manifest.json",
+      "sha256": "0d31476fe7043019aa6357eca1ab1d7f225124b97fd83969dec27b37e4836c9a",
+      "bytes": 3170
+    },
+    {
+      "path": "runtime-import-after.ts",
+      "sha256": "f7d6ed693d5ad3501b59981a6ce5c11e5af6c07fcb3d8088dd03e3318a8a7570",
+      "bytes": 9077
+    },
+    {
+      "path": "runtime-import-before.ts",
+      "sha256": "2e07506e8b26f90becbba60aa32ec5240223154581dfa91eec8e62b05bb8ab4e",
+      "bytes": 7996
+    },
+    {
+      "path": "runtime-import.json",
+      "sha256": "eeaef16361b3523fe296198b59e380c0bf0f5a45e4b9dbb6e9acc85f5d9ab55c",
+      "bytes": 10274
+    },
+    {
+      "path": "runtime-import.log.gz",
+      "sha256": "8740e8e0100edd9fe1e7f4f0aaa36a7ed5ad1911078e79c1d8e8a86e03eea075",
+      "bytes": 2088
+    },
+    {
+      "path": "runtime-restore-after-signer.log.gz",
+      "sha256": "6507cfeb055e25841b269307a97fe93ea16b1adbbf2e75e8c820fb24f7055255",
+      "bytes": 2052
+    },
+    {
+      "path": "runtime-restore-original-prefix.log.gz",
+      "sha256": "7b4847c99ba697c16b9aca1757a2d7a3ef68433abd8a3a149c53dcc5ac389967",
+      "bytes": 2478
+    },
+    {
+      "path": "runtime-restore.json.gz",
+      "sha256": "533cf985bd31c4c2aab226eb089c49839f48d7b005df33c2c9d8e002feff82fa",
+      "bytes": 5783
+    },
+    {
+      "path": "token.json",
+      "sha256": "d9e36977b8a49acc148ceed62932e1d1213d594658ef8113ebf4a716c976388c",
+      "bytes": 370
+    },
+    {
+      "path": "wrapped.json",
+      "sha256": "b1096bb6f3dc5dbd36349ee72d8224753935cba169611723c64a9df61a1a1308",
+      "bytes": 2468
+    }
+  ]
+}

@@ -36,7 +36,7 @@ Owner request, 2026-10-12: review all TS/Rust source with subagents to reduce th
 code a human auditor must read. Use disjoint immutable scopes, retain one
 implementation per financial responsibility, and prove each deletion. This
 authorizes the current review team and a 30-minute method-review heartbeat;
-it does not reopen frozen Rust/lending implementation or external-model budgets.
+it does not change external-model budgets.
 See the [bounded first pass](canonical-refactoring-20261012.md), which separates
 mechanical inventory, focused semantic reading and executed verification.
 
@@ -79,15 +79,10 @@ to MML; counting accounts or gross turnover does not replace GDP attribution.
   changing them requires a new review. Preparation is not rollout authorization.
   BrainVault seed provisioning remains under design; no secret transfer is implied.
 
-- Current scope, updated 2026-10-11: TypeScript, React `ui/`, Ethereum same-J.
-  Sepolia verification precedes the Ethereum mainnet canary. This supersedes
-  the October 10 multi-engine, multi-wallet and multi-jurisdiction scope.
-- Owner 2026-10-14 lifted the Rust freeze: edit and commit `rscore/`. Tag
-  `rscore-freeze-f1464e84e` is history. The later October 15 decision requires
-  PRs and green CI. Svelte wallet development stays frozen; its landing remains.
-  TRON, XLNC, Base, cross-J as a headline, lending in production, companies/IPO,
-  native clients and custody are deferred. Apply the exact freeze and reopening
-  rules in [AGENTS.md](../AGENTS.md); do not repeat excluded release gates.
+- Owner 2026-11-09: Svelte `/app` and React `/ui/` are equally important active
+  wallets. Neither is frozen. Preserve both designs, prove functional parity and
+  cover both with owning tests over the canonical runtime. Current release scope
+  is defined in [AGENTS.md](../AGENTS.md).
 - Owner 2026-10-15 requests a complete experimental local economy demo:
   Arrakis desert theme, Spice test currency, tradable Entity shares and a proved
   change in control. Reuse the canonical payment, swap and board paths; keep

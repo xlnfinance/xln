@@ -36,8 +36,8 @@ xln/
 ├── rscore/           Rust implementation of the canonical financial machines
 ├── brainvault/       standalone deterministic wallet-derivation package
 ├── jurisdictions/    Solidity settlement and dispute contracts
-├── ui/               React wallet; presentation and user input
-├── frontend/         existing Svelte client; presentation and user input
+├── ui/               React wallet at /ui/; presentation and user input
+├── frontend/         Svelte wallet at /app; presentation and user input
 ├── tests/            browser and full-stack E2E evidence
 ├── docs/             canonical documentation and immutable release evidence
 ├── scripts/          build, release, and operator tools
