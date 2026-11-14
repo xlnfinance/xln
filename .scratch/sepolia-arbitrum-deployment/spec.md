@@ -29,7 +29,7 @@ liquidity operation is part of these deployment tickets.
 - Complete the native migration's [07 recovery handoff](../ignition-stack-migration/issues/07-complete-recovery-matrix-and-handoff.md), including its owning process, RPC/nonce and reorg checks from 04-06, before public broadcast. Read-only preparation may proceed independently.
 - Pin one committed executable candidate and record source/configuration/artifact hashes and actual dirty status. Preserve unrelated work; do not combine receipts from different candidates.
 - Pass `bun run check:deployment` and owning checks under the current [verification scope](../../AGENTS.md#verification-scope). Unchanged shared candidate checks may be reused across the two network deliveries. Fresh network-specific preflight is always required.
-- Follow current AGENTS.md and the existing owner-approved MacBook Pro M5 / `testnets_deploy` exceptions for this effort. Run stand-owning work sequentially with the canonical lock.
+- Follow current AGENTS.md and the [owner-approved execution exceptions](../../docs/deployment/ignition-stack-design.md#owner-approved-execution-exceptions) for this effort. Run stand-owning work sequentially with the canonical lock.
 
 ## Selected configuration
 
@@ -71,8 +71,10 @@ per chain. Ethereum's original invocation and zero-send completed resume passed.
 Arbitrum's original invocation failed during verification because it compared
 Foundation's L1 execution height to an L2 receipt height. Its original failed
 outcome is retained. The owner selected the corrected read-only verification
-path above. Both final read-only reports are now `verified`, with zero current
-signatures/broadcasts and unchanged original files. Delivery tickets 03 and 04
+path above. Both final read-only reports record `verified` at their observed
+canonical points, with zero signatures/broadcasts for those verification runs
+and unchanged original files. They are historical observations, not a live
+refresh of the current HEAD or chain state. Delivery tickets 03 and 04
 are complete and ready for human review; each records exact addresses, canonical
 points, fees, balance accounting and the final scoped check results. The later
 verifier correction is committed at `cb52df9da1b0e1f0291db08074df122680da4526`;

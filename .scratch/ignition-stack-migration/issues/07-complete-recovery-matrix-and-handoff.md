@@ -68,4 +68,4 @@ Inspector writing cuts, archive-status validation and process-startup cleanup.
 Integrated 04–06 scenarios cover ownership, nonce/RPC/replacements and reorg/depth
 behavior. The tests use eleven intended operations, exact native accounting and
 zero-send completed reruns. Later read-only public observations are documented
-in the [deployment guide](../../../docs/deployment/ignition-stack-design.md#next-public-preflight).
+in the [deployment guide](../../../docs/deployment/ignition-stack-design.md#public-preflight-refresh).

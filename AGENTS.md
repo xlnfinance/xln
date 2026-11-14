@@ -231,6 +231,10 @@ transitions, one canonical production path, no silent fallback.
 Owner decision 2026-11-13; this scope prevails over broader check requirements in
 FinTS and older plans for qualifying changes. Financial safety standards remain mandatory.
 
+For the Sepolia deployment effort and its separately tracked reserve roundtrip, apply the
+[owner-approved task exceptions](docs/deployment/ignition-stack-design.md#owner-approved-execution-exceptions)
+for execution host, branch, external review and local evidence retention.
+
 - **EVM contracts and standalone deployment only:** green `bun run check:deployment`
   plus owning focused checks replaces `bun run check` for task completion, push, merge
   and testnet contract deployment. This includes deployment recovery tickets 04–07.

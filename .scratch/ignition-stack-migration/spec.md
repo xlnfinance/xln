@@ -4,7 +4,7 @@ Status: ready-for-human
 Created: 2026-11-11
 Updated: 2026-11-14
 Category: enhancement
-Inspected source HEAD: 696f6f0ac67003dfffbd5625376f2e3f60256274
+Documentation alignment base: 2df74f251d3ff3a869738ee1b77787f4be58185b
 Deployment source commit: ceb1d0522d20b171ca21803f152ecf3fd5875441
 Read-only verifier source commit: cb52df9da1b0e1f0291db08074df122680da4526
 Candidate: committed deployment source on the owner-approved testnets_deploy branch; unrelated owner edits remain dirty
@@ -13,7 +13,7 @@ Candidate: committed deployment source on the owner-approved testnets_deploy bra
 
 The operator needs to deploy and verify the existing XLN EVM stack from a command and configuration, independently of Stack Manager, a running Runtime, UI and jurisdiction discovery publication. An interrupted command must continue the same deployment without repeating confirmed actions, and its result must remain understandable without collecting terminal output by hand.
 
-Local fresh and basic resume flows previously passed through the existing Stack Manager implementation. That implementation couples deployment completion to catalog identity, locks and publication. Ticket 08 extracts its useful behavior into a native Hardhat task using the same executor; the remaining work proves the full recovery matrix. The abandoned four-contract Ethereum attempt remains separate; its contracts are untouched, while its local receipts and other deployment-task artifacts were deleted by owner decision on 2026-11-13. Do not resume or import that attempt.
+The earlier Stack Manager implementation coupled deployment completion to catalog identity, locks and publication. Ticket 08 extracted deployment into the native Hardhat task using the same executor; recovery implementation is complete through ticket 07. Both selected public deployments have recorded verification results in the [operator guide](../../docs/deployment/ignition-stack-design.md#verified-public-deployments-2026-11-14). The abandoned four-contract Ethereum attempt remains separate; its contracts are untouched, while its local receipts and other deployment-task artifacts were deleted by owner decision on 2026-11-13. Do not resume or import that attempt.
 
 ## Solution
 
@@ -111,10 +111,10 @@ It is not an acceptance requirement or dependency of 04–07.
 
 The existing Rust HTTP adjustment to the `{ request, execution }` envelope predates
 08 and remains coupled to the private TS worker. Preserve that adjustment and
-coherent request forwarding. Before including it in a commit, complete the
-separate [minimal adapter verification](issues/09-minimal-rust-http-adapter-verification.md).
-Green CLI evidence does not certify this Rust route. This is a conditional
-pre-commit obligation for the coupled API changes, not a new CLI recovery gate.
+coherent request forwarding. Its separate
+[minimal adapter verification](issues/09-minimal-rust-http-adapter-verification.md)
+is complete. That narrow result does not deliver further application integration;
+green CLI evidence does not certify the Rust route.
 
 ## Out of Scope
 
@@ -132,32 +132,24 @@ pre-commit obligation for the coupled API changes, not a new CLI recovery gate.
 
 The [accepted ADR](../../docs/adr/0001-use-hardhat-ignition-for-recoverable-stack-deployments.md), [current design](../../docs/deployment/ignition-stack-design.md), [glossary](../../docs/glossary.md) and [resolved design map](map.md) record the seven owner decisions and scope. The owner's instruction to update this specification and tickets confirms the shared understanding; no additional interview is needed to publish this plan.
 
-Tickets [02](issues/02-fresh-stack-deployment.md) and [03](issues/03-resume-and-idempotent-completion.md) remain completed historical records of the previous implementation placement. The owner deleted their artifacts and the resolved prototype's artifacts on 2026-11-13. Their recorded results do not certify the current candidate.
+Earlier prototype and local implementation records retain their historical
+results. Their deleted detailed artifacts do not certify a later candidate.
+Use the [owner-approved execution exceptions](../../docs/deployment/ignition-stack-design.md#owner-approved-execution-exceptions)
+for this effort. This documentation update starts no financial operation or Git publication.
 
-Ticket [08: standalone Hardhat task](issues/08-standalone-hardhat-stack-deployment.md) retains its implementation completion and historical local verification record: the focused profile passed and the repository gate failed. The owner deleted its final delivery artifacts on 2026-11-13. Fresh owning checks and the applicable verification profile are required before the next deployment or completion claim. The next serial slice is 04, then 05 and 06; 07 depends on those three. One implementer owns this area. Public execution remains outside this local completion.
+## Implementation and delivery status (2026-11-14)
 
-Continue under the owner-authorized MacBook Pro M5 and testnets_deploy exceptions, preserving unrelated dirty work and todo.md. No branch, worktree, commit, push, public signing, faucet request, deployment, store reset or external-model dispatch is authorized by this planning update. The waived external three-model rule remains waived.
-
-The historical repository check failed on two unchanged credential-URL fixtures; its cancelled and unrun gates were recorded in the deleted delivery artifacts. No current check result or release readiness is established by those records. Future proof-retention requirements above remain in force.
-
-## Local implementation completion (2026-11-13)
-
-The standalone CLI and recovery implementation is locally complete through ticket 07.
-The recorded six-gate deployment profile passed 274 Hardhat tests, 64 Foundry
-checks and 93 Bun tests / 3,505 assertions on the dirty owned candidate. Generated
-reports are excluded from these commits; no clean committed release or public
-execution is claimed. All implementation tickets are ready for human review. Public delivery
-follows the fresh preflight in the [single handoff](../../docs/night-work-plan.md).
+The native CLI and recovery implementation are complete through ticket 07.
+Both separate public delivery tickets are complete and ready for human review;
+the [public specification](../sepolia-arbitrum-deployment/spec.md) records their
+execution and verifier identities. The [single handoff](../../docs/night-work-plan.md)
+records the latest local adapter tests and deployment-profile results. These
+are distinct observations, not a clean whole-product release or public token-flow proof.
 
 ## Local test evidence retention (owner decision 2026-11-14)
 
-Exclude all generated local evidence files from these commits, including
-reports and hash maps. Keep runnable tests, verification commands and brief
-recorded results in the documentation. Local reports may remain outside the
-commit; detailed historical cases cannot be reconstructed from the recorded
-results alone. This exception applies to this task's local records only; active
-and future public deployment native journals/artifacts/receipts retain the
-requirements above.
+Follow the [owner-approved retention exception](../../docs/deployment/ignition-stack-design.md#owner-approved-execution-exceptions).
+The public native recovery evidence requirements above remain mandatory.
 
 ## Existing-stack read-only verification (owner decision 2026-11-14)
 
@@ -183,8 +175,9 @@ Report `status: verified`, original execution candidate, current verifier
 revision/source hashes, canonical point, checks, historical expenses and zero
 current signatures/broadcasts. The original failed result stays failed.
 
-Prove the boundary through real Anvil execution from a committed source export,
-read-only verification without a key, unchanged transaction count and original
-files, and rejection of altered/foreign evidence and output aliases. Run the
-owning checks and `check:deployment`, then recheck both existing public stacks
-without further financial actions. Public token flows remain separate.
+The boundary was verified through real Anvil execution from a committed source
+export, key-free reads, unchanged transaction counts/original files and rejection
+of altered/foreign evidence and output aliases. Owning checks and the deployment
+profile passed; both public stacks have separate read-only reports. The
+[operator guide](../../docs/deployment/ignition-stack-design.md#verified-public-deployments-2026-11-14)
+records source identities and observation points. Public token flows remain separate.

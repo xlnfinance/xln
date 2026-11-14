@@ -1,11 +1,12 @@
 # Ethereum Sepolia to Arbitrum Sepolia: retained plan and decisions
 
-Updated: 2026-11-13. Repository HEAD inspected for this documentation alignment:
-`fa6e1528c6bc6acfcd6d111a7d5851968d1ca18a`, `testnets_deploy`, with unrelated
+Updated: 2026-11-14. Repository HEAD inspected for this documentation alignment:
+`2df74f251d3ff3a869738ee1b77787f4be58185b`, `testnets_deploy`, with unrelated
 working-tree changes preserved. The original research inspected
 `019d45beb5954e77fe806d643845f6a4dca4fa82` on 2026-11-10. Its historical network
-observations are not current deployment proof. No public RPC query, build,
-scenario, signing or deployment was performed for this update.
+observations are not current deployment proof. Public roundtrip observations
+below refer to the separate recorded financial runs and their raw reports;
+this documentation alignment adds no live chain verification.
 
 **FACT** identifies inspected repository configuration/records. **DECISION**
 records an accepted owner choice. **UNKNOWN** identifies an unverified public
@@ -15,8 +16,8 @@ financial scope.
 
 ## Three separate outcomes
 
-1. **Current contract delivery:** deploy and verify both public stacks through the native CLI. The [public specification](../../.scratch/sepolia-arbitrum-deployment/spec.md) and its network tickets own this outcome. Catalog admission, UI and financial roundtrips are separate.
-2. **Later independent reserve roundtrip:** on each network, deposit exactly `1_000_000` USDC units from an external wallet into its XLN reserve and withdraw exactly that amount to the same wallet. The [roundtrip specification](../../.scratch/sepolia-arbitrum-usdc-roundtrip/spec.md) owns receipts, intermediate/final balances and separate native costs.
+1. **Recorded contract delivery:** both public stacks have deployment and verification records. The [public specification](../../.scratch/sepolia-arbitrum-deployment/spec.md) and its network tickets own this completed outcome. Catalog admission, UI and financial roundtrips are separate.
+2. **Completed independent reserve roundtrips:** on each public network, deposit exactly `1_000_000` USDC units from an external wallet into its XLN reserve and withdraw exactly that amount to the same wallet. The [roundtrip specification](../../.scratch/sepolia-arbitrum-usdc-roundtrip/spec.md) and [operator guide](../deployment/usdc-reserve-roundtrip.md) record receipts, intermediate/final balances and separate native costs for both successful runs.
 3. **Later Cross-J rehearsal:** deposit exactly one source USDC, execute all of it through the existing signed Cross-J path and withdraw the resulting net target amount to the external Arbitrum recipient. This does not gate contract deployment or either independent roundtrip.
 
 ## Selected assets and current implementation
@@ -38,17 +39,15 @@ One confirmation is required between operations and at least twelve for every wi
 receipt before success. This depth is not Ethereum finality or Arbitrum L1
 settlement. Stack Manager/catalog/publication are optional consumers afterward.
 
-**UNKNOWN:** neither network's current XLN deployment, token/proxy metadata,
-issuer provenance, RPC/compiler compatibility, available balances, nonce or
-gas costs is certified by this document. Refresh them before public execution;
-a token symbol, configured address or old receipt is insufficient.
+**FACT:** the separate [public delivery record](../deployment/ignition-stack-design.md#verified-public-deployments-2026-11-14)
+identifies both eleven-operation executions, original source/artifact identity,
+canonical receipt/code/token observations and actual native expenses. Arbitrum's
+original `failed/verifying` outcome remains intact beside its corrected read-only report.
 
-The current remaining implementation boundary is the native recovery work
-[04](../../.scratch/ignition-stack-migration/issues/04-process-and-lock-recovery.md),
-[05](../../.scratch/ignition-stack-migration/issues/05-rpc-nonce-and-evidence-conflicts.md),
-[06](../../.scratch/ignition-stack-migration/issues/06-reorg-and-confirmation-admission.md)
-and [07](../../.scratch/ignition-stack-migration/issues/07-complete-recovery-matrix-and-handoff.md).
-Local working paths and passing tests do not establish public-chain delivery.
+**UNKNOWN:** current balances, nonces, token/proxy state, fees and financial-flow
+readiness have not been refreshed by this documentation update. Verify them
+before a later financial run; historical deployment observations certify only
+their recorded source identities and chain points.
 The abandoned Ethereum attempt remains on-chain; its local evidence was deleted
 by owner decision. Do not resume/import it or reuse old nonce predictions.
 
@@ -110,8 +109,9 @@ canonical execution and economic formulas; do not create a parallel financial
 implementation. A demonstrated need for a new bridge/protocol is an owner
 decision, not an assumption of this plan.
 
-The next implementation slice remains native recovery ticket 04, followed by
-05/06 and the complete 07 handoff, then fresh public preflight and both native
-deployments. UI, reserve roundtrips, Cross-J quotes/liquidity and financial
-execution stay outside that immediate deployment work. This update closes no
-public acceptance criterion and starts no implementation, signing or deployment.
+Native recovery, both deployment deliveries and both independent
+[one-USDC reserve roundtrips](../../.scratch/sepolia-arbitrum-usdc-roundtrip/spec.md)
+have recorded completion. Public roundtrip receipts and balance accounting
+remain separate from Cross-J acceptance. Cross-J quotes, destination liquidity,
+execution and recovery retain the scope above. This documentation update starts
+no financial execution or deployment and adds no new public-chain observation.

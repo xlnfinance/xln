@@ -24,4 +24,23 @@ The owner explicitly separated this task from the immediate contract-deployment 
 
 UI, contract deployment infrastructure, shared catalog publication, settlement/dispute expansion, Cross-J transfers/recovery, quotes, MM operation, bridges, new tokens, mainnet and real-funds activation.
 
-No probe implementation or public financial transaction has been executed. The owner-approved MacBook Pro M5 and existing-branch exceptions continue to apply to this effort; unrelated source and tracker work must be preserved.
+The local [CLI probe](../../docs/deployment/usdc-reserve-roundtrip.md) is implemented;
+its final owning run passed 15 real-Anvil tests / 65 assertions in 227.39 s on
+the dirty candidate based on `2df74f251d3ff3a869738ee1b77787f4be58185b`.
+The applicable deployment profile passed all six gates; local implementation
+and verification are complete. The owner-selected public Ethereum Sepolia run
+then passed: three successful receipts at depth twelve or more, wallet
+`9 -> 8 -> 9` USDC, reserve `0 -> 1 -> 0`, debt zero and exact native fees
+of `12869822` wei. See the [public result](../../docs/deployment/usdc-reserve-roundtrip.md#public-ethereum-sepolia-result-2026-11-14).
+The separately owner-selected public Arbitrum Sepolia run also passed unchanged:
+wallet `20 -> 19 -> 20` USDC, reserve `0 -> 1 -> 0`, debt zero, three successful
+receipts at depth twelve or more and exact native fees of `7654409540000` wei.
+Independent read-only Foundry `cast` verification passed both public runs. See
+the [Arbitrum result](../../docs/deployment/usdc-reserve-roundtrip.md#public-arbitrum-sepolia-result-2026-11-14).
+The implementation ticket is complete with **12/12** acceptance criteria checked.
+The executable probe was subsequently committed as
+`c8fcff807e26af4569d9135d08216c1b93efce0a`, with all checked source contents
+unchanged. Original public reports retain the actual dirty execution identity;
+this is scoped roundtrip acceptance, not Cross-J or whole-product release evidence.
+The owner-approved MacBook Pro M5 and existing-branch
+exceptions continue to apply; preserve unrelated source and tracker work.

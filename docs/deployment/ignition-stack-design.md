@@ -3,12 +3,29 @@
 Owner-approved architecture, updated 2026-11-14.
 Public execution candidate: `49c26224497d5e875c369098f02d515e0fb81134`.
 Read-only verifier source commit: `cb52df9da1b0e1f0291db08074df122680da4526`.
-The working tree is dirty on the owner-approved `testnets_deploy` branch;
-the subsequent read-only verifier fix is recorded separately from execution.
+The subsequent read-only verifier fix is recorded separately from execution.
+Both public deployments have recorded verification results below. Resolve the
+current source SHA, dirty status and latest local checks from the
+[execution handoff](../night-work-plan.md).
 Older results and deleted artifacts cannot certify another candidate.
 Whole-product acceptance and public financial flows remain separate gates.
 
 The abandoned public attempt's contracts remain untouched. Its local receipts and journal are deleted; do not resume or import it. Future evidence-retention requirements below remain in force.
+
+## Owner-approved execution exceptions
+
+For this Sepolia deployment effort and the separately tracked
+[reserve roundtrip](../../.scratch/sepolia-arbitrum-usdc-roundtrip/spec.md),
+the owner's session decisions establish these task-scoped exceptions:
+
+- Execute on the owner's MacBook Pro M5 and existing `testnets_deploy` branch. Preserve unrelated work and retain capacity-one stand locking.
+- The requirement for three different external AI reviewers is waived for this effort. This record authorizes no external-model dispatch.
+- Exclude generated local test evidence from commits and remove it after verification, retaining runnable tests, commands and brief measured results. Deleted detailed cases cannot be reconstructed from summaries alone.
+- Preserve active and future public deployment journals, sealed artifacts, receipts and original invocation outcomes. Their retention requirements are unchanged; exclusion from a source commit does not authorize deletion.
+
+These exceptions leave financial authority, signing, verification and release
+requirements in [AGENTS.md](../../AGENTS.md) in force. Deployment completion
+does not start the separate financial probe or authorize a commit or push.
 
 ## Ownership
 
@@ -183,10 +200,10 @@ The [CLI recovery boundary](../../.scratch/ignition-stack-migration/spec.md#cli-
 also applies to tickets 04–07: no Rust daemon, application HTTP server or wallet
 UI is required for their execution and acceptance. Further TS/Rust HTTP/UI
 development belongs to a [separate deferred follow-up](../../.scratch/stack-manager-http-integration/issues/01-deferred-http-ui-integration.md).
-Preserve the existing paired Rust/private-worker envelope adjustment. Its
-[minimal verification](../../.scratch/ignition-stack-migration/issues/09-minimal-rust-http-adapter-verification.md)
-is required before including those coupled changes in a commit, independently
-of CLI recovery. Green deployment-profile evidence does not certify Rust HTTP.
+The existing paired Rust/private-worker envelope adjustment has its own
+completed [minimal verification](../../.scratch/ignition-stack-migration/issues/09-minimal-rust-http-adapter-verification.md).
+That narrow result does not deliver further application integration, and green
+deployment-profile evidence does not certify Rust HTTP.
 
 The chain-matrix caller already uses the same executor but has wrapped-token
 variants and pending discovery output. Do not redirect every variant blindly
@@ -251,14 +268,17 @@ has recorded reorg/depth results for removed/moved receipts,
 construction and completed-resume conflicts, a late reorg and the exact 11/12 boundary.
 Ticket [07: full recovery matrix](../../.scratch/ignition-stack-migration/issues/07-complete-recovery-matrix-and-handoff.md)
 has recorded results for 22 transaction cuts, 8 writing cuts, archive validation and startup cleanup, plus integrated 04–06 and fixture/wrapped callers.
-Read-only public preflight has since passed; full public deployment is the next delivery step. Completed 02/03 and the prototype retain
-their historical statuses and measurements; their deleted artifacts cannot certify the current candidate.
+Recovery tickets 04–07 are complete. Both selected public deployments have
+[recorded verification results](#verified-public-deployments-2026-11-14).
+The separate [reserve roundtrip](../../.scratch/sepolia-arbitrum-usdc-roundtrip/spec.md)
+has completed both public runs; its [operator guide](usdc-reserve-roundtrip.md)
+records receipts, exact balances and native costs. Earlier deleted local
+artifacts cannot certify another candidate.
 
 The [ADR](../adr/0001-use-hardhat-ignition-for-recoverable-stack-deployments.md)
 records the accepted choices, and the [design map](../../.scratch/ignition-stack-migration/map.md)
-records the seven owner answers. Public execution, application integration,
-Cross-J financial flows, dependency upgrades and unrelated repository repair
-remain separate work. No public transaction, UI work, commit or push is part of the local validation.
+records the seven owner answers. Application integration, Cross-J financial
+flows, dependency upgrades and unrelated repository repair remain separate work.
 
 ## Focused verification
 
@@ -271,8 +291,15 @@ checks, browser E2E and unrelated Runtime/performance gates are excluded.
 CJS exports are inferred and linted with `checkJs=false`; this is not strict JS
 checking. The existing exact ESLint debt authority remains 315 rows with its
 unchanged SHA; the focused profile admits only its exact scoped subset.
-Tickets 04–07 add their owning recovery cases when delivered; they are not
-silently treated as passing. Under the owner-approved
+The native recovery cases from tickets 04–07 are included. The eleven existing
+Stack Manager adapter test files aligned at `2df74f251` are checked separately:
+their 29 tests, owning types and lint are not included in this profile. The
+separate run is retained at `2df74f251:docs/night-work-plan.md`; the
+[current handoff](../night-work-plan.md#last-green-command) records the new probe run.
+The existing `verify`/pre-push path still runs the full repository check and
+contract suite; it has not been adapted to select this scoped profile. GitHub
+workflows remain manually dispatched under the existing owner policy.
+Under the owner-approved
 [verification scope](../../AGENTS.md#verification-scope), green `check:deployment`
 and owning checks are the gate for qualifying contract/deployment-only work.
 Broader changes and whole-XLN/mainnet release require the full repository and
@@ -302,7 +329,7 @@ Operators must check the command's exit status and current invocation. A failed
 identity/origin admission can leave an older successful `result.json` intact;
 that historical file does not certify the failed invocation.
 
-## Next public preflight
+## Public preflight refresh
 
 The checked-in configurations select these independent retained attempts. Both
 IDs below have now been used; verify these stacks with `xln-verify` above.
@@ -390,8 +417,9 @@ Both report files are siblings of their native deployment directories. Arbitrum'
 original offchain verifier compared L1 registration height `12128839` with L2
 creation height `328950104`; the correction is described above. Both final
 reports use the corrected verifier, record its distinct dirty source identity,
-and establish exact code/constructor/binding/authority/token checks and current
-canonical receipts. The original public execution source/seals remain unchanged.
+and establish exact code/constructor/binding/authority/token checks and canonical
+receipts at the recorded observation points. The original public execution
+source/seals remain unchanged; these reports are not a live refresh of chain state.
 Minimum observed receipt depths are 206 and 7,771 respectively; neither is a
 claim of permanent finality. Current verification signed/sent zero transactions
 and preserved all 91 files in each original native directory byte-for-byte.
@@ -412,33 +440,15 @@ These results establish scoped contract deployment/verification;
 token funding, approval, deposit, withdrawal, Cross-J, Runtime/UI activation and
 whole-product/mainnet acceptance remain separate and unrun here.
 
-Read-only public preflight passed on both networks: chain/token/signer reads,
-proxy getters/code hashes, batched reads, reference-header matches, artifact
-sizes and sixteen independent unsigned constructor estimates. Generated reports
-are local run outputs and excluded from these commits. These observations do
-not establish a third-party implementation build, a stateful eleven-operation
-simulation, a full deployment cost cap or long-term archive guarantees.
+## Latest local verification and next work
 
-The first remaining production boundary is complete native execution with the
-two bindings and Hanko-authorized USDC listing, followed by winning receipts,
-exact linked-code verification and expense reconciliation. The [current handoff](../night-work-plan.md) contains
-the next Ethereum command, checked with `--help` only. The later deployment step
-must refresh source/state/nonce/fee prerequisites and preserve its own evidence.
+The [single execution handoff](../night-work-plan.md) records the latest local
+candidate, exact owning command, deployment-profile counts and unrun gates.
+Its later adapter-test verification is separate from the public execution and
+verifier observations above. Earlier local results remain available in Git.
 
-## Current local verification
-
-The recorded final profile passed all six gates: 274 Hardhat tests, 64 Foundry
-checks in seven suites and 93 Bun tests / 3,505 assertions. At verification time,
-552 covered source and 181 compiler/ABI/TypeChain hashes matched the checked
-candidate. The owner excluded generated local evidence files from these commits
-on 2026-11-14. This document retains recorded outcomes; tests and verification
-commands remain in the repository. The discarded detailed case records cannot
-be reconstructed from this summary.
-The recorded check ran on dirty HEAD `696f6f0ac67003dfffbd5625376f2e3f60256274`.
-The unchanged deployment source is committed at `ceb1d0522d20b171ca21803f152ecf3fd5875441`;
-unrelated owner edits remain dirty. Read-only public preflight subsequently
-passed; no public broadcast is claimed. Future active/public deployment evidence
-requirements are unchanged.
-A running latest summary cannot erase an already terminal per-invocation archive;
-unknown archived status types fail loudly. Fee-bump probes mine real empty blocks
-without exposing artificially reduced block gas limits to the estimator.
+The independently specified one-USDC reserve roundtrip completed on each public
+network through the same checked CLI, with fresh stack/token/signer checks,
+confirmed receipts and exact balance accounting. Its [operator guide](usdc-reserve-roundtrip.md)
+records those separate financial results. Cross-J execution and recovery remain
+later outcomes requiring their own scope and authority.
