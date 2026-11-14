@@ -6,7 +6,7 @@ import type { JAdapter, JTokenInfo } from '../../jurisdiction/adapter/types';
 import { resolveJurisdictionsJsonPath } from '../../jurisdiction/adapter/jurisdictions-path';
 import { computeJurisdictionsNetworkVersion } from '../../jurisdiction/adapter/kernel/jurisdictions-version';
 import { decodeJurisdictionTransport } from '../../jurisdiction/adapter/kernel/jurisdiction-loader';
-import { DEV_CHAIN_IDS } from '../../jurisdiction/adapter/chain-ids';
+import { DEV_CHAIN_IDS, VALUELESS_CHAIN_IDS } from '../../jurisdiction/adapter/chain-ids';
 import { isLoopbackUrl, normalizeLoopbackUrl, toPublicRpcUrl } from '../../network/p2p/loopback-url';
 import { requireBoundaryRecord, requireBoundaryUint } from '../../protocol/boundary-validation';
 import {
@@ -677,7 +677,12 @@ export const toPublicJurisdictionsPayload = (
   const networkVersion = computeJurisdictionsNetworkVersion(parsed, String(parsed.version || '1'));
   parsed['deployVersion'] = networkVersion;
   parsed['networkVersion'] = networkVersion;
-  parsed['ephemeralTestnet'] = config.ephemeralTestnet === true;
+  // A deployment that serves only valueless chains holds no real funds, so its
+  // wallets may drop retired-deployment state without asking (keys are kept).
+  // One real-funds chain keeps every wallet of the deployment fail-closed.
+  const chainIds = Object.values(parsed.jurisdictions).map(entry => Number((entry as { chainId?: unknown })?.chainId));
+  parsed['ephemeralTestnet'] = config.ephemeralTestnet === true
+    || (chainIds.length > 0 && chainIds.every(chainId => VALUELESS_CHAIN_IDS.has(chainId)));
   for (const [key, jurisdiction] of Object.entries(parsed.jurisdictions)) {
     if (!jurisdiction || typeof jurisdiction !== 'object') continue;
     assertPublicActiveRpcDeploymentMetadata(key, jurisdiction);

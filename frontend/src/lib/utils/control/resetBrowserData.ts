@@ -57,6 +57,27 @@ const STORAGE_PREFIXES = [
   'xln-runtime-recovery-discovery:',
 ];
 
+// A redeployed testnet retires the chain, so everything derived from it is
+// disposable. Vault keys, passwords and preferences are not: the same keys
+// re-derive the same Entities on the new deployment, so no confirmation is asked.
+const RETIRED_DEPLOYMENT_DATABASES = new Set(['xln-runtime-command-journal-v1']);
+const RETIRED_DEPLOYMENT_STORAGE_KEYS = new Set([
+  'xln-deploy-version',
+  'xln-network-machine-config-v1',
+  'xln-remote-runtime-imports',
+  'xln-remote-runtime-import-last-result',
+  'xln-entity-tabs',
+  'xln-jmachines',
+  'xln-time-state',
+  'xln-push-wake-registrations-v1',
+  'xln-ui-recovery',
+]);
+const RETIRED_DEPLOYMENT_STORAGE_PREFIXES = [
+  'xln-onboarding-complete:',
+  'xln-remote-runtime-accepted:',
+  'xln-runtime-recovery-discovery:',
+];
+
 const deleteIndexedDb = (name: string): Promise<void> =>
   new Promise((resolve, reject) => {
     const request = indexedDB.deleteDatabase(name);
@@ -65,25 +86,33 @@ const deleteIndexedDb = (name: string): Promise<void> =>
     request.onblocked = () => reject(new Error(`RESET_INDEXED_DB_DELETE_BLOCKED:${name}`));
   });
 
-function clearOwnedStorage(storage: Storage): void {
+function clearStorageKeys(storage: Storage, names: ReadonlySet<string>, prefixes: readonly string[]): void {
   const keys = Array.from({ length: storage.length }, (_, index) => storage.key(index));
   for (const key of keys) {
-    if (key !== null && (STORAGE_KEYS.has(key) || STORAGE_PREFIXES.some(prefix => key.startsWith(prefix)))) {
+    if (key !== null && (names.has(key) || prefixes.some(prefix => key.startsWith(prefix)))) {
       storage.removeItem(key);
     }
   }
 }
 
-export async function clearBrowserRuntimeData(confirmation: string): Promise<void> {
-  if (confirmation !== RESET_CONFIRMATION) throw new Error('RESET_CONFIRMATION_REQUIRED');
+async function deleteOwnedDatabases(owned: (name: string) => boolean): Promise<void> {
   if (typeof indexedDB === 'undefined' || typeof indexedDB.databases !== 'function') {
     throw new Error('RESET_INDEXED_DB_ENUMERATION_UNAVAILABLE');
   }
   const databases = await indexedDB.databases();
-  const names = databases.flatMap(({ name }) =>
-    name && (DATABASE_NAMES.has(name) || RUNTIME_DATABASE.test(name)) ? [name] : [],
-  );
-  await Promise.all(names.map(deleteIndexedDb));
-  clearOwnedStorage(localStorage);
-  clearOwnedStorage(sessionStorage);
+  await Promise.all(databases.flatMap(({ name }) => (name && owned(name) ? [deleteIndexedDb(name)] : [])));
+}
+
+/** Drop the state of a retired testnet deployment; keys and preferences stay. */
+export async function clearRetiredTestnetState(): Promise<void> {
+  await deleteOwnedDatabases(name => RETIRED_DEPLOYMENT_DATABASES.has(name) || RUNTIME_DATABASE.test(name));
+  for (const storage of [localStorage, sessionStorage]) {
+    clearStorageKeys(storage, RETIRED_DEPLOYMENT_STORAGE_KEYS, RETIRED_DEPLOYMENT_STORAGE_PREFIXES);
+  }
+}
+
+export async function clearBrowserRuntimeData(confirmation: string): Promise<void> {
+  if (confirmation !== RESET_CONFIRMATION) throw new Error('RESET_CONFIRMATION_REQUIRED');
+  await deleteOwnedDatabases(name => DATABASE_NAMES.has(name) || RUNTIME_DATABASE.test(name));
+  for (const storage of [localStorage, sessionStorage]) clearStorageKeys(storage, STORAGE_KEYS, STORAGE_PREFIXES);
 }

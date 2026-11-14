@@ -1,5 +1,5 @@
 import { broadcastHardResetRequest } from './activeTabLock';
-import { clearBrowserRuntimeData, RESET_CONFIRMATION, RESET_WARNING } from './resetBrowserData';
+import { clearBrowserRuntimeData, clearRetiredTestnetState, RESET_CONFIRMATION, RESET_WARNING } from './resetBrowserData';
 let activeResetPromise: Promise<void> | null = null;
 
 const RESET_TAB_SETTLE_MS = 300;
@@ -38,4 +38,22 @@ export async function resetEverything(request: ResetEverythingRequest): Promise<
   } finally {
     if (activeResetPromise === resetPromise) activeResetPromise = null;
   }
+}
+
+let retiredTestnetReset: Promise<void> | null = null;
+
+/**
+ * A redeployed or re-schemed testnet cannot read the old stores. Only a
+ * deployment that declares itself an ephemeral testnet reaches this path;
+ * real-funds deployments keep the fail-closed recovery screen.
+ */
+export function resetRetiredTestnetState(): Promise<void> {
+  retiredTestnetReset ??= (async () => {
+    await stopCurrentRuntimeActivity();
+    requestOtherTabsShutdown();
+    await sleep(RESET_TAB_SETTLE_MS);
+    await clearRetiredTestnetState();
+    window.location.replace('/app');
+  })();
+  return retiredTestnetReset;
 }

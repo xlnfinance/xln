@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   clearBrowserRuntimeData,
+  clearRetiredTestnetState,
   RESET_CONFIRMATION,
   RESET_WARNING,
 } from '../../../frontend/src/lib/utils/control/resetBrowserData';
@@ -80,6 +81,48 @@ test('reset deletes only named XLN stores and preserves other applications, cach
     ]);
     expect([...session.values]).toEqual([['other-session', 'keep']]);
     expect(untouched).toEqual([]);
+  } finally {
+    restore.reverse().forEach(restoreGlobal => restoreGlobal());
+  }
+});
+
+test('a retired testnet deployment loses its state but keeps vault keys, passwords and preferences', async () => {
+  const runtime = `level-js-db-0x${'1'.repeat(40)}-storage-current`;
+  const retired = ['xln-runtime-command-journal-v1', runtime, 'level-js-db-default-wal'];
+  const local = storage({
+    'xln-vaults': 'vault',
+    'xln-ui-vaults': 'vault',
+    'xln-password-vault:alice': 'secret',
+    'xln-settings': 'prefs',
+    'xln-deploy-version': 'old',
+    'xln-jmachines': 'old chain',
+    'xln-onboarding-complete:alice': '1',
+    'other-app': 'keep',
+  });
+  const deleted: string[] = [];
+  const restore = [
+    replaceGlobal('localStorage', local),
+    replaceGlobal('sessionStorage', storage({ 'xln-runtime-adapter-key': 'secret' })),
+    replaceGlobal('indexedDB', {
+      databases: async () => ['xln-vault-keys-v1', ...retired, 'other-app'].map(name => ({ name })),
+      deleteDatabase: (name: string) => {
+        const request: Record<string, unknown> = {};
+        deleted.push(name);
+        queueMicrotask(() => (request['onsuccess'] as () => void)());
+        return request;
+      },
+    }),
+  ];
+  try {
+    await clearRetiredTestnetState();
+    expect(deleted).toEqual(retired);
+    expect([...local.values.keys()]).toEqual([
+      'xln-vaults',
+      'xln-ui-vaults',
+      'xln-password-vault:alice',
+      'xln-settings',
+      'other-app',
+    ]);
   } finally {
     restore.reverse().forEach(restoreGlobal => restoreGlobal());
   }

@@ -122,6 +122,19 @@ describe('orchestrator public RPC routes', () => {
     expect(published.jurisdictions['tron-nile'].rpc).toBe(seed.jurisdictions['tron-nile'].rpc);
   });
 
+  test.each([
+    [[31337, 3448148188], true],
+    [[31337, 1], false],
+    [[728126428], false],
+  ] as const)('chains %j make wallet state disposable: %s', (chainIds, disposable) => {
+    const jurisdictions = Object.fromEntries(chainIds.map((chainId, index) => [
+      `j${index}`,
+      { chainId, rpc: 'https://example.invalid/rpc' },
+    ]));
+    const published = JSON.parse(toPublicJurisdictionsPayload(config, safeStringify({ jurisdictions })));
+    expect(published.ephemeralTestnet).toBe(disposable);
+  });
+
   test('rejects malformed jurisdiction JSON instead of publishing it verbatim', () => {
     expect(() => toPublicJurisdictionsPayload({
       shardJurisdictionsPath: '/tmp/unused-jurisdictions.json',

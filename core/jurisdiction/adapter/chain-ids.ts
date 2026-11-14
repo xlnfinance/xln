@@ -3,6 +3,9 @@ import type { JAdapterConfig } from './types';
 /** Local EVM chains where development-only contract methods are allowed. */
 export const DEV_CHAIN_IDS = new Set<number>([31337, 31338]);
 
+/** Chains whose assets carry no value: local development plus public testnets (Sepolia, Base Sepolia, TRON Nile). */
+export const VALUELESS_CHAIN_IDS = new Set<number>([...DEV_CHAIN_IDS, 11155111, 84532, 3448148188]);
+
 const LOOPBACK_RPC_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 
 /**

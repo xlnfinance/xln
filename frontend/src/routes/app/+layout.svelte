@@ -27,7 +27,7 @@
   import { timeOperations } from '#lib/stores/timeStore.ts';
   import { activeRuntime, vaultOperations } from '#lib/stores/vault/vaultStore.ts';
   import { isDisposableLocalTestnet, resolveDeployVersionAction } from '#lib/utils/deployVersionPolicy.ts';
-  import { resetEverything } from '#lib/utils/control/resetEverything.ts';
+  import { resetEverything, resetRetiredTestnetState } from '#lib/utils/control/resetEverything.ts';
   import { parseStorageSchemaMismatch } from '#lib/utils/recovery/storageSchemaRecovery.ts';
   import {
     adoptActiveTabLock,
@@ -83,6 +83,7 @@
   let releaseActiveTabLock: (() => void) | null = null;
   const pageSearch = $derived(browser ? page.url.search : '');
   const storageSchemaMismatch = $derived(parseStorageSchemaMismatch($error));
+  let deployIsEphemeralTestnet = false;
   const DEPLOY_VERSION_KEY = 'xln-deploy-version';
   type DeployVersionPayload = {
     version: string;
@@ -370,6 +371,7 @@
       throw error;
     }
 
+    deployIsEphemeralTestnet = current.ephemeralTestnet;
     const storedVersion = readStoredDeployVersion();
     const action = resolveDeployVersionAction(storedVersion, current.version, current.ephemeralTestnet);
     if (action === 'persist-current') {
@@ -377,6 +379,10 @@
       return false;
     }
     if (action === 'continue') return false;
+    if (action === 'reset-ephemeral-testnet') {
+      await resetRetiredTestnetState();
+      return true;
+    }
     error.set(`Deploy version changed from ${storedVersion} to ${current.version}. Review recovery coverage before resetting local data.`);
     isLoading.set(false);
     return true;
@@ -434,7 +440,12 @@
     } catch (err) {
       if (generation !== bootGeneration || !hasActiveTabLock) return;
       logAppShellDiagnostic('XLN initialization failed', err);
-      error.set((err as Error)?.message || 'Initialization failed');
+      const message = (err as Error)?.message || 'Initialization failed';
+      if (deployIsEphemeralTestnet && parseStorageSchemaMismatch(message)) {
+        await resetRetiredTestnetState();
+        return;
+      }
+      error.set(message);
     }
   }
 
