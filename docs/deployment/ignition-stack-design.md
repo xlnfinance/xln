@@ -1,11 +1,12 @@
 # Standalone Stack Deployment through Hardhat Ignition
 
-Owner-approved architecture, updated 2026-11-13.
-Inspected HEAD: 696f6f0ac67003dfffbd5625376f2e3f60256274.
-The working tree is dirty on the owner-approved testnets_deploy branch.
-Local evidence below identifies its exact dirty deployment candidate. Older
-results and deleted artifacts cannot certify another candidate. Whole-product
-acceptance and public-chain execution remain separate gates.
+Owner-approved architecture, updated 2026-11-14.
+Public execution candidate: `49c26224497d5e875c369098f02d515e0fb81134`.
+Read-only verifier source commit: `cb52df9da1b0e1f0291db08074df122680da4526`.
+The working tree is dirty on the owner-approved `testnets_deploy` branch;
+the subsequent read-only verifier fix is recorded separately from execution.
+Older results and deleted artifacts cannot certify another candidate.
+Whole-product acceptance and public financial flows remain separate gates.
 
 The abandoned public attempt's contracts remain untouched. Its local receipts and journal are deleted; do not resume or import it. Future evidence-retention requirements below remain in force.
 
@@ -63,6 +64,44 @@ There is no two-network cap. The initial targets are Ethereum Sepolia
 six-decimal USDC. Every additional EVM network needs bytecode/gas/token/RPC
 compatibility evidence. Native TRON is not established by two EVM targets.
 
+### Read-only verification of an existing deployment
+
+Owner decision 2026-11-14: after a verifier-only correction, check an existing
+sealed deployment without changing its execution identity or resuming sends.
+Use the native `xln-verify` task. From the repository root:
+
+```sh
+DEPLOYER_PRIVATE_KEY='' bun run stand:run --reason existing-stack-verification --timeout-ms 180000 -- \
+  node --env-file="$HOME/.config/xln/testnet-deployer.env" \
+  node_modules/hardhat/dist/src/cli.js --config jurisdictions/hardhat.config.ts \
+  xln-verify --network arbitrum-sepolia \
+  --deployment-dir "$PWD/jurisdictions/ignition/deployments/arb-sepolia-ignition-01" \
+  --output "$PWD/jurisdictions/ignition/deployments/arb-sepolia-ignition-01.readonly.json"
+```
+
+Inputs are the selected Hardhat HTTP network/RPC and the original manifest,
+execution seal, native journal and artifact/build-info snapshot. The original
+execution commit must be available in Git: every sealed source hash and its
+inventory must match that commit. Missing, altered, foreign or unsupported
+evidence fails closed; this command does not reconstruct deleted attempts.
+It currently accepts the single-existing-token and local fixture variants;
+wrapped-token variants are rejected explicitly.
+
+The task uses the canonical stack verifier against the original sealed
+artifacts. It does not compile, connect a signer or invoke the deployment
+engine; its provider rejects RPC methods outside the explicit read allowlist.
+No private key is required. `--output` is optional (stdout is always emitted);
+a supplied path must be a new file outside the original deployment directory.
+Existing paths and aliases into that directory are rejected.
+
+Success exits zero and produces `status: verified`, the observation block/hash,
+checks, original `executionCandidate`, current `verificationCandidate` with
+source hashes, historical deployment expenses and zero signatures/broadcasts
+for the current operation. It preserves every original invocation outcome,
+including a failed `result.json`. Failure exits nonzero and emits no successful
+report. A changed verifier is not permission to bypass `xln-deploy --mode resume`
+source/policy identity checks or to certify a new execution candidate.
+
 ## Execution and verification
 
 Retain the existing eight creations, two bindings and first stablecoin listing.
@@ -78,6 +117,17 @@ authority, both live bindings and selected USDC registration/metadata.
 The agreed policy remains one confirmation between operations and at least
 twelve for every winning receipt before success. The inclusion block counts as
 one; this depth is not Ethereum finality or Arbitrum L1 settlement.
+
+For Arbitrum One (`42161`) and Arbitrum Sepolia (`421614`), Foundation's Solidity
+`registrationBlock` uses the L1 context exposed by `block.number`; RPC receipt
+`blockNumber` and confirmation depth use L2.
+The verifier requires matching `l1BlockNumber` in the raw creation receipt and
+its canonical L2 header before comparing Foundation registration. Missing or
+inconsistent L1 context is an error, with no fallback to L2 height.
+Other Nitro chain IDs require an explicit compatibility change and evidence.
+See [Arbitrum block-number semantics](https://docs.arbitrum.io/arbitrum-essentials/arbitrum-vs-ethereum/block-numbers-and-time)
+and [RPC extensions](https://docs.arbitrum.io/arbitrum-essentials/arbitrum-vs-ethereum/rpc-methods)
+(accessed 2026-11-13 UTC).
 
 Before each dependent signature and on resume, current raw RPC receipts must
 match the original inclusion block/hash recorded by native Ignition. A removed
@@ -254,11 +304,12 @@ that historical file does not certify the failed invocation.
 
 ## Next public preflight
 
-The checked-in configurations select these independent attempts. IDs below are
-proposals for later fresh deployments; first confirm their directories are absent.
-They must not reuse or import the abandoned attempt.
+The checked-in configurations select these independent retained attempts. Both
+IDs below have now been used; verify these stacks with `xln-verify` above.
+Another fresh deployment requires an explicitly unused ID and a fresh preflight.
+Never reuse or import the abandoned earlier attempt.
 
-| Hardhat network    | Configured chain ID | RPC environment   | Parameters                                                | Proposed ID               |
+| Hardhat network    | Configured chain ID | RPC environment   | Parameters                                                | Retained deployment ID    |
 | ------------------ | ------------------: | ----------------- | --------------------------------------------------------- | ------------------------- |
 | `ethereum-sepolia` |            11155111 | `ETH_SEPOLIA_RPC` | `jurisdictions/ignition/parameters/ethereum-sepolia.json` | `eth-sepolia-ignition-01` |
 | `arbitrum-sepolia` |              421614 | `ARB_SEPOLIA_RPC` | `jurisdictions/ignition/parameters/arbitrum-sepolia.json` | `arb-sepolia-ignition-01` |
@@ -320,6 +371,46 @@ It neither signs nor sends transactions, allocates a deployment ID, creates a
 journal or publishes discovery. It passed against both public chains on
 2026-11-13 UTC after the owner supplied both RPC variables. A refresh must still
 require both network records and exit zero; partial output is not success.
+
+## Verified public deployments (2026-11-14)
+
+Both executions used committed source `49c26224497d5e875c369098f02d515e0fb81134`
+and the same compiler/artifacts. Each mined eleven successful transactions:
+eight creations, two bindings and the first selected-USDC listing. All eight
+contract addresses and eleven transaction references are in each retained
+`manifest.json`; selected USDC has six decimals and tokenId one, and Foundation
+action nonce is one.
+
+| Network          | Original native outcome                                                | Final read-only report                                                          | Actual fees, wei |
+| ---------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------- | ---------------: |
+| Ethereum Sepolia | Initial and completed resume `complete`; resume sent zero              | `eth-sepolia-ignition-01.readonly-final.json`, `verified` at block 12129021     |       2374739656 |
+| Arbitrum Sepolia | Eleven receipts succeeded; original outcome remains `failed/verifying` | `arb-sepolia-ignition-01.readonly-final.json`, `verified` at L2 block 328957948 |  401706116534000 |
+
+Both report files are siblings of their native deployment directories. Arbitrum's
+original offchain verifier compared L1 registration height `12128839` with L2
+creation height `328950104`; the correction is described above. Both final
+reports use the corrected verifier, record its distinct dirty source identity,
+and establish exact code/constructor/binding/authority/token checks and current
+canonical receipts. The original public execution source/seals remain unchanged.
+Minimum observed receipt depths are 206 and 7,771 respectively; neither is a
+claim of permanent finality. Current verification signed/sent zero transactions
+and preserved all 91 files in each original native directory byte-for-byte.
+
+Receipt fees equal each signer's observed native balance reduction exactly:
+both reports have `unaccountedDeltaWei = 0`. Arbitrum's eleven raw receipts
+reported `gasUsedForL1 = 0`; that component is not added again. Full per-receipt
+accounting is retained in the original results and final verification reports.
+
+The corrected dirty verifier candidate passed `bun run check:deployment`: 6/6
+gates, 274 Hardhat tests, 64 Foundry checks and 110 Bun tests / 3,582 assertions,
+including the 22 interruption cuts. All 561 covered source hashes stayed stable
+and all 181 compiler/ABI/TypeChain artifact hashes remained unchanged. Owning
+focused regressions passed 17 tests / 71 assertions. The unchanged verifier
+source content is now committed at `cb52df9da1b0e1f0291db08074df122680da4526`;
+the reports retain their verification-time SHA, dirty status and source hashes.
+These results establish scoped contract deployment/verification;
+token funding, approval, deposit, withdrawal, Cross-J, Runtime/UI activation and
+whole-product/mainnet acceptance remain separate and unrun here.
 
 Read-only public preflight passed on both networks: chain/token/signer reads,
 proxy getters/code hashes, batched reads, reference-header matches, artifact

@@ -1,8 +1,8 @@
 # Public Sepolia contract delivery through the native CLI
 
-Status: ready-for-agent
+Status: ready-for-human
 Created: 2026-11-11
-Updated: 2026-11-13
+Updated: 2026-11-14
 Planning baseline: fa6e1528c6bc6acfcd6d111a7d5851968d1ca18a
 
 ## Outcome and boundaries
@@ -57,6 +57,7 @@ introduce a USDT alias. USDC funding for a deposit belongs to the roundtrip task
 - Verify current linked runtime bytes/immutables, constructor and authority bindings, both live bindings, canonical token registration/metadata and successful canonical receipts. A returned address, local simulation or journal success alone is insufficient.
 - Preserve native recovery files, original invocation outcomes, source/artifact identity, receipts and actual native expenses for each public attempt. The terminal JSON reports the outcome; it is not a recovery oracle.
 - After interruption or failure, inspect the same attempt and chain state and use explicit compatible resume intent. Do not hide a partial failure by allocating another fresh ID or inventing a receipt/nonce outcome.
+- Owner decision 2026-11-14: if execution is complete and only the offchain verifier needs correction, an independent native `xln-verify` report may establish current stack verification. Preserve the original failed invocation, source seal, journal and artifacts byte-for-byte; report original execution and current verification candidates separately. This does not authorize an incompatible resume or another transaction.
 
 The full repository check remains required for broader changes and whole-XLN or
 mainnet release. An unrelated Svelte/UI failure is not a gate for this scoped
@@ -64,12 +65,21 @@ contract delivery. No browser check is introduced by this browserless scope.
 
 ## Current state and exclusions
 
-Neither public stack is certified for the delivery candidate by this plan.
-Earlier preflights, predicted addresses and nonces are obsolete; their local
-artifacts were deleted by owner decision on 2026-11-13. The abandoned Ethereum
-attempt remains on-chain and must not be resumed or imported. Use a fresh ID.
+Both fresh public executions used committed candidate
+`49c26224497d5e875c369098f02d515e0fb81134`, with eleven successful transactions
+per chain. Ethereum's original invocation and zero-send completed resume passed.
+Arbitrum's original invocation failed during verification because it compared
+Foundation's L1 execution height to an L2 receipt height. Its original failed
+outcome is retained. The owner selected the corrected read-only verification
+path above. Both final read-only reports are now `verified`, with zero current
+signatures/broadcasts and unchanged original files. Delivery tickets 03 and 04
+are complete and ready for human review; each records exact addresses, canonical
+points, fees, balance accounting and the final scoped check results. The later
+verifier correction is committed at `cb52df9da1b0e1f0291db08074df122680da4526`;
+its source content matches the checked candidate and does not change deployed bytecode.
 
-This update aligns planning only. It starts no deployment or financial operation
-and authorizes no commit/push. UI, catalog publication/retirement, reserve
+The older abandoned Ethereum attempt remains on-chain and is not imported or
+resumed. Its deleted evidence is unrelated to these retained fresh attempts.
+This specification authorizes no commit/push. UI, catalog publication/retirement, reserve
 roundtrips, Cross-J economics, Hub/MM funding, new tokens/bridges, dependency or
 compiler upgrades, TRON and mainnet activation remain outside this scope.

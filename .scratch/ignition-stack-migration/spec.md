@@ -6,6 +6,7 @@ Updated: 2026-11-14
 Category: enhancement
 Inspected source HEAD: 696f6f0ac67003dfffbd5625376f2e3f60256274
 Deployment source commit: ceb1d0522d20b171ca21803f152ecf3fd5875441
+Read-only verifier source commit: cb52df9da1b0e1f0291db08074df122680da4526
 Candidate: committed deployment source on the owner-approved testnets_deploy branch; unrelated owner edits remain dirty
 
 ## Problem Statement
@@ -157,3 +158,33 @@ commit; detailed historical cases cannot be reconstructed from the recorded
 results alone. This exception applies to this task's local records only; active
 and future public deployment native journals/artifacts/receipts retain the
 requirements above.
+
+## Existing-stack read-only verification (owner decision 2026-11-14)
+
+The owner selected a separate native `xln-verify` command after all eleven
+Arbitrum transactions mined successfully and the original verifier compared
+Foundation's L1 execution height to its L2 inclusion height. Correct that
+offchain comparison and reuse the canonical exact stack verifier. Do not
+redeploy, sign, change the original execution seal or weaken resume admission.
+
+Verification reads the original manifest, source-bound seal, journal and sealed
+artifact snapshot. Validate the original source inventory/hashes against its
+available committed Git revision, then current canonical receipts, operation
+identity, exact runtime/constructors/bindings, Foundation/token state and the
+original minimum twelve-confirmation policy. Registration on Arbitrum One
+(`42161`) and Sepolia (`421614`) uses matching receipt/header L1 context;
+canonical inclusion and depth remain in L2 units. Other Nitro chain IDs are
+not covered by this correction.
+
+No key, compile or deployment-engine invocation is allowed. The RPC provider
+permits only required read methods. Write only a new optional report outside
+the original directory and preserve all original bytes and invocation outcomes.
+Report `status: verified`, original execution candidate, current verifier
+revision/source hashes, canonical point, checks, historical expenses and zero
+current signatures/broadcasts. The original failed result stays failed.
+
+Prove the boundary through real Anvil execution from a committed source export,
+read-only verification without a key, unchanged transaction count and original
+files, and rejection of altered/foreign evidence and output aliases. Run the
+owning checks and `check:deployment`, then recheck both existing public stacks
+without further financial actions. Public token flows remain separate.
