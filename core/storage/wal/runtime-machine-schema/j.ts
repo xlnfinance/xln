@@ -267,7 +267,7 @@ function assertJReplica(
     'lastBlockTimestamp', 'position',
   ], [
     'disputeReferences', 'blockTimeMs', 'blockReady', 'watcherConfirmationDepth', 'watcherReceiptCommitment',
-    'rpcs', 'chainId', 'entityProviderDeploymentBlock', 'contracts',
+    'rpcs', 'chainId', 'entityProviderDeploymentBlock', 'contracts', 'tokenRegistry',
   ], `${code}_FIELDS`);
   const name = requireString(replica['name'], `${code}_NAME`);
   if (name !== expectedName) throw new Error(`${code}_NAME_KEY_MISMATCH`);
@@ -303,6 +303,23 @@ function assertJReplica(
     }
   }
   if (replica['rpcs'] !== undefined) requireStringArray(replica['rpcs'], `${code}_RPCS`);
+  if (replica['tokenRegistry'] !== undefined) {
+    requireArray(replica['tokenRegistry'], `${code}_TOKEN_REGISTRY`).forEach((raw, index) => {
+      const tokenCode = `${code}_TOKEN_REGISTRY_${index}`;
+      const token = requireBoundaryRecord(raw, tokenCode);
+      requireExactBoundaryKeys(
+        token,
+        ['symbol', 'name', 'address', 'decimals', 'tokenId', 'tokenType', 'externalTokenId'],
+        [],
+        `${tokenCode}_FIELDS`,
+      );
+      for (const field of ['symbol', 'name', 'address'] as const) requireString(token[field], `${tokenCode}_${field.toUpperCase()}`);
+      for (const field of ['decimals', 'tokenId', 'tokenType'] as const) {
+        requireBoundaryInteger(token[field], `${tokenCode}_${field.toUpperCase()}`);
+      }
+      requireBigInt(token['externalTokenId'], `${tokenCode}_EXTERNAL_TOKEN_ID`, 0n);
+    });
+  }
   if (replica['contracts'] !== undefined) {
     const contracts = requireBoundaryRecord(replica['contracts'], `${code}_CONTRACTS`);
     requireExactBoundaryKeys(

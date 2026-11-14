@@ -175,6 +175,9 @@ export const buildCanonicalJReplicaSnapshot = (jr: JReplica): JReplica => ({
     : {}),
   ...(jr.rpcs ? { rpcs: [...jr.rpcs] } : {}),
   ...(jr.chainId !== undefined ? { chainId: jr.chainId } : {}),
+  // Same-J matching reads token dimensions from this registry inside the Entity
+  // transition, so it is committed Runtime state and must survive a checkpoint.
+  ...(jr.tokenRegistry ? { tokenRegistry: jr.tokenRegistry.map(token => ({ ...token })) } : {}),
   position: requireFinitePosition(jr.position),
   ...(jr.entityProviderDeploymentBlock !== undefined
     ? { entityProviderDeploymentBlock: jr.entityProviderDeploymentBlock }
