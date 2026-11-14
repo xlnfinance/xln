@@ -5,7 +5,7 @@
   belongs here. Do not derive, rehydrate, or create wallet state in this component.
 -->
 <script lang="ts">
-import { asTokenId } from "@xln/core/account/tx/units";
+import { asTokenId } from "@xln/core/protocol/units";
   import { onMount } from 'svelte';
   import { createEventDispatcher } from 'svelte';
   import { resolveConfiguredApiBase, submitRuntimeInput, xlnFunctions } from '../../../stores/xlnStore';
