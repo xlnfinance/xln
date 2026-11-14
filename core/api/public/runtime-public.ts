@@ -132,6 +132,7 @@ export type {
   MppReceipt,
 } from '../../protocol/payments/mpp';
 export { createJAdapter } from '../../jurisdiction/adapter';
+export { replaceJurisdictionRpc } from '../../runtime/recovery/j-rpc-replace';
 export type { JAdapter, JAdapterConfig, JAdapterMode, JEvent } from '../../jurisdiction/adapter';
 export { applyJEventsToEnv, buildJEventsRuntimeInput } from '../../jurisdiction/adapter/watcher';
 export { getJWatcherDrainStatus, isJWatcherDrainComplete, observeJWatcherDrainProgress, getJWatcherDrainProgressKey } from '../../jurisdiction/adapter/operations/backlog-drain-status';

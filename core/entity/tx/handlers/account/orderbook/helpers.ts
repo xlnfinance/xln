@@ -1,5 +1,5 @@
 import { deriveSameOrderbookPriceBandBounds, resolveOrderbookPriceReference } from '../../../../../swapbook/price-band';
-import { haltRuntimeFailure } from "../../../../../protocol/errors/failure-taxonomy";
+import { haltRuntimeFailure } from '../../../../../protocol/errors/failure-taxonomy';
 
 import { LIMITS, SWAP_CONSTANTS } from '../../../../../config/constants';
 import {
@@ -52,6 +52,7 @@ import { resolveStoredOfferEntityRefs } from './offers';
 import type { SwapResolveEnqueueData } from './queue';
 
 export type OrderbookProcessOptions = {
+  tokenRegistry: readonly Readonly<{ tokenId: number; decimals: number }>[];
   candidateEffects?: EntityCandidateEffect[];
   resumeSamePairIds?: readonly string[];
 };
@@ -149,8 +150,7 @@ type SameOrderbookMaterialization = {
 };
 
 type SameOrderbookMaterializationResult =
-  | { kind: 'ok'; order: SameOrderbookMaterialization }
-  | { kind: 'reject'; reason: string; message: string };
+  { kind: 'ok'; order: SameOrderbookMaterialization } | { kind: 'reject'; reason: string; message: string };
 
 type SameOrderbookPriceBandDecision = {
   rejectReason?: string;
@@ -174,7 +174,10 @@ export const splitWorkingOrderbookOffers = (
 
   for (const offer of offers) {
     if (!isWorkingOrderbookOffer(offer)) {
-      throw haltRuntimeFailure("ORDERBOOK_UNADMITTED_OFFER", `ORDERBOOK_UNADMITTED_OFFER: offer=${offerIdForDiagnostic(offer)}`);
+      throw haltRuntimeFailure(
+        'ORDERBOOK_UNADMITTED_OFFER',
+        `ORDERBOOK_UNADMITTED_OFFER: offer=${offerIdForDiagnostic(offer)}`,
+      );
     }
     if (offer.orderbookKind === 'same-jurisdiction') {
       sameAccountSwapOffers.push(offer);
@@ -184,7 +187,10 @@ export const splitWorkingOrderbookOffers = (
       crossJurisdictionSwapOffers.push(offer);
       continue;
     }
-    throw haltRuntimeFailure("ORDERBOOK_UNADMITTED_OFFER", `ORDERBOOK_UNADMITTED_OFFER: offer=${offerIdForDiagnostic(offer)}`);
+    throw haltRuntimeFailure(
+      'ORDERBOOK_UNADMITTED_OFFER',
+      `ORDERBOOK_UNADMITTED_OFFER: offer=${offerIdForDiagnostic(offer)}`,
+    );
   }
 
   return { sameAccountSwapOffers, crossJurisdictionSwapOffers };
@@ -238,18 +244,8 @@ export const deriveSameOrderbookMaterialization = (
   if ('kind' in amounts) return amounts;
   const { baseAmount, quoteAmount } = amounts;
   const { baseTokenDecimals, quoteTokenDecimals } = getSwapPairDimensions(side, offer);
-  const pairPolicy = getSwapPairPolicyForDimensions(
-    base,
-    quote,
-    baseTokenDecimals,
-    quoteTokenDecimals,
-  );
-  const hasExplicitPairPolicy = hasSwapPairPolicyForDimensions(
-    base,
-    quote,
-    baseTokenDecimals,
-    quoteTokenDecimals,
-  );
+  const pairPolicy = getSwapPairPolicyForDimensions(base, quote, baseTokenDecimals, quoteTokenDecimals);
+  const hasExplicitPairPolicy = hasSwapPairPolicyForDimensions(base, quote, baseTokenDecimals, quoteTokenDecimals);
   const bucketWidthTicks = Math.max(1, pairPolicy.bookBucketWidthTicks);
   const lotScale = getSwapLotScaleForDecimals(baseTokenDecimals);
   if (baseAmount <= 0n || quoteAmount <= 0n) {
@@ -381,10 +377,7 @@ export const buildCrossMarketOfferFromBookOrder = (
   state: Pick<EntityState, 'entityId' | 'accounts' | 'crossJurisdictionBookAdmissions'>,
   namespacedOrderId: string,
 ): CrossMarketOffer | null => {
-  const { accountId, offerId } = parseNamespacedOrderId(
-    namespacedOrderId,
-    'ORDERBOOK_CROSS_J_MALFORMED_BOOK_ORDER',
-  );
+  const { accountId, offerId } = parseNamespacedOrderId(namespacedOrderId, 'ORDERBOOK_CROSS_J_MALFORMED_BOOK_ORDER');
   const account = state.accounts.get(accountId);
   const offer = account?.state.swapOffers?.get(offerId);
   const admission = state.crossJurisdictionBookAdmissions?.get(
@@ -462,12 +455,7 @@ const materializeCanonicalRestingOffer = (
   const baseTokenDecimals = side === 1 ? giveTokenDecimals : wantTokenDecimals;
   const quoteTokenDecimals = side === 1 ? wantTokenDecimals : giveTokenDecimals;
   const baseAmount = baseAmountFromLotsForDecimals(baseTokenDecimals, qtyLots);
-  const quoteAmount = quoteAmountAtPriceForDecimals(
-    baseTokenDecimals,
-    quoteTokenDecimals,
-    baseAmount,
-    priceTicks,
-  );
+  const quoteAmount = quoteAmountAtPriceForDecimals(baseTokenDecimals, quoteTokenDecimals, baseAmount, priceTicks);
   if (side === 1) {
     return {
       giveTokenId,
@@ -589,8 +577,11 @@ const resolveSameExecutionOffer = (
   }
   const resting = input.batchOffer ?? input.accountOffer;
   if (!resting) {
-    throw haltRuntimeFailure("ORDERBOOK_FILL_SOURCE_MISSING", `ORDERBOOK_FILL_SOURCE_MISSING: order=${input.namespacedOrderId} pair=${input.bookKey} ` +
-        `account=${input.accountId} offer=${input.offerId}`);
+    throw haltRuntimeFailure(
+      'ORDERBOOK_FILL_SOURCE_MISSING',
+      `ORDERBOOK_FILL_SOURCE_MISSING: order=${input.namespacedOrderId} pair=${input.bookKey} ` +
+        `account=${input.accountId} offer=${input.offerId}`,
+    );
   }
   const canonical = materializeCanonicalRestingOffer(
     resting.giveTokenId,
@@ -631,26 +622,25 @@ export const buildSameFillResolvePlan = (input: SameFillResolveInput): SameFillR
   const filledBig = BigInt(filledLots);
   const isCurrentTakerOrder = input.namespacedOrderId === input.currentNamespacedOrderId;
   if (filledBig <= 0n || weightedCost <= 0n) {
-    throw haltRuntimeFailure("ORDERBOOK_FILL_LOOKUP_FAILED", `ORDERBOOK_FILL_LOOKUP_FAILED: invalid fill aggregate weightedCost=${weightedCost.toString()} filledLots=${filledBig.toString()}`);
+    throw haltRuntimeFailure(
+      'ORDERBOOK_FILL_LOOKUP_FAILED',
+      `ORDERBOOK_FILL_LOOKUP_FAILED: invalid fill aggregate weightedCost=${weightedCost.toString()} filledLots=${filledBig.toString()}`,
+    );
   }
   if (!isCurrentTakerOrder && weightedCost % filledBig !== 0n) {
-    throw haltRuntimeFailure("ORDERBOOK_FILL_LOOKUP_FAILED", `ORDERBOOK_FILL_LOOKUP_FAILED: non-integral resting price weightedCost=${weightedCost.toString()} filledLots=${filledBig.toString()}`);
+    throw haltRuntimeFailure(
+      'ORDERBOOK_FILL_LOOKUP_FAILED',
+      `ORDERBOOK_FILL_LOOKUP_FAILED: non-integral resting price weightedCost=${weightedCost.toString()} filledLots=${filledBig.toString()}`,
+    );
   }
 
   const restingPriceTicks = weightedCost / filledBig;
-  const offerForExecution = resolveSameExecutionOffer(
-    input,
-    isCurrentTakerOrder,
-    restingPriceTicks,
-    originalLots,
-  );
+  const offerForExecution = resolveSameExecutionOffer(input, isCurrentTakerOrder, restingPriceTicks, originalLots);
   const executionSide = deriveSide(offerForExecution.giveTokenId, offerForExecution.wantTokenId);
-  const executionBaseDecimals = executionSide === 1
-    ? offerForExecution.giveTokenDecimals
-    : offerForExecution.wantTokenDecimals;
-  const executionQuoteDecimals = executionSide === 1
-    ? offerForExecution.wantTokenDecimals
-    : offerForExecution.giveTokenDecimals;
+  const executionBaseDecimals =
+    executionSide === 1 ? offerForExecution.giveTokenDecimals : offerForExecution.wantTokenDecimals;
+  const executionQuoteDecimals =
+    executionSide === 1 ? offerForExecution.wantTokenDecimals : offerForExecution.giveTokenDecimals;
   const executionBaseWei = baseAmountFromLotsForDecimals(executionBaseDecimals, filledBig);
   const executionQuoteWei = quoteAmountFromWeightedLotsForDecimals(
     executionBaseDecimals,

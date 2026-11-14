@@ -1,7 +1,7 @@
 import { assertCertifiedRegistrationEvidenceStore } from '../../../jurisdiction/machine/registration-evidence';
 import { safeStringify } from '../../../protocol/serialization';
 import { writeRuntimeMetadata } from '../../../runtime/loop/loop-environment.ts';
-import type { RuntimeReplica } from '../../../runtime/types';
+import type { RuntimeInput, RuntimeReplica } from '../../../runtime/types';
 import { computeStorageFrameHash, type RuntimeFrame } from '../..';
 import { computeCanonicalEntityHashesFromEnv } from '../../canonical-hash';
 import type { PersistedStorageReadApi } from '../../read/persisted-read';
@@ -25,6 +25,8 @@ export type ReplayOptions = {
   borrowRuntimeWalFrom?: RuntimeReplica;
   /** Historical queries rebuild State but never mutate auxiliary read models. */
   readOnly?: boolean;
+  /** Host-owned key preparation only, after source verification and before consensus can sign. */
+  prepareLocalSigners?: (env: RuntimeReplica, input?: RuntimeInput) => void;
 };
 
 type LoadPersistedRuntime = (env: RuntimeReplica, targetHeight?: number) => Promise<LoadedRuntimeStorage | null>;
@@ -69,18 +71,10 @@ const resolveReplayTarget = async (
   throw new Error(`STORAGE_RESTORE_SNAPSHOT_MISSING:height=${targetHeight}`);
 };
 
-const assertReplayedFrameMatches = (
-  env: RuntimeReplica,
-  frame: RuntimeFrame,
-): void => {
+const assertReplayedFrameMatches = (env: RuntimeReplica, frame: RuntimeFrame): void => {
   const verification = verifyPersistedFrameState(env, frame);
   if (verification.ok) return;
-  const expectedEntities = new Map(
-    (frame.canonicalEntityHashes ?? []).map(entry => [
-      entry.entityId,
-      entry.hash,
-    ]),
-  );
+  const expectedEntities = new Map((frame.canonicalEntityHashes ?? []).map(entry => [entry.entityId, entry.hash]));
   const entityMismatches = computeCanonicalEntityHashesFromEnv(env)
     .filter(entry => expectedEntities.get(entry.entityId) !== entry.hash)
     .map(entry => ({
@@ -90,11 +84,11 @@ const assertReplayedFrameMatches = (
     }));
   throw new Error(
     `STORAGE_RESTORE_REPLAY_HASH_MISMATCH:height=${frame.height}:` +
-    `expected=${verification.expectedStateHash}:` +
-    `actual=${verification.actualStateHash}:` +
-    `expectedCanonical=${verification.expectedCanonicalStateHash}:` +
-    `actualCanonical=${verification.actualCanonicalStateHash}:` +
-    `entities=${safeStringify(entityMismatches)}`,
+      `expected=${verification.expectedStateHash}:` +
+      `actual=${verification.actualStateHash}:` +
+      `expectedCanonical=${verification.expectedCanonicalStateHash}:` +
+      `actualCanonical=${verification.actualCanonicalStateHash}:` +
+      `entities=${safeStringify(entityMismatches)}`,
   );
 };
 
@@ -105,10 +99,14 @@ const assertReplayedFrameMatches = (
 const assertFrameRecordLinked = (frame: RuntimeFrame, parentHash: string | null): string => {
   const actualHash = computeStorageFrameHash(frame);
   if (frame.frameHash !== actualHash) {
-    throw new Error(`STORAGE_RESTORE_FRAME_HASH_MISMATCH:height=${frame.height}:expected=${actualHash}:actual=${frame.frameHash ?? 'none'}`);
+    throw new Error(
+      `STORAGE_RESTORE_FRAME_HASH_MISMATCH:height=${frame.height}:expected=${actualHash}:actual=${frame.frameHash ?? 'none'}`,
+    );
   }
   if (parentHash !== null && frame.prevFrameHash !== parentHash) {
-    throw new Error(`STORAGE_RESTORE_FRAME_CHAIN_BROKEN:height=${frame.height}:expectedPrev=${parentHash}:actualPrev=${frame.prevFrameHash ?? 'none'}`);
+    throw new Error(
+      `STORAGE_RESTORE_FRAME_CHAIN_BROKEN:height=${frame.height}:expectedPrev=${parentHash}:actualPrev=${frame.prevFrameHash ?? 'none'}`,
+    );
   }
   return actualHash;
 };
@@ -130,19 +128,13 @@ const finalizeReplay = async (
   frame: RuntimeFrame,
 ): Promise<void> => {
   assertReplayedFrameMatches(restored.env, frame);
-  await restoreReplayOverlay(
-    reads,
-    restored.env,
-    target.targetHeight,
-  );
+  await restoreReplayOverlay(reads, restored.env, target.targetHeight);
   await assertCertifiedRegistrationEvidenceStore(restored.env);
   writeRuntimeMetadata(restored.env, '__replayMeta', {
     checkpointHeight: target.selectedCheckpointHeight,
     selectedSnapshotHeight: target.selectedSnapshotHeight,
     selectedSnapshotLabel:
-      target.selectedCheckpointHeight <= 1
-        ? 'genesis:1'
-        : `checkpoint:${target.selectedCheckpointHeight}`,
+      target.selectedCheckpointHeight <= 1 ? 'genesis:1' : `checkpoint:${target.selectedCheckpointHeight}`,
     latestHeight: target.latestHeight,
     replayedFrameCount: target.targetHeight - target.selectedCheckpointHeight,
   });
@@ -180,12 +172,16 @@ export const createRuntimeReplayLoader =
         targetFrame = frame;
         // The checkpoint state must equal its frame before any later input
         // replays through consensus on top of it.
-        if (height === target.selectedCheckpointHeight && height < target.targetHeight) {
-          assertReplayedFrameMatches(restored.env, frame);
+        if (height === target.selectedCheckpointHeight) {
+          if (height < target.targetHeight || options.prepareLocalSigners)
+            assertReplayedFrameMatches(restored.env, frame);
+          options.prepareLocalSigners?.(restored.env);
         }
         if (height > target.selectedCheckpointHeight) {
           const payloads = await reads.readPersistedStorageFramePayloads(restored.env, frame);
-          await deps.replayRecoveryFrameJournals(restored.env, [buildRecoveryJournalFromStorageFrame(frame, payloads)]);
+          const journal = buildRecoveryJournalFromStorageFrame(frame, payloads);
+          options.prepareLocalSigners?.(restored.env, journal.runtimeInput);
+          await deps.replayRecoveryFrameJournals(restored.env, [journal]);
         }
       }
       if (!targetFrame) {

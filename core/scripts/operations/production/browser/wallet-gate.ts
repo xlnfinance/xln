@@ -124,12 +124,22 @@ const assertBrowserReport = (path: string, repoRoot: string, tests: readonly str
   console.log(`WALLET_BROWSER_GATE_OK passed=${passed} skipped=0 report=${path}`);
 };
 
+// Specs whose verdict depends on production runtime dispositions (log-and-drop,
+// not dev fail-fast) run against the exact built release bytes.
+const ARTIFACT_TESTS = new Set([
+  'e2e-production-wallet.spec.ts',
+  'e2e-hub-outage-exit.spec.ts',
+  'e2e-hub-outage-payout.spec.ts',
+]);
+
 /** Reuse the production stand and its leased ports; all children share its cleanup owner. */
 export const runWalletBrowserGate = async (input: WalletGate): Promise<void> => {
   const tests = input.tests.split(',');
   const ui = process.env['XLN_LOCAL_PROD_SMOKE_WALLET_UI'] ?? 'react';
   if (ui !== 'react' && ui !== 'svelte') throw new Error('WALLET_UI_INVALID');
   const grep = process.env['XLN_LOCAL_PROD_SMOKE_WALLET_GREP'];
+  const trace = process.env['XLN_LOCAL_PROD_SMOKE_WALLET_TRACE'];
+  if (trace !== undefined && trace !== 'on') throw new Error('WALLET_TRACE_ARGUMENT_INVALID');
   if (grep !== undefined && !/^[A-Za-z0-9][A-Za-z0-9 ._-]{0,255}$/.test(grep)) {
     throw new Error('WALLET_TEST_GREP_INVALID');
   }
@@ -140,7 +150,7 @@ export const runWalletBrowserGate = async (input: WalletGate): Promise<void> => 
   const artifactDir = process.env['XLN_LOCAL_PROD_SMOKE_WALLET_ARTIFACT_DIR'];
   if (
     artifactDir !== undefined &&
-    (!isAbsolute(artifactDir) || ui !== 'react' || tests.length !== 1 || tests[0] !== 'e2e-production-wallet.spec.ts')
+    (!isAbsolute(artifactDir) || ui !== 'react' || tests.length !== 1 || !ARTIFACT_TESTS.has(tests[0]!))
   )
     throw new Error('WALLET_ARTIFACT_ARGUMENT_INVALID');
   // Source runs rebuild this candidate; artifact runs preserve the supplied release bytes.
@@ -203,6 +213,7 @@ export const runWalletBrowserGate = async (input: WalletGate): Promise<void> => 
     UI_E2E_PORT: String(port),
     XLN_RDB_ROOT: input.workDir,
     XLN_UI_DISPUTE_PRIVATE_RPC: `http://127.0.0.1:${input.rpcPort}`,
+    XLN_UI_DISPUTE_PRIVATE_SECONDARY_RPC: `http://127.0.0.1:${input.rpcPort + 1}`,
     XLN_UI_DISPUTE_PRIVATE_ORIGIN: origin,
     PLAYWRIGHT_JSON_OUTPUT_NAME: report,
   };
@@ -263,6 +274,7 @@ export const runWalletBrowserGate = async (input: WalletGate): Promise<void> => 
         '--project=chromium',
         '--max-failures=1',
         '--reporter=list,json',
+        ...(trace === 'on' ? ['--trace=on'] : []),
         ...(grep === undefined ? [] : ['--grep', grep.replaceAll('.', '[.]')]),
         '--output',
         join(input.workDir, 'wallet-artifacts'),

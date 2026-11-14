@@ -1,27 +1,23 @@
-import { getKnownTokenIds, getTokenInfo } from '../../../../../../account/utils';
-import { haltRuntimeFailure } from "../../../../../../protocol/errors/failure-taxonomy";
+import { haltRuntimeFailure } from '../../../../../../protocol/errors/failure-taxonomy';
 
-import { equalSwapPairDimensions, forkBookState, getBestAsk, getBestBid, getBookOrder } from '../../../../../../swapbook';
+import {
+  equalSwapPairDimensions,
+  forkBookState,
+  getBestAsk,
+  getBestBid,
+  getBookOrder,
+} from '../../../../../../swapbook';
 import { createStructuredLogger, shortId, shortOrder } from '../../../../../../support/logger';
 import type { SameJurisdictionWorkingOrderbookOffer } from '../../../../../../swapbook/swap-execution';
-import {
-  createEmptyPairBook,
-  deriveSameOrderbookMaterialization,
-  evaluateSameOrderbookPriceBand,
-} from '../helpers';
-import {
-  hasQueuedSwapResolveForEntityState,
-} from '../queue';
+import { createEmptyPairBook, deriveSameOrderbookMaterialization, evaluateSameOrderbookPriceBand } from '../helpers';
+import { hasQueuedSwapResolveForEntityState } from '../queue';
 import {
   queueSameSwapResolve,
   recordZeroFillCancel,
   sweepSamePairOutOfBandOffers,
   type SameOrderbookPass,
 } from './pass';
-import type {
-  MaterializedSameOffer,
-  PreparedSameOffer,
-} from './offer-types';
+import type { MaterializedSameOffer, PreparedSameOffer } from './offer-types';
 
 const orderbookSameLog = createStructuredLogger('orderbook.same');
 
@@ -30,28 +26,24 @@ export const materializeSameOffer = (
   offer: SameJurisdictionWorkingOrderbookOffer,
 ): MaterializedSameOffer | null => {
   const accountId = offer.accountId;
-  if (
-    hasQueuedSwapResolveForEntityState(
-      pass.hubState,
-      pass.queuedSwapResolutions,
-      accountId,
-      offer.offerId,
-    )
-  ) {
+  if (hasQueuedSwapResolveForEntityState(pass.hubState, pass.queuedSwapResolutions, accountId, offer.offerId)) {
     return null;
   }
   orderbookSameLog.debug('offer.process', {
     offer: shortOrder(offer.offerId),
     account: shortId(accountId, 8),
   });
-  // Peer-signed dimensions cannot choose the registry layout of a shared pair.
-  if (!getKnownTokenIds().includes(offer.giveTokenId) ||
-      !getKnownTokenIds().includes(offer.wantTokenId) ||
-      getTokenInfo(offer.giveTokenId).decimals !== offer.giveTokenDecimals ||
-      getTokenInfo(offer.wantTokenId).decimals !== offer.wantTokenDecimals) {
+  // IDs are local to the committed J registry. A peer cannot substitute global
+  // ETH18 for native slot2 WTRX6 and poison the first shared pair dimensions.
+  if (
+    pass.tokenDecimals.get(offer.giveTokenId) !== offer.giveTokenDecimals ||
+    pass.tokenDecimals.get(offer.wantTokenId) !== offer.wantTokenDecimals
+  ) {
     recordZeroFillCancel(pass, 'token-decimals-mismatch');
     queueSameSwapResolve(pass, accountId, {
-      offerId: offer.offerId, fillRatio: 0, cancelRemainder: true,
+      offerId: offer.offerId,
+      fillRatio: 0,
+      cancelRemainder: true,
       comment: 'token-decimals-mismatch',
     });
     return null;
@@ -106,27 +98,16 @@ export const materializeSameOffer = (
   };
 };
 
-const rejectOutsidePriceBand = (
-  pass: SameOrderbookPass,
-  offer: MaterializedSameOffer,
-  reason: string,
-): void => {
-  queueSameSwapResolve(
-    pass,
-    offer.accountId,
-    {
-      offerId: offer.offer.offerId,
-      fillRatio: 0,
-      cancelRemainder: true,
-      comment: reason,
-    },
-  );
+const rejectOutsidePriceBand = (pass: SameOrderbookPass, offer: MaterializedSameOffer, reason: string): void => {
+  queueSameSwapResolve(pass, offer.accountId, {
+    offerId: offer.offer.offerId,
+    fillRatio: 0,
+    cancelRemainder: true,
+    comment: reason,
+  });
 };
 
-export const prepareSameOffer = (
-  pass: SameOrderbookPass,
-  offer: MaterializedSameOffer,
-): PreparedSameOffer | null => {
+export const prepareSameOffer = (pass: SameOrderbookPass, offer: MaterializedSameOffer): PreparedSameOffer | null => {
   let book = pass.bookCache.get(offer.bookKey);
   if (!book) {
     const committed = pass.ext.books.get(offer.bookKey);
@@ -185,10 +166,7 @@ export const prepareSameOffer = (
   return { ...offer, book, bestBid, bestAsk };
 };
 
-export const keepIdenticalRestingOrder = (
-  pass: SameOrderbookPass,
-  prepared: PreparedSameOffer,
-): boolean => {
+export const keepIdenticalRestingOrder = (pass: SameOrderbookPass, prepared: PreparedSameOffer): boolean => {
   const existing = getBookOrder(prepared.book, prepared.namespacedOrderId);
   if (!existing) return false;
   if (
@@ -205,8 +183,10 @@ export const keepIdenticalRestingOrder = (
       storedQty: existing.qtyLots.toString(),
       canonicalQty: prepared.qtyLots.toString(),
     });
-    throw haltRuntimeFailure("ORDERBOOK_CACHE_MISMATCH", `ORDERBOOK_CACHE_MISMATCH: pair=${prepared.bookKey} ` +
-      `order=${prepared.namespacedOrderId}`);
+    throw haltRuntimeFailure(
+      'ORDERBOOK_CACHE_MISMATCH',
+      `ORDERBOOK_CACHE_MISMATCH: pair=${prepared.bookKey} ` + `order=${prepared.namespacedOrderId}`,
+    );
   }
   orderbookSameLog.debug('order.resting', {
     offer: shortOrder(prepared.offer.offerId, 8),

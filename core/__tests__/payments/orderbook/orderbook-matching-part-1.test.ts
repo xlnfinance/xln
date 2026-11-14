@@ -1,20 +1,35 @@
+import { catalogTokenRegistry } from '../../helpers/j-replica';
 import { describe, expect, test } from 'bun:test';
 
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
 
-import { createBook, applyCommand, getBestAsk, getBestBid, getBookOrder, getBookSideLevels, resumeCrossedBook } from '../../../swapbook/core';
+import {
+  createBook,
+  applyCommand,
+  getBestAsk,
+  getBestBid,
+  getBookOrder,
+  getBookSideLevels,
+  resumeCrossedBook,
+} from '../../../swapbook/core';
 
-import { getStaticSwapTokenDimensions, getSwapExactQuoteLotMultipleAtPriceForDimensions, getSwapLotScale, getSwapPairDimensions, ORDERBOOK_PRICE_SCALE, quoteAmountAtPrice, SWAP_LOT_SCALE } from '../../../swapbook/types';
+import {
+  getStaticSwapTokenDimensions,
+  getSwapExactQuoteLotMultipleAtPriceForDimensions,
+  getSwapLotScale,
+  getSwapPairDimensions,
+  ORDERBOOK_PRICE_SCALE,
+  quoteAmountAtPrice,
+  SWAP_LOT_SCALE,
+} from '../../../swapbook/types';
 
 import { removeCrossJurisdictionBookOrderByRouteId } from '../../../swapbook/cross-j';
 
 import { processOrderbookCancels, processOrderbookSwaps } from '../../../entity/tx/handlers/account/index';
 
-
 import { handleSwapResolve } from '../../../account/tx/handlers/swap/resolve/index';
 
 import { createEmptyEnv } from '../../../runtime';
-
 
 import {
   deriveCanonicalSwapFillRatio,
@@ -32,9 +47,7 @@ import {
   discardAccountTransition,
   publishAccountTransition,
 } from '../../../account/state/candidate-overlay';
-import {
-  accountTxFailureMessage,
-} from '../../../account/tx/apply-result';
+import { accountTxFailureMessage } from '../../../account/tx/apply-result';
 import type { EntityState } from '../../../entity/types';
 import { initCrontab } from '../../../entity/scheduler';
 
@@ -73,28 +86,28 @@ const exactWethBaseAmount = (priceTicks: bigint, minimumLots: bigint): bigint =>
   return ((minimumLots + multiple - 1n) / multiple) * multiple * SWAP_LOT_SCALE;
 };
 
-const withZeroFeeTestAuthorization = <T extends { wantAmount: bigint }>(offer: T): T & {
+const withZeroFeeTestAuthorization = <T extends { wantAmount: bigint }>(
+  offer: T,
+): T & {
   maxFee: bigint;
   minNetReceive: bigint;
 } => ({
   maxFee: 0n,
   minNetReceive: offer.wantAmount,
-  ...getStaticSwapTokenDimensions(
-    Number(Reflect.get(offer, 'giveTokenId')),
-    Number(Reflect.get(offer, 'wantTokenId')),
-  ),
+  ...getStaticSwapTokenDimensions(Number(Reflect.get(offer, 'giveTokenId')), Number(Reflect.get(offer, 'wantTokenId'))),
   ...offer,
 });
 
 const processCommittedOrderbookSwaps = (
   state: Parameters<typeof processOrderbookSwaps>[0],
   offers: NormalizedOrderbookOffer[],
-  options?: Parameters<typeof processOrderbookSwaps>[2],
-) => processOrderbookSwaps(
-  state,
-  offers.map(offer => markWorkingOrderbookOffer(withZeroFeeTestAuthorization(offer))),
-  options,
-);
+  options?: Omit<Parameters<typeof processOrderbookSwaps>[2], 'tokenRegistry'>,
+) =>
+  processOrderbookSwaps(
+    state,
+    offers.map(offer => markWorkingOrderbookOffer(withZeroFeeTestAuthorization(offer))),
+    { tokenRegistry: catalogTokenRegistry, ...options },
+  );
 
 // Matching requires committed offers, give-token holds and bilateral credit capacity.
 function makeAccountMachine(input: SwapOffer | readonly SwapOffer[]): AccountReplica {
@@ -104,8 +117,14 @@ function makeAccountMachine(input: SwapOffer | readonly SwapOffer[]): AccountRep
           ...offer,
           crossJurisdiction: {
             ...offer.crossJurisdiction,
-            sourceDisputeConfig: offer.crossJurisdiction.sourceDisputeConfig ?? { leftResponseSeconds: 10, rightResponseSeconds: 10 },
-            targetDisputeConfig: offer.crossJurisdiction.targetDisputeConfig ?? { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+            sourceDisputeConfig: offer.crossJurisdiction.sourceDisputeConfig ?? {
+              leftResponseSeconds: 10,
+              rightResponseSeconds: 10,
+            },
+            targetDisputeConfig: offer.crossJurisdiction.targetDisputeConfig ?? {
+              leftResponseSeconds: 10,
+              rightResponseSeconds: 10,
+            },
           },
         }
       : offer,
@@ -139,7 +158,7 @@ function makeAccountMachine(input: SwapOffer | readonly SwapOffer[]): AccountRep
       locks: PersistentAccountStateMap.empty('locks'),
       swapOffers: PersistentAccountStateMap.fromEntries(
         'swapOffers',
-        offers.map((offer) => [offer.offerId, offer] as const),
+        offers.map(offer => [offer.offerId, offer] as const),
       ),
       requestedRebalance: PersistentAccountStateMap.empty('requestedRebalance'),
       requestedRebalanceFeeState: PersistentAccountStateMap.empty('requestedRebalanceFeeState'),
@@ -208,7 +227,7 @@ const applyFixtureSwapResolve = async (
  */
 function makeAccountIndex(offerIds: readonly string[]): AccountReplica {
   return makeAccountMachine(
-    offerIds.map((offerId) => ({
+    offerIds.map(offerId => ({
       offerId,
       makerIsLeft: false,
       fromEntity: HUB_ENTITY,
@@ -266,9 +285,13 @@ describe('orderbook matching execution mapping', () => {
       } as any,
     } as any;
 
-    expect(() => processOrderbookSwaps(entityState, [rawOffer] as any)).toThrow(/ORDERBOOK_UNADMITTED_OFFER/);
     expect(() =>
-      processOrderbookSwaps(entityState, [{ ...rawOffer, orderbookKind: 'same-jurisdiction' }] as any),
+      processOrderbookSwaps(entityState, [rawOffer] as any, { tokenRegistry: catalogTokenRegistry }),
+    ).toThrow(/ORDERBOOK_UNADMITTED_OFFER/);
+    expect(() =>
+      processOrderbookSwaps(entityState, [{ ...rawOffer, orderbookKind: 'same-jurisdiction' }] as any, {
+        tokenRegistry: catalogTokenRegistry,
+      }),
     ).toThrow(/ORDERBOOK_UNADMITTED_OFFER/);
   });
 
@@ -1056,21 +1079,24 @@ describe('orderbook matching execution mapping', () => {
     const entityState = {
       entityId: HUB_ENTITY,
       accounts: new Map([
-        [MAKER_ACCOUNT, makeAccountMachine({
-          offerId: 'maker-ask-historical',
-          fromEntity: HUB_ENTITY,
-          toEntity: MAKER_ACCOUNT,
-          accountId: MAKER_ACCOUNT,
-          giveTokenId: 2,
-          giveAmount: lot,
-          wantTokenId: 5,
-          wantAmount: (1000n * lot) / 10_000n,
-          makerIsLeft: false,
-          createdHeight: 1,
-          priceTicks: 1000n,
-          quantizedGive: lot,
-          quantizedWant: (1000n * lot) / 10_000n,
-        })],
+        [
+          MAKER_ACCOUNT,
+          makeAccountMachine({
+            offerId: 'maker-ask-historical',
+            fromEntity: HUB_ENTITY,
+            toEntity: MAKER_ACCOUNT,
+            accountId: MAKER_ACCOUNT,
+            giveTokenId: 2,
+            giveAmount: lot,
+            wantTokenId: 5,
+            wantAmount: (1000n * lot) / 10_000n,
+            makerIsLeft: false,
+            createdHeight: 1,
+            priceTicks: 1000n,
+            quantizedGive: lot,
+            quantizedWant: (1000n * lot) / 10_000n,
+          }),
+        ],
         [TAKER_ACCOUNT, makeAccountMachine([takerOffer])],
       ]),
       orderbookExt: {
@@ -1090,10 +1116,7 @@ describe('orderbook matching execution mapping', () => {
         },
         books: new Map([['2/5', historicalBook]]),
         orderPairs: new Map([[orderKey(MAKER_ACCOUNT, 'maker-ask-historical'), ['2/5']]]),
-        pairDimensions: new Map([[
-          '2/5',
-          getSwapPairDimensions(1, getStaticSwapTokenDimensions(2, 5)),
-        ]]),
+        pairDimensions: new Map([['2/5', getSwapPairDimensions(1, getStaticSwapTokenDimensions(2, 5))]]),
         referrals: new Map(),
       } as any,
     } as any;
@@ -1228,43 +1251,44 @@ describe('orderbook matching execution mapping', () => {
       priceTicks: makerPriceTicks,
     };
 
-    const makeFeeEntityState = (maker: SwapOffer, taker: SwapOffer) => ({
-      entityId: HUB_ENTITY,
-      hubRebalanceConfig: {
-        matchingStrategy: 'amount',
-        policyVersion: 1,
-        routingFeePPM: 1,
-        baseFee: 0n,
-        swapTakerFeeBps: 1,
-        rebalanceLiquidityFeeBps: 1n,
-        rebalanceGasFee: 0n,
-        rebalanceTimeoutMs: 10 * 60 * 1000,
-      },
-      accounts: new Map([
-        [MAKER_ACCOUNT, makeAccountMachine([maker])],
-        [TAKER_ACCOUNT, makeAccountMachine([taker])],
-      ]),
-      orderbookExt: {
-        hubProfile: {
-          entityId: HUB_ENTITY,
-          name: 'Hub',
-          minTradeSize: 0n,
-          spreadDistribution: {
-            makerBps: 0,
-            takerBps: 10_000,
-            hubBps: 0,
-            makerReferrerBps: 0,
-            takerReferrerBps: 0,
-          },
-          referenceTokenId: 2,
-          supportedPairs: ['2/5'],
+    const makeFeeEntityState = (maker: SwapOffer, taker: SwapOffer) =>
+      ({
+        entityId: HUB_ENTITY,
+        hubRebalanceConfig: {
+          matchingStrategy: 'amount',
+          policyVersion: 1,
+          routingFeePPM: 1,
+          baseFee: 0n,
+          swapTakerFeeBps: 1,
+          rebalanceLiquidityFeeBps: 1n,
+          rebalanceGasFee: 0n,
+          rebalanceTimeoutMs: 10 * 60 * 1000,
         },
-        books: new Map(),
-        orderPairs: new Map(),
-        pairDimensions: new Map(),
-        referrals: new Map(),
-      } as any,
-    } as any);
+        accounts: new Map([
+          [MAKER_ACCOUNT, makeAccountMachine([maker])],
+          [TAKER_ACCOUNT, makeAccountMachine([taker])],
+        ]),
+        orderbookExt: {
+          hubProfile: {
+            entityId: HUB_ENTITY,
+            name: 'Hub',
+            minTradeSize: 0n,
+            spreadDistribution: {
+              makerBps: 0,
+              takerBps: 10_000,
+              hubBps: 0,
+              makerReferrerBps: 0,
+              takerReferrerBps: 0,
+            },
+            referenceTokenId: 2,
+            supportedPairs: ['2/5'],
+          },
+          books: new Map(),
+          orderPairs: new Map(),
+          pairDimensions: new Map(),
+          referrals: new Map(),
+        } as any,
+      }) as any;
 
     const makerOffer = {
       offerId: 'maker-ask-fee',
@@ -1286,24 +1310,27 @@ describe('orderbook matching execution mapping', () => {
       maxFee: 0n,
       minNetReceive: makerBaseQty,
     };
-    const unauthorized = processCommittedOrderbookSwaps(
-      makeFeeEntityState(makerOffer, unauthorizedTaker), [makerOffer, unauthorizedTaker],
-    );
-    expect(unauthorized.accountTxs.some(
-      item => item.accountId === MAKER_ACCOUNT && item.tx.type === 'swap_resolve',
-    )).toBe(false);
-    expect(unauthorized.accountTxs).toContainEqual(expect.objectContaining({
-      accountId: TAKER_ACCOUNT,
-      tx: expect.objectContaining({
-        type: 'swap_resolve',
-        data: expect.objectContaining({
-          offerId: 'taker-buy-with-fee',
-          fillRatio: 0,
-          cancelRemainder: true,
-          comment: 'fee-authorization-exceeded',
+    const unauthorized = processCommittedOrderbookSwaps(makeFeeEntityState(makerOffer, unauthorizedTaker), [
+      makerOffer,
+      unauthorizedTaker,
+    ]);
+    expect(
+      unauthorized.accountTxs.some(item => item.accountId === MAKER_ACCOUNT && item.tx.type === 'swap_resolve'),
+    ).toBe(false);
+    expect(unauthorized.accountTxs).toContainEqual(
+      expect.objectContaining({
+        accountId: TAKER_ACCOUNT,
+        tx: expect.objectContaining({
+          type: 'swap_resolve',
+          data: expect.objectContaining({
+            offerId: 'taker-buy-with-fee',
+            fillRatio: 0,
+            cancelRemainder: true,
+            comment: 'fee-authorization-exceeded',
+          }),
         }),
       }),
-    }));
+    );
 
     const result = processCommittedOrderbookSwaps(makeFeeEntityState(makerOffer, takerOffer), [makerOffer, takerOffer]);
     const takerResolve = result.accountTxs.find(
@@ -1326,10 +1353,10 @@ describe('orderbook matching execution mapping', () => {
       giveAmount: improvedQuoteLimit,
       priceTicks: 1100n,
     };
-    const improved = processCommittedOrderbookSwaps(
-      makeFeeEntityState(makerOffer, improvedTakerOffer),
-      [makerOffer, improvedTakerOffer],
-    );
+    const improved = processCommittedOrderbookSwaps(makeFeeEntityState(makerOffer, improvedTakerOffer), [
+      makerOffer,
+      improvedTakerOffer,
+    ]);
     const improvedMakerResolve = improved.accountTxs.find(
       item => item.accountId === MAKER_ACCOUNT && item.tx.type === 'swap_resolve',
     );
@@ -1381,10 +1408,10 @@ describe('orderbook matching execution mapping', () => {
       timeInForce: 0,
       priceTicks: makerPriceTicks,
     };
-    const improvedSell = processCommittedOrderbookSwaps(
-      makeFeeEntityState(makerBid, improvedSellTaker),
-      [makerBid, improvedSellTaker],
-    );
+    const improvedSell = processCommittedOrderbookSwaps(makeFeeEntityState(makerBid, improvedSellTaker), [
+      makerBid,
+      improvedSellTaker,
+    ]);
     const improvedSellMakerResolve = improvedSell.accountTxs.find(
       item => item.accountId === MAKER_ACCOUNT && item.tx.type === 'swap_resolve',
     );
@@ -1493,18 +1520,22 @@ describe('orderbook matching execution mapping', () => {
       priceTicks,
       qtyLots: 2n,
     }).state;
-    crossedBook = applyCommand(crossedBook, {
-      kind: 0,
-      ownerId: TAKER_ENTITY,
-      orderId: restingBidOrderId,
-      side: 0,
-      tif: 0,
-      postOnly: false,
-      priceTicks,
-      qtyLots: 1n,
-    }, {
-      suspendedOrderIds: new Set([makerOrderId]),
-    }).state;
+    crossedBook = applyCommand(
+      crossedBook,
+      {
+        kind: 0,
+        ownerId: TAKER_ENTITY,
+        orderId: restingBidOrderId,
+        side: 0,
+        tif: 0,
+        postOnly: false,
+        priceTicks,
+        qtyLots: 1n,
+      },
+      {
+        suspendedOrderIds: new Set([makerOrderId]),
+      },
+    ).state;
 
     const entityState = {
       entityId: HUB_ENTITY,

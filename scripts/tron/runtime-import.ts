@@ -1,14 +1,29 @@
 import { strict as assert } from 'node:assert';
 import { resolve } from 'node:path';
-import { main, enqueueRuntimeInput, processRuntime, startJurisdictionWatchers,
-  stopJurisdictionWatchersAndWait, closeRuntimeDb, closeInfraDb, getRuntimeWalDb } from '../../core/runtime';
+import { getBytes, Wallet } from 'ethers';
+import {
+  main,
+  enqueueRuntimeInput,
+  processRuntime,
+  startJurisdictionWatchers,
+  stopJurisdictionWatchersAndWait,
+  closeRuntimeDb,
+  closeInfraDb,
+  getRuntimeWalDb,
+} from '../../core/runtime';
 import { getLiveJAdapter } from '../../core/runtime/j-submit/live-jadapters';
-import { assertCertifiedRegistrationEvidenceStore, computeRegistrationEvidenceHash,
-  computeRegistrationEvidenceClaimHash } from '../../core/jurisdiction/machine/registration-evidence';
+import {
+  assertCertifiedRegistrationEvidenceStore,
+  computeRegistrationEvidenceHash,
+  computeRegistrationEvidenceClaimHash,
+} from '../../core/jurisdiction/machine/registration-evidence';
 import { readStorageFrameRecord, readStorageHead } from '../../core/storage/read/read';
 import { safeStringify } from '../../core/protocol/serialization';
+import { registerSignerKey } from '../../core/account/crypto';
 
-const data = resolve(process.env['XLN_TRON_STAND_PATH'] || resolve(import.meta.dir, '../../db/native-tron-release-20260918'));
+const data = resolve(
+  process.env['XLN_TRON_STAND_PATH'] || resolve(import.meta.dir, '../../db/native-tron-release-20260918'),
+);
 assert.equal(process.env.XLN_DB_PATH, `${data}/runtime`);
 assert.equal(process.env.XLN_JURISDICTIONS_PATH, `${data}/jurisdictions.json`);
 assert.notEqual(process.env.XLN_DISABLE_RUNTIME_RESTORE, '1');
@@ -22,7 +37,12 @@ const previousFile = Bun.file(`${data}/runtime-import.json`);
 assert.equal(await previousFile.exists(), restore, 'Explicit import/restore mode must match saved evidence');
 const previous = restore ? await previousFile.json() : null;
 const name = 'Native TVM';
-const env = await main('xln-native-local-release-20260918-public-observer', { numericSignerPrewarmCount: 1 });
+const runtimeSeed = 'xln-native-local-release-20260918-public-observer';
+// The same local ledger later imports Foundation and commits its signed J
+// prefixes. Recovery must prewarm this fixture-owned EOA before replaying them.
+const foundationKey = `0x${'1'.padStart(64, '0')}`; // Public disposable private-chain signer.
+registerSignerKey(runtimeSeed, new Wallet(foundationKey).address.toLowerCase(), getBytes(foundationKey));
+const env = await main(runtimeSeed, { numericSignerPrewarmCount: 1 });
 const restoredFromHeight = env.state.height;
 try {
   const db = getRuntimeWalDb(env);
@@ -46,18 +66,39 @@ try {
     const beforePoll = await readStorageFrameRecord(db, env.state.height);
     assert(beforePoll);
     await assertCertifiedRegistrationEvidenceStore(env);
-    await Bun.write(`${data}/runtime-recovered-before-poll.json`, safeStringify({
-      runtimeHeight: env.state.height, frameHash: beforePoll.frameHash, postStateHash: beforePoll.postStateHash,
-      evidence: [...(env.infrastructure?.certifiedRegistrationEvidence?.values() ?? [])],
-    }, 2));
+    await Bun.write(
+      `${data}/runtime-recovered-before-poll.json`,
+      safeStringify(
+        {
+          runtimeHeight: env.state.height,
+          frameHash: beforePoll.frameHash,
+          postStateHash: beforePoll.postStateHash,
+          evidence: [...(env.infrastructure?.certifiedRegistrationEvidence?.values() ?? [])],
+        },
+        2,
+      ),
+    );
   } else {
     assert.equal(env.state.height, 0, 'Fresh import cannot reuse an existing Runtime WAL');
-    enqueueRuntimeInput(env, { runtimeTxs: [{ type: 'importJ', data: {
-      name, chainId: graph.chainId, ticker: 'TRX', rpcs: [graph.chain.defaultRpc], blockTimeMs: 3000,
-      entityProviderDeploymentBlock: graph.entityProviderDeploymentBlock,
-      contracts: Object.fromEntries(['account', 'depository', 'entityProvider', 'deltaTransformer']
-        .map(key => [key, graph.contracts[key]])),
-    } }], entityInputs: [] });
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [
+        {
+          type: 'importJ',
+          data: {
+            name,
+            chainId: graph.chainId,
+            ticker: 'TRX',
+            rpcs: [graph.chain.defaultRpc],
+            blockTimeMs: 3000,
+            entityProviderDeploymentBlock: graph.entityProviderDeploymentBlock,
+            contracts: Object.fromEntries(
+              ['account', 'depository', 'entityProvider', 'deltaTransformer'].map(key => [key, graph.contracts[key]]),
+            ),
+          },
+        },
+      ],
+      entityInputs: [],
+    });
   }
   const deadline = Date.now() + 30_000;
   let adapter = getLiveJAdapter(env, name);
@@ -76,8 +117,11 @@ try {
     await adapter.pollNow();
     await processRuntime(env);
     const evidence = [...(env.infrastructure?.certifiedRegistrationEvidence?.values() ?? [])];
-    if (evidence.some(item => item.source === 'FoundationBootstrapped') &&
-      (adapter.getWatcherScanProgress?.().scannedThroughHeight ?? -1) >= targetHeight) break;
+    if (
+      evidence.some(item => item.source === 'FoundationBootstrapped') &&
+      (adapter.getWatcherScanProgress?.().scannedThroughHeight ?? -1) >= targetHeight
+    )
+      break;
     await Bun.sleep(100);
   }
   await stopJurisdictionWatchersAndWait(env);
@@ -113,18 +157,37 @@ try {
   const frame = await readStorageFrameRecord(db, env.state.height);
   assert(frame);
   const frames = [];
-  for (let height = restore ? restoredFromHeight + 1 : 1; height <= env.state.height; height++) {
+  for (let height = 1; height <= env.state.height; height++) {
     const committed = await readStorageFrameRecord(db, height);
     assert(committed);
     frames.push(committed);
   }
+  // Empty solidified blocks advance the authenticated scan without certifying
+  // new authority. Verify the original committed prefix, never demand a duplicate.
+  if (restore) {
+    assert.deepEqual(JSON.parse(safeStringify(frames.slice(0, previous.runtimeHeight))), previous.frames);
+  }
   assert(frames.some(frame => frame.runtimeInput.runtimeTxs?.some(tx => tx.type === 'recordAuthenticatedJAuthority')));
-  const result = { kind: 'NATIVE_RUNTIME_AUTHORITY', restore, resumeImport, restoredFromHeight, runtimeId: env.runtimeId,
-    runtimeHeight: env.state.height, frameHash: frame.frameHash, postStateHash: frame.postStateHash,
-    chainId: graph.chainId, mode: adapter.mode, observedThroughHeight: scan.scannedThroughHeight,
-    authorityObservedThroughHeight: foundation.observedThroughHeight, scan,
-    evidence, evidenceHashes: evidence.map(computeRegistrationEvidenceHash), claimHashes, frames,
-    scope: 'Real native RPC-attested Runtime authority and WAL; no Entity financial or cross-J claim' };
+  const result = {
+    kind: 'NATIVE_RUNTIME_AUTHORITY',
+    restore,
+    resumeImport,
+    restoredFromHeight,
+    runtimeId: env.runtimeId,
+    runtimeHeight: env.state.height,
+    frameHash: frame.frameHash,
+    postStateHash: frame.postStateHash,
+    chainId: graph.chainId,
+    mode: adapter.mode,
+    observedThroughHeight: scan.scannedThroughHeight,
+    authorityObservedThroughHeight: foundation.observedThroughHeight,
+    scan,
+    evidence,
+    evidenceHashes: evidence.map(computeRegistrationEvidenceHash),
+    claimHashes,
+    frames,
+    scope: 'Real native RPC-attested Runtime authority and WAL; no Entity financial or cross-J claim',
+  };
   await Bun.write(`${data}/runtime-${restore ? 'restore' : 'import'}.json`, safeStringify(result, 2));
   console.log('NATIVE_RUNTIME_AUTHORITY_VERIFIED', safeStringify({ ...result, frames: frames.length }));
 } finally {

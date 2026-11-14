@@ -2,16 +2,12 @@ import type { RuntimeReplica } from '../types';
 import { ensureRuntimeInfrastructure } from '../envelope/replica-envelope';
 import type { JReplica } from '../../types/jurisdiction-runtime';
 import type { BrowserVMProvider, JAdapter, JAdapterConfig } from '../../jurisdiction/adapter/types';
-import { createJAdapterWithRetry } from '../../jurisdiction/adapter/kernel/retry';
+import { createJAdapterWithRetry, isTransientJAdapterStartupError } from '../../jurisdiction/adapter/kernel/retry';
 import { errorMessage } from '../../support/boundary-guards';
 import { createStructuredLogger } from '../../support/logger';
 import { getJurisdictionIdentityRef } from '../../jurisdiction/machine/jurisdiction-runtime';
 import { buildCanonicalJReplicaSnapshot } from '../../storage/wal/snapshot';
-import {
-  attachLiveJAdapter,
-  detachLiveJAdapter,
-  getLiveJAdapter,
-} from '../j-submit/live-jadapters';
+import { attachLiveJAdapter, detachLiveJAdapter, getLiveJAdapter } from '../j-submit/live-jadapters';
 
 const infraLog = createStructuredLogger('runtime.restore');
 
@@ -26,7 +22,9 @@ export const applyTrustedJurisdictionRpcBindings = (
 ): void => {
   const rpcByJurisdictionRef = new Map<string, string>();
   for (const binding of bindings) {
-    const jurisdictionRef = String(binding.jurisdictionRef || '').trim().toLowerCase();
+    const jurisdictionRef = String(binding.jurisdictionRef || '')
+      .trim()
+      .toLowerCase();
     const rpcUrl = String(binding.rpcUrl || '').trim();
     if (!jurisdictionRef || !rpcUrl) {
       throw new Error('RESTORE_JURISDICTION_RPC_BINDING_INVALID');
@@ -56,26 +54,30 @@ export const normalizeRestoredJReplicas = (env: RuntimeReplica): void => {
  */
 const closeJAdaptersAfterFailure = async (adapters: readonly JAdapter[], error: unknown): Promise<never> => {
   const closing = await Promise.allSettled(adapters.map(adapter => adapter.close()));
-  const closeFailures = closing.flatMap(result => result.status === 'rejected' ? [result.reason] : []);
+  const closeFailures = closing.flatMap(result => (result.status === 'rejected' ? [result.reason] : []));
   if (closeFailures.length === 0) throw error;
   throw new AggregateError([error, ...closeFailures], 'RESTORE_JADAPTER_FAILED_AND_CLOSE_FAILED');
 };
 
-const assertJAdapterMatchesReplica = async (
-  name: string,
-  jReplica: JReplica,
-  jadapter: JAdapter,
-): Promise<void> => {
+const assertJAdapterMatchesReplica = async (name: string, jReplica: JReplica, jadapter: JAdapter): Promise<void> => {
   const expectedAddresses = {
-    account: String(jReplica.contracts?.account || '').trim().toLowerCase(),
-    depository: String(jReplica.contracts?.depository || '').trim().toLowerCase(),
-    entityProvider: String(jReplica.contracts?.entityProvider || '').trim().toLowerCase(),
-    deltaTransformer: String(jReplica.contracts?.deltaTransformer || '').trim().toLowerCase(),
+    account: String(jReplica.contracts?.account || '')
+      .trim()
+      .toLowerCase(),
+    depository: String(jReplica.contracts?.depository || '')
+      .trim()
+      .toLowerCase(),
+    entityProvider: String(jReplica.contracts?.entityProvider || '')
+      .trim()
+      .toLowerCase(),
+    deltaTransformer: String(jReplica.contracts?.deltaTransformer || '')
+      .trim()
+      .toLowerCase(),
   };
   for (const [contractName, expected] of Object.entries(expectedAddresses)) {
-    const actual = String(
-      jadapter.addresses[contractName as keyof typeof jadapter.addresses] || '',
-    ).trim().toLowerCase();
+    const actual = String(jadapter.addresses[contractName as keyof typeof jadapter.addresses] || '')
+      .trim()
+      .toLowerCase();
     if (!expected || actual !== expected) {
       throw new Error(
         `RESTORE_JADAPTER_ADDRESS_MISMATCH:${name}:${contractName}:expected=${expected || 'missing'}:actual=${actual || 'missing'}`,
@@ -108,23 +110,36 @@ const assertJAdapterMatchesReplica = async (
 };
 
 type LiveJAdapterOptions = {
+  /** A candidate transport is verified without publishing a live binding first. */
+  rpcUrl?: string;
   allowBrowserVm?: boolean;
   context?: string;
   attempts?: number;
+  skipOperatorTransport?: boolean;
+  /**
+   * Owner wallets restore even when a chain's RPC cannot be reached (its Hub
+   * gateway may be the outage): that chain stays without a live adapter, so
+   * the j-catchup fence keeps every submission paused until the owner points
+   * it at a reachable RPC. A reachable endpoint with the wrong chain or
+   * contracts still fails the restore.
+   */
+  tolerateUnreachable?: boolean;
 };
 
 /**
  * Connects and verifies one chain capability. A failed check closes the new
  * adapter; a verified one is returned unattached for its caller to own.
  */
-const connectVerifiedJAdapter = async (
+export const connectVerifiedJAdapter = async (
   env: RuntimeReplica,
   name: string,
   jReplica: JReplica,
   options: LiveJAdapterOptions,
 ): Promise<JAdapter | null> => {
-  const rpcUrl = jReplica.rpcs?.find((candidate) => {
-    const normalized = String(candidate || '').trim().toLowerCase();
+  const rpcUrl = jReplica.rpcs?.find(candidate => {
+    const normalized = String(candidate || '')
+      .trim()
+      .toLowerCase();
     return normalized.length > 0 && !normalized.startsWith('browservm:');
   });
   const hasRpcs = Boolean(rpcUrl);
@@ -140,10 +155,12 @@ const connectVerifiedJAdapter = async (
     ...(hasRpcs ? { watchOnly: true } : {}),
   };
 
+  const trustedRpcUrl = env.infrastructure?.trustedJurisdictionRpcUrls?.get(
+    getJurisdictionIdentityRef(jReplica).toLowerCase(),
+  );
   if (hasRpcs) {
     if (!rpcUrl) return null;
-    adapterConfig.rpcUrl = env.infrastructure?.trustedJurisdictionRpcUrls
-      ?.get(getJurisdictionIdentityRef(jReplica).toLowerCase()) ?? rpcUrl;
+    adapterConfig.rpcUrl = options.rpcUrl ?? trustedRpcUrl ?? rpcUrl;
     adapterConfig.fromReplica = jReplica;
     if (Number.isSafeInteger(jReplica.blockDelayMs) && jReplica.blockDelayMs > 0) {
       adapterConfig.watchPollMs = jReplica.blockDelayMs;
@@ -152,21 +169,32 @@ const connectVerifiedJAdapter = async (
     adapterConfig.browserVMState = env.browserVMState;
   }
 
-  const jadapter = await createJAdapterWithRetry(adapterConfig, {
-    context,
-    attempts,
-    onRetry: (attempt, totalAttempts, error) => {
-      // A transient attempt that is still inside the bounded retry policy is
-      // recovery telemetry, not a runtime warning. Exhaustion remains a loud
-      // `jadapter.restore_failed` error in rehydrateRestoredRuntimeInfra.
-      infraLog.info('jadapter.restore_retry', {
-        name,
-        attempt,
-        attempts: totalAttempts,
-        error: errorMessage(error),
-      });
-    },
-  });
+  // The committed EVM endpoint is the whole transport: operator metadata only ever
+  // adds TRON hosts, and the operator API may be the outage being survived.
+  const skipOperatorTransport = options.skipOperatorTransport || adapterConfig.mode === 'rpc';
+  let jadapter: JAdapter;
+  try {
+    jadapter = await createJAdapterWithRetry(adapterConfig, {
+      context,
+      attempts,
+      ...(skipOperatorTransport ? { skipOperatorTransport: true } : {}),
+      onRetry: (attempt, totalAttempts, error) => {
+        // A transient attempt that is still inside the bounded retry policy is
+        // recovery telemetry, not a runtime warning. Exhaustion remains a loud
+        // `jadapter.restore_failed` error in rehydrateRestoredRuntimeInfra.
+        infraLog.info('jadapter.restore_retry', {
+          name,
+          attempt,
+          attempts: totalAttempts,
+          error: errorMessage(error),
+        });
+      },
+    });
+  } catch (error) {
+    if (!options.tolerateUnreachable || !hasRpcs || !isTransientJAdapterStartupError(error)) throw error;
+    infraLog.warn('jadapter.restore_unreachable', { name, error: errorMessage(error) });
+    return null;
+  }
 
   try {
     if (hasRpcs && (!jadapter.addresses?.depository || !jadapter.addresses?.entityProvider)) {
@@ -221,20 +249,35 @@ const connectRestoredJAdapters = async (
   options: LiveJAdapterOptions,
 ): Promise<RestoredJAdapter[]> => {
   const names = [...env.state.jReplicas.keys()];
-  const settled = await Promise.allSettled(names.map(async name => {
-    const jReplica = env.state.jReplicas.get(name);
-    if (!jReplica) throw new Error(`RESTORE_JREPLICA_MISSING:${name}`);
-    if (getLiveJAdapter(env, name)) throw new Error(`RESTORE_JADAPTER_ALREADY_LIVE:${name}`);
-    return { name, adapter: await connectVerifiedJAdapter(env, name, jReplica, { ...options, context: `restore:${name}` }) };
-  }));
+  const settled = await Promise.allSettled(
+    names.map(async name => {
+      const jReplica = env.state.jReplicas.get(name);
+      if (!jReplica) throw new Error(`RESTORE_JREPLICA_MISSING:${name}`);
+      if (getLiveJAdapter(env, name)) throw new Error(`RESTORE_JADAPTER_ALREADY_LIVE:${name}`);
+      return {
+        name,
+        adapter: await connectVerifiedJAdapter(env, name, jReplica, { ...options, context: `restore:${name}` }),
+      };
+    }),
+  );
   const restored = settled.flatMap((result): RestoredJAdapter[] =>
-    result.status === 'fulfilled' && result.value.adapter ? [{ name: result.value.name, adapter: result.value.adapter }] : []);
-  const failures = settled.flatMap((result, index) => result.status === 'rejected'
-    ? [new Error(`RESTORE_JADAPTER_FAILED: name=${names[index]} cause=${errorMessage(result.reason)}`, { cause: result.reason })]
-    : []);
+    result.status === 'fulfilled' && result.value.adapter
+      ? [{ name: result.value.name, adapter: result.value.adapter }]
+      : [],
+  );
+  const failures = settled.flatMap((result, index) =>
+    result.status === 'rejected'
+      ? [
+          new Error(`RESTORE_JADAPTER_FAILED: name=${names[index]} cause=${errorMessage(result.reason)}`, {
+            cause: result.reason,
+          }),
+        ]
+      : [],
+  );
   if (failures.length === 0) return restored;
   for (const [index, result] of settled.entries()) {
-    if (result.status === 'rejected') infraLog.error('jadapter.restore_failed', { name: names[index], error: errorMessage(result.reason) });
+    if (result.status === 'rejected')
+      infraLog.error('jadapter.restore_failed', { name: names[index], error: errorMessage(result.reason) });
   }
   return closeJAdaptersAfterFailure(
     restored.map(entry => entry.adapter),
@@ -251,7 +294,8 @@ const validateRestoredBrowserVM = (
   for (const { name, adapter } of restored) {
     if (adapter.mode !== 'browservm') continue;
     const browserVM = adapter.getBrowserVM();
-    if (!browserVM) throw new Error(`RESTORE_JADAPTER_FAILED: name=${name} cause=RESTORE_BROWSERVM_PROVIDER_MISSING:${name}`);
+    if (!browserVM)
+      throw new Error(`RESTORE_JADAPTER_FAILED: name=${name} cause=RESTORE_BROWSERVM_PROVIDER_MISSING:${name}`);
     if (restoredBrowserVM && restoredBrowserVM !== browserVM) {
       throw new Error(`RESTORE_JADAPTER_FAILED: name=${name} cause=RESTORE_MULTIPLE_BROWSERVM_UNSUPPORTED`);
     }
@@ -266,12 +310,9 @@ export const rehydrateRestoredRuntimeInfra = async (
   options: {
     loadGossipProfiles: (env: RuntimeReplica) => Promise<void>;
     assertPersistedContractConfigReady: (env: RuntimeReplica, label: string) => void;
-    assertBrowserVMJurisdiction: (
-      depositoryAddress: string,
-      chainId: number,
-      browserVM: BrowserVMProvider,
-    ) => void;
+    assertBrowserVMJurisdiction: (depositoryAddress: string, chainId: number, browserVM: BrowserVMProvider) => void;
     trustedJurisdictionRpcBindings?: readonly TrustedJurisdictionRpcBinding[];
+    tolerateUnreachableJurisdictions?: boolean;
   },
 ): Promise<void> => {
   normalizeRestoredJReplicas(env);
@@ -285,6 +326,7 @@ export const rehydrateRestoredRuntimeInfra = async (
   const restored = await connectRestoredJAdapters(env, {
     allowBrowserVm: Boolean(env.browserVMState),
     attempts: 5,
+    ...(options.tolerateUnreachableJurisdictions ? { tolerateUnreachable: true } : {}),
   });
   const attached: RestoredJAdapter[] = [];
   try {
@@ -296,9 +338,15 @@ export const rehydrateRestoredRuntimeInfra = async (
     if (browserVM && typeof window !== 'undefined') {
       (window as Window & { __xlnBrowserVM?: BrowserVMProvider | null }).__xlnBrowserVM = browserVM;
     }
-    if (browserVM) infraLog.debug('browservm.restored', { names: restored.filter(entry => entry.adapter.mode === 'browservm').map(entry => entry.name) });
+    if (browserVM)
+      infraLog.debug('browservm.restored', {
+        names: restored.filter(entry => entry.adapter.mode === 'browservm').map(entry => entry.name),
+      });
   } catch (error) {
     for (const { name, adapter } of attached) detachLiveJAdapter(env, name, adapter);
-    await closeJAdaptersAfterFailure(restored.map(entry => entry.adapter), error);
+    await closeJAdaptersAfterFailure(
+      restored.map(entry => entry.adapter),
+      error,
+    );
   }
 };

@@ -5,6 +5,7 @@
  *   bun rscore/fixtures/entity-kernel/generate.ts
  */
 import { createHash } from 'node:crypto';
+import { getKnownTokenIds, getTokenInfo } from '../../../core/account/utils';
 
 import { createEmptyAccountJClaimAccumulator } from '../../../core/account/j-claims/j-claim-accumulator';
 import { encodeAccountStateValue } from '../../../core/account/commitment/state-root';
@@ -33,15 +34,9 @@ import {
   type HubProfile,
 } from '../../../core/swapbook';
 import type { BookPricePageTree } from '../../../core/swapbook/pages/page';
-import {
-  markWorkingOrderbookOffer,
-  type NormalizedOrderbookOffer,
-} from '../../../core/swapbook/swap-execution';
+import { markWorkingOrderbookOffer, type NormalizedOrderbookOffer } from '../../../core/swapbook/swap-execution';
 import { hashHtlcSecret } from '../../../core/protocol/htlc/utils';
-import {
-  HTLC_OPAQUE_CIPHERTEXT_VERSION,
-  hashOpaqueHtlcCiphertext,
-} from '../../../core/protocol/htlc/multi-recipient';
+import { HTLC_OPAQUE_CIPHERTEXT_VERSION, hashOpaqueHtlcCiphertext } from '../../../core/protocol/htlc/multi-recipient';
 import { encodeBase64Bytes } from '../../../core/protocol/serialization/base64';
 import { safeStringify } from '../../../core/protocol/serialization';
 import type {
@@ -52,11 +47,7 @@ import type {
   AccountTx,
   SwapOffer,
 } from '../../../core/types/account';
-import type {
-  EntityCandidateEffect,
-  EntityInput,
-  EntityState,
-} from '../../../core/entity/types';
+import type { EntityCandidateEffect, EntityInput, EntityState } from '../../../core/entity/types';
 import type { EntityRuntimeContext } from '../../../core/entity/runtime-context';
 import type { EntityInfraContext } from '../../../core/types/entity/infra-context';
 import type { PreparedHtlcEntry } from '../../../core/types/entity/htlc-infra-context';
@@ -69,10 +60,7 @@ import {
 } from '../../../core/entity/consensus/state-root';
 import { createEntityFrameCandidateState } from '../../../core/entity/state-clone';
 import { initCrontab } from '../../../core/entity/scheduler';
-import {
-  applyBookIntentProgram,
-  createBookIntentProgram,
-} from '../../../core/entity/books/book-intents';
+import { applyBookIntentProgram, createBookIntentProgram } from '../../../core/entity/books/book-intents';
 
 const HUB = `0x${'11'.repeat(32)}`;
 const MAKER = `0x${'22'.repeat(32)}`;
@@ -83,6 +71,7 @@ const FINAL_SECRET = `0x${'77'.repeat(32)}`;
 const FINAL_HASHLOCK = hashHtlcSecret(FINAL_SECRET);
 const PRICE = 25_000_000n;
 const BASE = 10n ** 18n;
+const tokenRegistry = getKnownTokenIds().map(tokenId => ({ tokenId, decimals: getTokenInfo(tokenId).decimals }));
 
 const profile: HubProfile = {
   entityId: HUB,
@@ -152,15 +141,11 @@ const offerAtPrice = (
   };
 };
 
-const offer = (
-  accountId: string,
-  offerId: string,
-  createdHeight: number,
-  ask: boolean,
-): NormalizedOrderbookOffer => offerAtPrice(accountId, offerId, createdHeight, ask);
+const offer = (accountId: string, offerId: string, createdHeight: number, ask: boolean): NormalizedOrderbookOffer =>
+  offerAtPrice(accountId, offerId, createdHeight, ask);
 
 const account = (remote: string, offers: readonly NormalizedOrderbookOffer[]): AccountReplica => {
-  const deltas = [1, 2].map((tokenId) => {
+  const deltas = [1, 2].map(tokenId => {
     const delta = createDefaultDelta(tokenId);
     delta.collateral = 10n ** 30n;
     delta.leftCreditLimit = 10n ** 30n;
@@ -184,7 +169,7 @@ const account = (remote: string, offers: readonly NormalizedOrderbookOffer[]): A
       locks: PersistentAccountStateMap.empty('locks'),
       swapOffers: PersistentAccountStateMap.fromEntries(
         'swapOffers',
-        offers.map((row) => {
+        offers.map(row => {
           if (row.quantizedGive === undefined || row.quantizedWant === undefined) {
             throw new Error(`ENTITY_KERNEL_FIXTURE_UNQUANTIZED_OFFER:${row.offerId}`);
           }
@@ -303,14 +288,19 @@ const projectOffer = (row: NormalizedOrderbookOffer) => ({
 
 const projectBook = (book: BookState) => ({
   maxOrders: book.params.maxOrders,
-  orders: new Map(Array.from(book.orders, ([key, row]) => [key, {
-    orderId: row.orderId,
-    ownerId: row.ownerId,
-    side: row.side === 0 ? 'bid' : 'ask',
-    priceTicks: row.priceTicks,
-    qtyLots: row.qtyLots,
-    seq: row.seq,
-  }])),
+  orders: new Map(
+    Array.from(book.orders, ([key, row]) => [
+      key,
+      {
+        orderId: row.orderId,
+        ownerId: row.ownerId,
+        side: row.side === 0 ? 'bid' : 'ask',
+        priceTicks: row.priceTicks,
+        qtyLots: row.qtyLots,
+        seq: row.seq,
+      },
+    ]),
+  ),
   nextSeq: book.nextSeq,
   tradeCount: book.tradeCount,
   tradeQtySum: book.tradeQtySum,
@@ -319,23 +309,25 @@ const projectBook = (book: BookState) => ({
   eventHash: book.eventHash,
 });
 
-const projectExactPages = (tree: BookPricePageTree) => Array.from(
-  tree.entries(),
-  ([key, page]) => ({
+const projectExactPages = (tree: BookPricePageTree) =>
+  Array.from(tree.entries(), ([key, page]) => ({
     priceTicks: key.priceTicks.toString(),
     pageSequence: key.pageSequence,
     headSlot: page.headSlot,
     nextSlot: page.nextSlot,
     liveCount: page.liveCount,
     totalQtyLots: page.totalQtyLots.toString(),
-    slots: page.slots.map(entry => entry === null ? null : ({
-      orderId: entry.orderId,
-      ownerId: entry.ownerId,
-      qtyLots: entry.qtyLots.toString(),
-      seq: entry.seq,
-    })),
-  }),
-);
+    slots: page.slots.map(entry =>
+      entry === null
+        ? null
+        : {
+            orderId: entry.orderId,
+            ownerId: entry.ownerId,
+            qtyLots: entry.qtyLots.toString(),
+            seq: entry.seq,
+          },
+    ),
+  }));
 
 const projectExactBookSnapshot = (book: BookState) => ({
   bucketWidthTicks: book.params.bucketWidthTicks.toString(),
@@ -387,14 +379,11 @@ const hubState = entityState(
   ]),
   ext,
 );
-const match = processOrderbookSwaps(
-  hubState,
-  [maker, taker].map(markWorkingOrderbookOffer),
-);
+const match = processOrderbookSwaps(hubState, [maker, taker].map(markWorkingOrderbookOffer), { tokenRegistry });
 if (match.crossJurisdictionFills.length !== 0) {
   throw new Error('ENTITY_KERNEL_FIXTURE_UNEXPECTED_CROSS_OR_REJECT');
 }
-const finalBook = match.bookUpdates.find((row) => row.pairId === '1/2')?.book;
+const finalBook = match.bookUpdates.find(row => row.pairId === '1/2')?.book;
 if (!finalBook || finalBook.tradeCount !== 1) throw new Error('ENTITY_KERNEL_FIXTURE_MATCH_MISSING');
 for (const update of match.bookUpdates) replaceOrderbookPair(ext, update.pairId, update.book);
 const sameJFullMatchCanonicalEntity = canonicalEntityEvidence(hubState);
@@ -405,20 +394,12 @@ const usdAuthorityProfile: HubProfile = {
   usdQuoteAuthorityEntityId: MAKER,
 };
 const usdAuthorityExt = createOrderbookExtState(usdAuthorityProfile);
-const usdAuthorityState = entityState(
-  new Map([[MAKER, account(MAKER, [usdAuthorityAsk])]]),
-  usdAuthorityExt,
-);
-const usdAuthorityPass = processOrderbookSwaps(
-  usdAuthorityState,
-  [markWorkingOrderbookOffer(usdAuthorityAsk)],
-);
-const usdAuthorityBook = usdAuthorityPass.bookUpdates
-  .find((row) => row.pairId === '1/2')?.book;
-if (
-  !usdAuthorityBook ||
-  usdAuthorityBook.lastAcceptedUsdAskPriceTicks !== PRICE
-) {
+const usdAuthorityState = entityState(new Map([[MAKER, account(MAKER, [usdAuthorityAsk])]]), usdAuthorityExt);
+const usdAuthorityPass = processOrderbookSwaps(usdAuthorityState, [markWorkingOrderbookOffer(usdAuthorityAsk)], {
+  tokenRegistry,
+});
+const usdAuthorityBook = usdAuthorityPass.bookUpdates.find(row => row.pairId === '1/2')?.book;
+if (!usdAuthorityBook || usdAuthorityBook.lastAcceptedUsdAskPriceTicks !== PRICE) {
   throw new Error('ENTITY_KERNEL_FIXTURE_USD_AUTHORITY_ASK_MISSING');
 }
 
@@ -429,7 +410,7 @@ for (const row of match.accountTxs) {
   grouped.set(row.accountId, txs);
 }
 const proposalWork = Array.from(grouped)
-  .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+  .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
   .map(([accountId, txs]) => ({ accountId, txDigests: txs.map(txDigest) }));
 const orderbookProjection = {
   domain: 'xln.entity-kernel.orderbook.v1',
@@ -439,7 +420,10 @@ const orderbookProjection = {
     [[MAKER, maker.offerId], projectOffer(maker)],
     [[TAKER, taker.offerId], projectOffer(taker)],
   ]),
-  resolvingOffers: new Set([[MAKER, maker.offerId], [TAKER, taker.offerId]]),
+  resolvingOffers: new Set([
+    [MAKER, maker.offerId],
+    [TAKER, taker.offerId],
+  ]),
   pairByOrder: new Map(),
   maxOrdersPerPair: 10_000,
 };
@@ -462,11 +446,10 @@ const partialState = entityState(
   ]),
   partialExt,
 );
-const partialMatch = processOrderbookSwaps(
-  partialState,
-  [partialMaker, partialTaker].map(markWorkingOrderbookOffer),
-);
-const partialBook = partialMatch.bookUpdates.find((row) => row.pairId === '1/2')?.book;
+const partialMatch = processOrderbookSwaps(partialState, [partialMaker, partialTaker].map(markWorkingOrderbookOffer), {
+  tokenRegistry,
+});
+const partialBook = partialMatch.bookUpdates.find(row => row.pairId === '1/2')?.book;
 if (!partialBook || partialBook.tradeCount !== 1 || partialBook.orders.size !== 1) {
   throw new Error('ENTITY_KERNEL_FIXTURE_PARTIAL_MATCH_MISSING');
 }
@@ -477,7 +460,7 @@ for (const row of partialMatch.accountTxs) {
   partialGrouped.set(row.accountId, txs);
 }
 const partialProposalWork = Array.from(partialGrouped)
-  .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+  .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
   .map(([accountId, txs]) => ({ accountId, txDigests: txs.map(txDigest) }));
 const partialOrderbookProjection = {
   domain: 'xln.entity-kernel.orderbook.v1',
@@ -517,6 +500,7 @@ const sweepState = entityState(
 const sweepMatch = processOrderbookSwaps(
   sweepState,
   [sweepLowMaker, sweepHighMaker, sweepTaker].map(markWorkingOrderbookOffer),
+  { tokenRegistry },
 );
 const sweepBook = sweepMatch.bookUpdates.find(row => row.pairId === '1/2')?.book;
 if (!sweepBook || sweepBook.tradeCount !== 2 || sweepBook.orders.size !== 0) {
@@ -529,7 +513,7 @@ for (const row of sweepMatch.accountTxs) {
   sweepGrouped.set(row.accountId, txs);
 }
 const sweepProposalWork = Array.from(sweepGrouped)
-  .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+  .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
   .map(([accountId, txs]) => ({ accountId, txDigests: txs.map(txDigest) }));
 const sweepOrderbookProjection = {
   domain: 'xln.entity-kernel.orderbook.v1',
@@ -556,12 +540,9 @@ const sweepOutboxProjection = {
 
 const cancelExt = createOrderbookExtState(profile);
 const cancelMaker = offer(MAKER, 'cancel-me', 1, true);
-const cancelState = entityState(
-  new Map([[MAKER, account(MAKER, [cancelMaker])]]),
-  cancelExt,
-);
-const resting = processOrderbookSwaps(cancelState, [markWorkingOrderbookOffer(cancelMaker)]);
-const restingBook = resting.bookUpdates.find((row) => row.pairId === '1/2')?.book;
+const cancelState = entityState(new Map([[MAKER, account(MAKER, [cancelMaker])]]), cancelExt);
+const resting = processOrderbookSwaps(cancelState, [markWorkingOrderbookOffer(cancelMaker)], { tokenRegistry });
+const restingBook = resting.bookUpdates.find(row => row.pairId === '1/2')?.book;
 if (!restingBook) throw new Error('ENTITY_KERNEL_FIXTURE_RESTING_MISSING');
 replaceOrderbookPair(cancelExt, '1/2', restingBook);
 const canceled = processOrderbookCancels(cancelState, [{ accountId: MAKER, offerId: 'cancel-me' }]);
@@ -683,57 +664,55 @@ const paybookFollowupContext = {
   candidateEffects: paybookCandidateEffects,
   bookIntentSlot: paybookBookIntents.openSlot(),
   infraContext: paybookInfraContext,
-  preparedHtlcEntriesByBinding: new Map([
-    [`${committedHtlcFrame.stateHash}:${HASHLOCK}`, preparedHtlc],
-  ]),
+  preparedHtlcEntriesByBinding: new Map([[`${committedHtlcFrame.stateHash}:${HASHLOCK}`, preparedHtlc]]),
   consumedPreparedHtlcBindings: new Set<string>(),
 };
-await applyCommittedHtlcLockFollowup(
-  paybookFollowupContext,
-  inboundHtlc,
-  committedHtlcFrame,
-  false,
-  true,
-);
+await applyCommittedHtlcLockFollowup(paybookFollowupContext, inboundHtlc, committedHtlcFrame, false, true);
 applyDirectPaymentForwardFollowups(paybookFollowupContext, [directForward]);
 applyBookIntentProgram(paybookWorkingState, paybookBookIntents);
 if (
-  paybookAccountTxs.length !== 2
-  || paybookAccountTxs[0]?.tx.type !== 'htlc_lock'
-  || paybookAccountTxs[1]?.tx.type !== 'direct_payment'
-) throw new Error('ENTITY_KERNEL_FIXTURE_PAYBOOK_OUTBOX_ORDER');
+  paybookAccountTxs.length !== 2 ||
+  paybookAccountTxs[0]?.tx.type !== 'htlc_lock' ||
+  paybookAccountTxs[1]?.tx.type !== 'direct_payment'
+)
+  throw new Error('ENTITY_KERNEL_FIXTURE_PAYBOOK_OUTBOX_ORDER');
 const forwardedHtlc = paybookAccountTxs[0].tx;
 const forwardedDirect = paybookAccountTxs[1].tx;
 if (forwardedHtlc.type !== 'htlc_lock' || forwardedDirect.type !== 'direct_payment') {
   throw new Error('ENTITY_KERNEL_FIXTURE_PAYBOOK_OUTBOX_KIND');
 }
 if (
-  forwardedHtlc.data.lockId !== forwardedLockId
-  || forwardedHtlc.data.timelock !== 190_000n
-  || forwardedHtlc.data.revealBeforeHeight !== 997
-) throw new Error('ENTITY_KERNEL_FIXTURE_PAYBOOK_FORWARD_VALUES');
+  forwardedHtlc.data.lockId !== forwardedLockId ||
+  forwardedHtlc.data.timelock !== 190_000n ||
+  forwardedHtlc.data.revealBeforeHeight !== 997
+)
+  throw new Error('ENTITY_KERNEL_FIXTURE_PAYBOOK_FORWARD_VALUES');
 const forwardEvent = paybookCandidateEffects.find(
   effect => effect.kind === 'runtimeEvent' && effect.eventName === 'HtlcForwardAccepted',
 );
 if (
-  !forwardEvent
-  || forwardEvent.kind !== 'runtimeEvent'
-  || forwardEvent.eventName !== 'HtlcForwardAccepted'
-  || paybookCandidateEffects.length !== 1
+  !forwardEvent ||
+  forwardEvent.kind !== 'runtimeEvent' ||
+  forwardEvent.eventName !== 'HtlcForwardAccepted' ||
+  paybookCandidateEffects.length !== 1
 ) {
   throw new Error('ENTITY_KERNEL_FIXTURE_PAYBOOK_EVENT');
 }
 const canonicalRoute = paybookWorkingState.paybook.entries.get(HASHLOCK);
 if (!canonicalRoute) throw new Error('ENTITY_KERNEL_FIXTURE_PAYBOOK_ROUTE');
-const paybookProposal = [{
-  accountId: NEXT,
-  txDigests: paybookAccountTxs.map(row => txDigest(row.tx)),
-}];
-const paybookOutputs = [{
-  kind: 'htlcForwardAccepted',
-  entityId: String(forwardEvent.data['entityId']),
-  hashlock: String(forwardEvent.data['hashlock']),
-}];
+const paybookProposal = [
+  {
+    accountId: NEXT,
+    txDigests: paybookAccountTxs.map(row => txDigest(row.tx)),
+  },
+];
+const paybookOutputs = [
+  {
+    kind: 'htlcForwardAccepted',
+    entityId: String(forwardEvent.data['entityId']),
+    hashlock: String(forwardEvent.data['hashlock']),
+  },
+];
 const paybookForwardCanonicalEntity = canonicalEntityEvidence(paybookWorkingState);
 
 const finalEnvelope = {
@@ -803,9 +782,7 @@ await applyCommittedHtlcLockFollowup(
       ...paybookInfraContext,
       htlc: { version: 1, entries: [finalPrepared], originated: [] },
     },
-    preparedHtlcEntriesByBinding: new Map([
-      [`${finalFrame.stateHash}:${FINAL_HASHLOCK}`, finalPrepared],
-    ]),
+    preparedHtlcEntriesByBinding: new Map([[`${finalFrame.stateHash}:${FINAL_HASHLOCK}`, finalPrepared]]),
     consumedPreparedHtlcBindings: new Set<string>(),
   },
   finalInboundHtlc,
@@ -815,10 +792,11 @@ await applyCommittedHtlcLockFollowup(
 );
 const finalResolve = finalPreparedAccountTxs[0]?.tx;
 if (
-  finalPreparedAccountTxs.length !== 1
-  || finalResolve?.type !== 'htlc_resolve'
-  || finalResolve.data.outcome !== 'secret'
-) throw new Error('ENTITY_KERNEL_FIXTURE_FINAL_RESOLVE');
+  finalPreparedAccountTxs.length !== 1 ||
+  finalResolve?.type !== 'htlc_resolve' ||
+  finalResolve.data.outcome !== 'secret'
+)
+  throw new Error('ENTITY_KERNEL_FIXTURE_FINAL_RESOLVE');
 const committedResolveFrame: AccountFrame = {
   ...finalFrame,
   height: 2,
@@ -853,13 +831,14 @@ const finalReceivedEffect = finalCandidateEffects.find(
   effect => effect.kind === 'runtimeEvent' && effect.eventName === 'HtlcReceived',
 );
 if (
-  !finalReceivedEffect
-  || finalReceivedEffect.kind !== 'runtimeEvent'
-  || finalReceivedEffect.eventName !== 'HtlcReceived'
-  || finalCandidateEffects.length !== 1
-  || finalPostAccountTxs.length !== 0
-  || finalWorkingState.paybook.entries.size !== 0
-) throw new Error('ENTITY_KERNEL_FIXTURE_FINAL_COMMIT');
+  !finalReceivedEffect ||
+  finalReceivedEffect.kind !== 'runtimeEvent' ||
+  finalReceivedEffect.eventName !== 'HtlcReceived' ||
+  finalCandidateEffects.length !== 1 ||
+  finalPostAccountTxs.length !== 0 ||
+  finalWorkingState.paybook.entries.size !== 0
+)
+  throw new Error('ENTITY_KERNEL_FIXTURE_FINAL_COMMIT');
 const finalOutputs = [{ kind: 'htlcReceived', ...finalReceivedEffect.data }];
 
 const fixture = {
@@ -890,8 +869,8 @@ const fixture = {
     paybookRoot: paybookDigest(hubState),
     orderbookRoot: digest(orderbookProjection),
     orderedOutboxDigest: digest(outboxProjection),
-    makerResolveDigest: proposalWork.find((row) => row.accountId === MAKER)?.txDigests[0],
-    takerResolveDigest: proposalWork.find((row) => row.accountId === TAKER)?.txDigests[0],
+    makerResolveDigest: proposalWork.find(row => row.accountId === MAKER)?.txDigests[0],
+    takerResolveDigest: proposalWork.find(row => row.accountId === TAKER)?.txDigests[0],
     tradeCount: finalBook.tradeCount,
     tradeQtyLots: finalBook.tradeQtySum.toString(),
     eventHash: finalBook.eventHash.toString(),
@@ -908,10 +887,9 @@ const fixture = {
   sameJPartialMatch: {
     orderbookRoot: digest(partialOrderbookProjection),
     orderedOutboxDigest: digest(partialOutboxProjection),
-    makerResolveDigest: partialProposalWork.find((row) => row.accountId === MAKER)?.txDigests[0],
-    takerResolveDigest: partialProposalWork.find((row) => row.accountId === TAKER)?.txDigests[0],
-    remainingMakerQtyLots: partialBook.orders
-      .get(`${MAKER}:${partialMaker.offerId}`)?.qtyLots.toString(),
+    makerResolveDigest: partialProposalWork.find(row => row.accountId === MAKER)?.txDigests[0],
+    takerResolveDigest: partialProposalWork.find(row => row.accountId === TAKER)?.txDigests[0],
+    remainingMakerQtyLots: partialBook.orders.get(`${MAKER}:${partialMaker.offerId}`)?.qtyLots.toString(),
     bidPagesRoot: partialBook.bidPages.rootHash(),
     askPagesRoot: partialBook.askPages.rootHash(),
     bookCommitmentHash: computeBookCommitmentHash(partialBook),

@@ -1,11 +1,26 @@
+import { catalogTokenRegistry } from '../../helpers/j-replica';
 import { describe, expect, test } from 'bun:test';
 
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claims/j-claim-accumulator';
 
-import { createBook, applyCommand, getBestAsk, getBestBid, getBookOrder, getBookSideLevels } from '../../../swapbook/core';
+import {
+  createBook,
+  applyCommand,
+  getBestAsk,
+  getBestBid,
+  getBookOrder,
+  getBookSideLevels,
+} from '../../../swapbook/core';
 import { commitBookOverlay, setBookPageTree } from '../../../swapbook/book-overlay';
 
-import { getStaticSwapTokenDimensions, getSwapExactQuoteLotMultipleAtPriceForDimensions, getSwapLotScale, ORDERBOOK_PRICE_SCALE, quoteAmountAtPrice, SWAP_LOT_SCALE } from '../../../swapbook/types';
+import {
+  getStaticSwapTokenDimensions,
+  getSwapExactQuoteLotMultipleAtPriceForDimensions,
+  getSwapLotScale,
+  ORDERBOOK_PRICE_SCALE,
+  quoteAmountAtPrice,
+  SWAP_LOT_SCALE,
+} from '../../../swapbook/types';
 
 import { removeCrossJurisdictionBookOrderByRouteId } from '../../../swapbook/cross-j';
 
@@ -13,12 +28,10 @@ import { processOrderbookCancels, processOrderbookSwaps } from '../../../entity/
 
 import { buildCrossMarketOfferFromBookOrder } from '../../../entity/tx/handlers/account/orderbook/helpers';
 
-
 import { handleSwapResolve } from '../../../account/tx/handlers/swap/resolve/index';
 
 import { createEmptyEnv } from '../../../runtime';
 import { publishEntityCandidateEffects } from '../../../runtime/observability/env-events';
-
 
 import {
   deriveCanonicalSwapFillRatio,
@@ -68,8 +81,12 @@ const withStaticDimensions = <T extends { giveTokenId: number; wantTokenId: numb
 const processCommittedOrderbookSwaps = (
   state: Parameters<typeof processOrderbookSwaps>[0],
   offers: NormalizedOrderbookOffer[],
-  options?: Parameters<typeof processOrderbookSwaps>[2],
-) => processOrderbookSwaps(state, offers.map(withStaticDimensions).map(markWorkingOrderbookOffer), options);
+  options?: Omit<Parameters<typeof processOrderbookSwaps>[2], 'tokenRegistry'>,
+) =>
+  processOrderbookSwaps(state, offers.map(withStaticDimensions).map(markWorkingOrderbookOffer), {
+    tokenRegistry: catalogTokenRegistry,
+    ...options,
+  });
 
 function makeAccountMachine(input: SwapOffer | readonly SwapOffer[]): AccountReplica {
   const offers = (Array.isArray(input) ? input : [input]).map(withStaticDimensions).map(offer =>
@@ -78,8 +95,14 @@ function makeAccountMachine(input: SwapOffer | readonly SwapOffer[]): AccountRep
           ...offer,
           crossJurisdiction: {
             ...offer.crossJurisdiction,
-            sourceDisputeConfig: offer.crossJurisdiction.sourceDisputeConfig ?? { leftResponseSeconds: 10, rightResponseSeconds: 10 },
-            targetDisputeConfig: offer.crossJurisdiction.targetDisputeConfig ?? { leftResponseSeconds: 10, rightResponseSeconds: 10 },
+            sourceDisputeConfig: offer.crossJurisdiction.sourceDisputeConfig ?? {
+              leftResponseSeconds: 10,
+              rightResponseSeconds: 10,
+            },
+            targetDisputeConfig: offer.crossJurisdiction.targetDisputeConfig ?? {
+              leftResponseSeconds: 10,
+              rightResponseSeconds: 10,
+            },
           },
         }
       : offer,
@@ -111,7 +134,7 @@ function makeAccountMachine(input: SwapOffer | readonly SwapOffer[]): AccountRep
       watchSeed: `0x${'11'.repeat(32)}`,
       deltas,
       locks: new Map(),
-      swapOffers: new Map(offers.map((offer) => [offer.offerId, offer])),
+      swapOffers: new Map(offers.map(offer => [offer.offerId, offer])),
       requestedRebalance: new Map(),
       requestedRebalanceFeeState: new Map(),
       leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
@@ -149,7 +172,7 @@ function makeAccountMachine(input: SwapOffer | readonly SwapOffer[]): AccountRep
 /** See part 1: projection-only fixtures still use the canonical AccountReplica shape. */
 function makeAccountIndex(offerIds: readonly string[]): AccountReplica {
   return makeAccountMachine(
-    offerIds.map((offerId) => ({
+    offerIds.map(offerId => ({
       offerId,
       makerIsLeft: false,
       fromEntity: HUB_ENTITY,
@@ -434,10 +457,7 @@ describe('orderbook matching execution mapping', () => {
     const entityState = {
       entityId: HUB_ENTITY,
       accounts: new Map([
-        [
-          MAKER_ACCOUNT,
-          makeAccountMachine([makerOfferA, makerOfferB]),
-        ],
+        [MAKER_ACCOUNT, makeAccountMachine([makerOfferA, makerOfferB])],
         [TAKER_ACCOUNT, makeAccountMachine([])],
       ]),
       orderbookExt: {
@@ -752,10 +772,7 @@ describe('orderbook matching execution mapping', () => {
     const entityState = {
       entityId: HUB_ENTITY,
       accounts: new Map([
-        [
-          MAKER_ACCOUNT,
-          makeAccountMachine([makerOffer]),
-        ],
+        [MAKER_ACCOUNT, makeAccountMachine([makerOffer])],
         [TAKER_ACCOUNT, makeAccountMachine([])],
       ]),
       orderbookExt: {
@@ -809,26 +826,30 @@ describe('orderbook matching execution mapping', () => {
       maxOrders: 10_000,
       stpPolicy: 1,
     });
-    book = commitBookOverlay(applyCommand(book, {
-      kind: 0,
-      ownerId: ALICE_ACCOUNT,
-      orderId: ALICE_ACCOUNT + ':offer-cancel',
-      side: 1,
-      tif: 0,
-      postOnly: false,
-      priceTicks: 1000n,
-      qtyLots: 1n,
-    }).state);
-    book = commitBookOverlay(applyCommand(book, {
-      kind: 0,
-      ownerId: ALICE_ACCOUNT,
-      orderId: ALICE_ACCOUNT + ':offer-cancel-2',
-      side: 1,
-      tif: 0,
-      postOnly: false,
-      priceTicks: 2000n,
-      qtyLots: 1n,
-    }).state);
+    book = commitBookOverlay(
+      applyCommand(book, {
+        kind: 0,
+        ownerId: ALICE_ACCOUNT,
+        orderId: ALICE_ACCOUNT + ':offer-cancel',
+        side: 1,
+        tif: 0,
+        postOnly: false,
+        priceTicks: 1000n,
+        qtyLots: 1n,
+      }).state,
+    );
+    book = commitBookOverlay(
+      applyCommand(book, {
+        kind: 0,
+        ownerId: ALICE_ACCOUNT,
+        orderId: ALICE_ACCOUNT + ':offer-cancel-2',
+        side: 1,
+        tif: 0,
+        postOnly: false,
+        priceTicks: 2000n,
+        qtyLots: 1n,
+      }).state,
+    );
 
     const entityState = {
       entityId: HUB_ENTITY,
@@ -944,7 +965,9 @@ describe('orderbook matching execution mapping', () => {
       } as any,
     } as any;
 
-    const result = processOrderbookCancels(entityState, [{ accountId: ALICE_ACCOUNT, offerId: 'offer-cancel-pending' }]);
+    const result = processOrderbookCancels(entityState, [
+      { accountId: ALICE_ACCOUNT, offerId: 'offer-cancel-pending' },
+    ]);
     expect(result.accountTxs).toHaveLength(0);
   });
 

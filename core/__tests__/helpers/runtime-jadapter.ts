@@ -21,7 +21,7 @@ export const startRuntimeAdapterRpc = async () => {
   const anvil = await startAnvil({ chainId: 31337, port });
   try {
     await waitForRpcReady(rpcUrl);
-    return { rpcUrl, close: () => stopAnvil(anvil, false) };
+    return { rpcUrl, child: anvil.child, close: () => stopAnvil(anvil, false) };
   } catch (error) {
     await stopAnvil(anvil, false);
     throw error;

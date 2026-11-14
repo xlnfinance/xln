@@ -1,32 +1,20 @@
-import { haltRuntimeFailure } from "../../../../../protocol/errors/failure-taxonomy";
+import { haltRuntimeFailure } from '../../../../../protocol/errors/failure-taxonomy';
 
 import type { EntityState } from '../../../../types';
-import {
-  type BookState,
-  type OrderbookExtState,
-} from '../../../../../swapbook';
+import { type BookState, type OrderbookExtState } from '../../../../../swapbook';
 import { createStructuredLogger } from '../../../../../support/logger';
 import { type WorkingOrderbookOffer } from '../../../../../swapbook/swap-execution';
 import { type CrossJurisdictionFillInstruction } from '../../../../../extensions/cross-j/orderbook';
-import {
-  type AccountTxTarget,
-} from './queue';
+import { type AccountTxTarget } from './queue';
 import type { MatchResult } from './offers';
 import { sortSwapOffersForOrderbook } from '../../../../../swapbook/swap-execution';
-import {
-  splitWorkingOrderbookOffers,
-  type OrderbookProcessOptions,
-} from './helpers';
+import { splitWorkingOrderbookOffers, type OrderbookProcessOptions } from './helpers';
 import { finalizeCrossOrderbookFills } from './cross/fills';
 import { crossBookQtyLots } from './cross/book';
 import { processCrossOrderbookOffer } from './cross/offer';
 import { createCrossOrderbookPass } from './cross/pass';
 import type { CrossOrderbookProcessInput } from './cross/types';
-import {
-  createSameOrderbookPass,
-  zeroFillCancelTotal,
-  type SameOrderbookProcessInput,
-} from './same/pass';
+import { createSameOrderbookPass, zeroFillCancelTotal, type SameOrderbookProcessInput } from './same/pass';
 import { processSameOrderbookOffer, resumeCrossedSameOrderbookPair } from './same/offer';
 
 const orderbookSameLog = createStructuredLogger('orderbook.same');
@@ -45,9 +33,7 @@ const finalBookUpdates = (
   return Array.from(byPair, ([pairId, book]) => ({ pairId, book }));
 };
 
-const processCrossJurisdictionOrderbookOffers = (
-  input: CrossOrderbookProcessInput,
-): void => {
+const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookProcessInput): void => {
   const pass = createCrossOrderbookPass(input);
   for (const offer of input.crossJurisdictionSwapOffers) {
     processCrossOrderbookOffer(pass, offer);
@@ -76,9 +62,9 @@ const processSameAccountOrderbookOffers = (
     offers: input.sameAccountSwapOffers.length,
     pairSweep: pass.pairSweepCount,
     zeroFillCancels,
-    byReason: Object.fromEntries(Array.from(pass.zeroFillCancels).sort(
-      ([left], [right]) => (left < right ? -1 : left > right ? 1 : 0),
-    )),
+    byReason: Object.fromEntries(
+      Array.from(pass.zeroFillCancels).sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)),
+    ),
   });
 };
 
@@ -102,7 +88,7 @@ const processSameAccountOrderbookOffers = (
 export function processOrderbookSwaps(
   hubState: EntityState,
   swapOffers: WorkingOrderbookOffer[],
-  options: OrderbookProcessOptions = {},
+  options: OrderbookProcessOptions,
 ): MatchResult {
   const accountTxs: AccountTxTarget[] = [];
   const crossJurisdictionFills: CrossJurisdictionFillInstruction[] = [];
@@ -125,7 +111,10 @@ export function processOrderbookSwaps(
   // row is never refreshed from route/admission data: the account swapOffer
   // or admitted route must validate the existing row exactly.
   const rejectInvalidCrossOffer = (accountId: string, offerId: string, reason: string): never => {
-    throw haltRuntimeFailure("ORDERBOOK_LIVE_PROJECTION_REJECT", `ORDERBOOK_LIVE_PROJECTION_REJECT: account=${accountId} offer=${offerId} reason=${reason}`);
+    throw haltRuntimeFailure(
+      'ORDERBOOK_LIVE_PROJECTION_REJECT',
+      `ORDERBOOK_LIVE_PROJECTION_REJECT: account=${accountId} offer=${offerId} reason=${reason}`,
+    );
   };
   processCrossJurisdictionOrderbookOffers({
     ...(options.candidateEffects ? { candidateEffects: options.candidateEffects } : {}),
@@ -139,17 +128,21 @@ export function processOrderbookSwaps(
     queuedSwapResolutions,
     rejectInvalidCrossOffer,
   });
-  processSameAccountOrderbookOffers({
-    hubState,
-    ext,
-    sameAccountSwapOffers,
-    minTradeSize,
-    swapTakerFeeBps,
-    bookCache,
-    bookUpdates,
-    accountTxs,
-    queuedSwapResolutions,
-  }, options.resumeSamePairIds ?? []);
+  processSameAccountOrderbookOffers(
+    {
+      hubState,
+      ext,
+      sameAccountSwapOffers,
+      tokenDecimals: new Map(options.tokenRegistry.map(token => [token.tokenId, token.decimals])),
+      minTradeSize,
+      swapTakerFeeBps,
+      bookCache,
+      bookUpdates,
+      accountTxs,
+      queuedSwapResolutions,
+    },
+    options.resumeSamePairIds ?? [],
+  );
 
   return {
     accountTxs,

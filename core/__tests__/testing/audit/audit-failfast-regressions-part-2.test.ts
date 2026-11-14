@@ -264,6 +264,7 @@ import {
   isProposedAccountFrame,
   proposeAccountFrameMessage,
 } from '../../../account/consensus/result';
+import { catalogTokenRegistry } from '../../helpers/j-replica';
 
 const makeSingleSignerConfig = (): EntityState['config'] => ({
   mode: 'proposer-based',
@@ -379,6 +380,7 @@ const attachSigningReplica = (env: ReturnType<typeof createEmptyEnv>, entityId: 
         account: hex20('98'),
         deltaTransformer: hex20('99'),
       },
+      tokenRegistry: catalogTokenRegistry,
       blockNumber: 0n,
       stateRoot: null,
       mempool: [],

@@ -2,12 +2,15 @@ import { assertTypeScriptAccountExecution } from '../config/account-execution';
 import { createStructuredLogger } from '../../support/logger';
 import type { TrustedJurisdictionRpcBinding } from './j-adapter-restore';
 import type { RuntimeReplica } from '../types';
+import type { ReplayOptions } from '../../storage/recovery/journal/replay';
 
 const runtimeLog = createStructuredLogger('runtime');
 
 export type RuntimeLoadOptions = {
   fromSnapshotHeight?: number;
   trustedJurisdictionRpcBindings?: readonly TrustedJurisdictionRpcBinding[];
+  tolerateUnreachableJurisdictions?: boolean;
+  prepareLocalSigners?: ReplayOptions['prepareLocalSigners'];
 };
 
 export type RuntimeLiveRestoreDeps = {
@@ -15,11 +18,12 @@ export type RuntimeLiveRestoreDeps = {
     runtimeId?: string | null,
     runtimeSeed?: string | null,
     fromSnapshotHeight?: number,
-    options?: Record<string, never>,
+    options?: ReplayOptions,
   ): Promise<{ env: RuntimeReplica } | null>;
   rehydrate(
     env: RuntimeReplica,
     trustedJurisdictionRpcBindings?: readonly TrustedJurisdictionRpcBinding[],
+    tolerateUnreachableJurisdictions?: boolean,
   ): Promise<void>;
   registerCommittedSingleSignerWallets(env: RuntimeReplica): void;
 };
@@ -35,19 +39,19 @@ export const loadLiveRuntimeFromDB = async (
     const snapshotHeight = Number.isFinite(options?.fromSnapshotHeight)
       ? Math.floor(Number(options?.fromSnapshotHeight))
       : undefined;
-    const restored = await deps.loadByReplay(runtimeId, runtimeSeed, snapshotHeight, {});
+    const restored = await deps.loadByReplay(runtimeId, runtimeSeed, snapshotHeight, {
+      ...(options?.prepareLocalSigners ? { prepareLocalSigners: options.prepareLocalSigners } : {}),
+    });
     const env = restored?.env ?? null;
     if (!env) return null;
 
-    await deps.rehydrate(env, options?.trustedJurisdictionRpcBindings);
+    await deps.rehydrate(env, options?.trustedJurisdictionRpcBindings, options?.tolerateUnreachableJurisdictions);
     deps.registerCommittedSingleSignerWallets(env);
     // Keep the WAL-proven flat outbox. Runtime republishes it through the same
     // writer when recipients become ready; no separate recovery queue exists.
     return env;
   } catch (error) {
-    const message = error instanceof Error
-      ? `${error.name}: ${error.message}`
-      : String(error);
+    const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
     runtimeLog.error('load_env_from_db.failed', { error: message });
     throw error;
   }

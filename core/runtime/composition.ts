@@ -9,46 +9,30 @@ import type { EntityInput } from '../entity/types';
 import type { RuntimeReplica } from './types';
 import { createPersistenceQueries } from '../storage/queries';
 import { createRuntimeStorageApi } from '../storage/runtime-storage';
-import { rehydrateRestoredRuntimeInfra, type TrustedJurisdictionRpcBinding } from './recovery/j-adapter-restore';
+import { rehydrateRestoredRuntimeInfra } from './recovery/j-adapter-restore';
 import { createRuntimeLoopApi } from './loop/loop.ts';
 import { createRuntimeRecoveryApi } from '../storage/recovery/restore';
 import { createRuntimeStateApi } from './replica/state-create';
 import { loadGossipProfilesFromInfraDb } from './envelope/gossip-store';
 import { ensureRuntimeInfrastructure } from './envelope/replica-envelope';
 import { withStorageConsistentRead } from '../storage/runtime-dbs';
-import {
-  createRuntimeCommandApi,
-} from './command/api';
-import {
-  runtimeInputHasQueuedWork,
-} from './frame/transaction';
-import {
-  admitAtomicCrossJAccountInputs,
-} from './frame/cross-j/atomic-admission';
+import { createRuntimeCommandApi } from './command/api';
+import { runtimeInputHasQueuedWork } from './frame/transaction';
+import { admitAtomicCrossJAccountInputs } from './frame/cross-j/atomic-admission';
 import { createRuntimeInputReducer } from './frame/intake/reducer';
 import { createRuntimeProcessor } from './frame/process';
 import { clearRuntimeDatabases } from './envelope/storage-admin';
-import { restoreRuntimeFromRecording,
-  type RecoveryArchiveImportOptions } from '../storage/recovery/bundle/import';
-import { loadLiveRuntimeFromDB } from './recovery/live-restore';
-import {
-  bootstrapRuntime,
-  type RuntimeCreationOptions,
-  type RuntimeLocalSigner,
-} from './replica/bootstrap';
-import {
-  notifyRuntimeStateChanged,
-} from './frame/notifications';
+import { restoreRuntimeFromRecording, type RecoveryArchiveImportOptions } from '../storage/recovery/bundle/import';
+import { loadLiveRuntimeFromDB, type RuntimeLoadOptions } from './recovery/live-restore';
+import { bootstrapRuntime, type RuntimeCreationOptions, type RuntimeLocalSigner } from './replica/bootstrap';
+import { notifyRuntimeStateChanged } from './frame/notifications';
 
 export { admitAtomicCrossJAccountInputs };
 export { quoteHtlcPaymentRoute } from '../pathfinding/htlc-quote';
 
 let processRuntimeImpl: ReturnType<typeof createRuntimeProcessor> | undefined;
 
-export const processRuntime = async (
-  env: RuntimeReplica,
-  inputs?: EntityInput[],
-): Promise<RuntimeReplica> => {
+export const processRuntime = async (env: RuntimeReplica, inputs?: EntityInput[]): Promise<RuntimeReplica> => {
   if (!processRuntimeImpl) throw new Error('RUNTIME_PROCESSOR_NOT_INITIALIZED');
   return processRuntimeImpl(env, inputs);
 };
@@ -184,22 +168,20 @@ const applyRuntimeInput = createRuntimeInputReducer({
 
 export type { RuntimeCreationOptions, RuntimeLocalSigner };
 
-const main = (
-  runtimeSeedOverride?: string | null,
-  options?: RuntimeCreationOptions,
-): Promise<RuntimeReplica> => bootstrapRuntime({
-  createRuntime: createEmptyEnv,
-  loadRuntime: loadEnvFromDB,
-  loadGossipProfiles: env => loadGossipProfilesFromInfraDb(env, infraGossipDbAccess),
-  startRuntimeLoop,
-}, runtimeSeedOverride, options);
+const main = (runtimeSeedOverride?: string | null, options?: RuntimeCreationOptions): Promise<RuntimeReplica> =>
+  bootstrapRuntime(
+    {
+      createRuntime: createEmptyEnv,
+      loadRuntime: loadEnvFromDB,
+      loadGossipProfiles: env => loadGossipProfilesFromInfraDb(env, infraGossipDbAccess),
+      startRuntimeLoop,
+    },
+    runtimeSeedOverride,
+    options,
+  );
 
 // Clear database for a specific runtime and return a fresh env
-export {
-  applyRuntimeInput,
-  main,
-  assertBrowserVMJurisdiction,
-};
+export { applyRuntimeInput, main, assertBrowserVMJurisdiction };
 
 // Runtime is a pure library - no auto-execution side effects.
 // Browser and server entrypoints call xln.main() explicitly.
@@ -314,33 +296,53 @@ export const {
 export const loadEnvFromDB = async (
   runtimeId?: string | null,
   runtimeSeed?: string | null,
-  options?: {
-    fromSnapshotHeight?: number;
-    trustedJurisdictionRpcBindings?: readonly TrustedJurisdictionRpcBinding[];
-  },
-): Promise<RuntimeReplica | null> => loadLiveRuntimeFromDB({
-  loadByReplay: loadEnvFromStorageByReplay,
-  rehydrate: (env, trustedJurisdictionRpcBindings) =>
-    rehydrateRestoredRuntimeInfra(env, {
-      loadGossipProfiles: targetEnv =>
-        loadGossipProfilesFromInfraDb(targetEnv, infraGossipDbAccess),
-      assertPersistedContractConfigReady,
-      assertBrowserVMJurisdiction,
-      ...(trustedJurisdictionRpcBindings ? { trustedJurisdictionRpcBindings } : {}),
-  }),
-  registerCommittedSingleSignerWallets,
-}, runtimeId, runtimeSeed, options);
+  options?: RuntimeLoadOptions,
+): Promise<RuntimeReplica | null> =>
+  loadLiveRuntimeFromDB(
+    {
+      loadByReplay: loadEnvFromStorageByReplay,
+      rehydrate: (env, trustedJurisdictionRpcBindings, tolerateUnreachableJurisdictions) =>
+        rehydrateRestoredRuntimeInfra(env, {
+          loadGossipProfiles: targetEnv => loadGossipProfilesFromInfraDb(targetEnv, infraGossipDbAccess),
+          assertPersistedContractConfigReady,
+          assertBrowserVMJurisdiction,
+          ...(trustedJurisdictionRpcBindings ? { trustedJurisdictionRpcBindings } : {}),
+          ...(tolerateUnreachableJurisdictions ? { tolerateUnreachableJurisdictions } : {}),
+        }),
+      registerCommittedSingleSignerWallets,
+    },
+    runtimeId,
+    runtimeSeed,
+    options,
+  );
 
 export const importRuntimeRecoveryRecording = (
   recording: import('../storage/recovery/bundle/types').RuntimeRecording,
   runtimeSeed: string,
   options?: RecoveryArchiveImportOptions,
-): Promise<RuntimeReplica> => restoreRuntimeFromRecording({
-  createEmptyEnv, restoreEnvFromRecoveryBundles, persistRestoredEnvToDB,
-  replayRecoveryFrameJournals, saveEnvToDB, readPersistedFrameJournal, loadEnvFromDB,
-  closeRuntimeDb, closeInfraDb, getRuntimeWalDb, tryOpenRuntimeWalDb, tryOpenStorageDb,
-  getStorageDb, getInfraDb, tryOpenInfraDb: runtimeLoopApi.tryOpenInfraDb,
-}, recording, runtimeSeed, options);
+): Promise<RuntimeReplica> =>
+  restoreRuntimeFromRecording(
+    {
+      createEmptyEnv,
+      restoreEnvFromRecoveryBundles,
+      persistRestoredEnvToDB,
+      replayRecoveryFrameJournals,
+      saveEnvToDB,
+      readPersistedFrameJournal,
+      loadEnvFromDB,
+      closeRuntimeDb,
+      closeInfraDb,
+      getRuntimeWalDb,
+      tryOpenRuntimeWalDb,
+      tryOpenStorageDb,
+      getStorageDb,
+      getInfraDb,
+      tryOpenInfraDb: runtimeLoopApi.tryOpenInfraDb,
+    },
+    recording,
+    runtimeSeed,
+    options,
+  );
 
 export const clearDB = async (env?: RuntimeReplica): Promise<void> => {
   const targetEnv = env ?? createEmptyEnv(null);

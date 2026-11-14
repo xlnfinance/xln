@@ -1,5 +1,5 @@
 import { deriveSameOrderbookPriceBandBounds } from '../../../../../../swapbook/price-band';
-import { haltRuntimeFailure } from "../../../../../../protocol/errors/failure-taxonomy";
+import { haltRuntimeFailure } from '../../../../../../protocol/errors/failure-taxonomy';
 
 import type { EntityState } from '../../../../../types';
 import {
@@ -21,7 +21,7 @@ import type {
   NormalizedOrderbookOffer,
   SameJurisdictionWorkingOrderbookOffer,
 } from '../../../../../../swapbook/swap-execution';
-import { normalizeSwapOfferForOrderbook , swapKey } from '../../../../../../swapbook/swap-execution';
+import { normalizeSwapOfferForOrderbook, swapKey } from '../../../../../../swapbook/swap-execution';
 import {
   hasQueuedSwapResolveForEntityState,
   queueUniqueSwapResolveForEntityState,
@@ -29,10 +29,7 @@ import {
   type SwapResolveEnqueueData,
 } from '../queue';
 import { resolveStoredOfferEntityRefs } from '../offers';
-import {
-  parseNamespacedOrderId,
-  resolvePairBandReference,
-} from '../helpers';
+import { parseNamespacedOrderId, resolvePairBandReference } from '../helpers';
 
 const orderbookSameLog = createStructuredLogger('orderbook.same');
 
@@ -40,6 +37,7 @@ export type SameOrderbookProcessInput = {
   hubState: EntityState;
   ext: OrderbookExtState;
   sameAccountSwapOffers: SameJurisdictionWorkingOrderbookOffer[];
+  tokenDecimals: ReadonlyMap<number, number>;
   minTradeSize: bigint;
   swapTakerFeeBps: number;
   bookCache: Map<string, BookState>;
@@ -56,9 +54,7 @@ export type SameOrderbookPass = SameOrderbookProcessInput & {
   zeroFillCancels: Map<string, number>;
 };
 
-export const createSameOrderbookPass = (
-  input: SameOrderbookProcessInput,
-): SameOrderbookPass => ({
+export const createSameOrderbookPass = (input: SameOrderbookProcessInput): SameOrderbookPass => ({
   ...input,
   orderbookOfferMeta: new Map(),
   suspendedSameOrderIds: new Set(),
@@ -117,10 +113,7 @@ export const buildLiveSameOfferMeta = (
   pass: SameOrderbookPass,
   namespacedOrderId: string,
 ): NormalizedOrderbookOffer | null => {
-  const { accountId, offerId } = parseNamespacedOrderId(
-    namespacedOrderId,
-    'ORDERBOOK_MALFORMED_BOOK_ORDER',
-  );
+  const { accountId, offerId } = parseNamespacedOrderId(namespacedOrderId, 'ORDERBOOK_MALFORMED_BOOK_ORDER');
   const account = pass.hubState.accounts.get(accountId);
   const liveOffer = account?.state.swapOffers?.get(offerId);
   if (!account || !liveOffer || liveOffer.crossJurisdiction) return null;
@@ -155,18 +148,21 @@ export const classifySameBookMaker = (
   const { accountId } = parseNamespacedOrderId(order.orderId, 'ORDERBOOK_MALFORMED_BOOK_ORDER');
   const account = pass.hubState.accounts.get(accountId);
   if (!account) {
-    throw haltRuntimeFailure('ORDERBOOK_SAME_SNAPSHOT_MISSING',
-      `ORDERBOOK_SAME_SNAPSHOT_MISSING: pair=${pairId} order=${order.orderId}`);
+    throw haltRuntimeFailure(
+      'ORDERBOOK_SAME_SNAPSHOT_MISSING',
+      `ORDERBOOK_SAME_SNAPSHOT_MISSING: pair=${pairId} order=${order.orderId}`,
+    );
   }
   if (account.status !== undefined && account.status !== 'active') return 'cancel';
   const meta = pass.orderbookOfferMeta.get(order.orderId) ?? buildLiveSameOfferMeta(pass, order.orderId);
   if (!meta) {
-    throw haltRuntimeFailure('ORDERBOOK_SAME_SNAPSHOT_MISSING',
-      `ORDERBOOK_SAME_SNAPSHOT_MISSING: pair=${pairId} order=${order.orderId}`);
+    throw haltRuntimeFailure(
+      'ORDERBOOK_SAME_SNAPSHOT_MISSING',
+      `ORDERBOOK_SAME_SNAPSHOT_MISSING: pair=${pairId} order=${order.orderId}`,
+    );
   }
-  if (hasQueuedSwapResolveForEntityState(
-    pass.hubState, pass.queuedSwapResolutions, meta.accountId, meta.offerId,
-  )) return 'suspended';
+  if (hasQueuedSwapResolveForEntityState(pass.hubState, pass.queuedSwapResolutions, meta.accountId, meta.offerId))
+    return 'suspended';
   pass.orderbookOfferMeta.set(order.orderId, meta);
   const side = deriveSide(meta.giveTokenId, meta.wantTokenId);
   const baseTokenDecimals = side === 1 ? meta.giveTokenDecimals : meta.wantTokenDecimals;
@@ -174,33 +170,34 @@ export const classifySameBookMaker = (
   const canonicalOwner = meta.makerIsLeft ? meta.fromEntity : meta.toEntity;
   const canonicalQtyLots = baseAmount / getSwapLotScaleForDecimals(baseTokenDecimals);
   if (
-    order.side !== side || order.priceTicks !== meta.priceTicks ||
-    order.ownerId !== canonicalOwner || order.qtyLots !== canonicalQtyLots
+    order.side !== side ||
+    order.priceTicks !== meta.priceTicks ||
+    order.ownerId !== canonicalOwner ||
+    order.qtyLots !== canonicalQtyLots
   ) {
-    throw haltRuntimeFailure('ORDERBOOK_CACHE_MISMATCH',
+    throw haltRuntimeFailure(
+      'ORDERBOOK_CACHE_MISMATCH',
       `ORDERBOOK_CACHE_MISMATCH: pair=${pairId} order=${order.orderId} ` +
-      `storedOwner=${order.ownerId} canonicalOwner=${canonicalOwner} ` +
-      `storedSide=${order.side} canonicalSide=${side} ` +
-      `storedPrice=${order.priceTicks.toString()} canonicalPrice=${meta.priceTicks.toString()} ` +
-      `storedQtyLots=${order.qtyLots.toString()} canonicalQtyLots=${canonicalQtyLots.toString()}`);
+        `storedOwner=${order.ownerId} canonicalOwner=${canonicalOwner} ` +
+        `storedSide=${order.side} canonicalSide=${side} ` +
+        `storedPrice=${order.priceTicks.toString()} canonicalPrice=${meta.priceTicks.toString()} ` +
+        `storedQtyLots=${order.qtyLots.toString()} canonicalQtyLots=${canonicalQtyLots.toString()}`,
+    );
   }
   return 'eligible';
 };
 
-export const containSamePairFailure = (
-  pairId: string,
-  accountId: string,
-  offerId: string,
-  message: string,
-): void => {
+export const containSamePairFailure = (pairId: string, accountId: string, offerId: string, message: string): void => {
   orderbookSameLog.debug('pair.command_failed', {
     pair: pairId,
     offer: shortOrder(offerId, 8),
     account: shortId(accountId, 8),
     error: message,
   });
-  throw haltRuntimeFailure("ORDERBOOK_PAIR_COMMAND_FAILED", `ORDERBOOK_PAIR_COMMAND_FAILED: pair=${pairId} account=${accountId} ` +
-    `offer=${offerId} error=${message}`);
+  throw haltRuntimeFailure(
+    'ORDERBOOK_PAIR_COMMAND_FAILED',
+    `ORDERBOOK_PAIR_COMMAND_FAILED: pair=${pairId} account=${accountId} ` + `offer=${offerId} error=${message}`,
+  );
 };
 
 export const sweepSamePairOutOfBandOffers = (
@@ -212,12 +209,7 @@ export const sweepSamePairOutOfBandOffers = (
 ): BookState => {
   const bestBid = getBestBid(currentBook);
   const bestAsk = getBestAsk(currentBook);
-  const { anchor, label } = resolvePairBandReference(
-    pairPolicy,
-    hasExplicitPairPolicy,
-    bestBid,
-    bestAsk,
-  );
+  const { anchor, label } = resolvePairBandReference(pairPolicy, hasExplicitPairPolicy, bestBid, bestAsk);
   if (anchor === null) return currentBook;
   const { minAllowed, maxAllowed } = deriveSameOrderbookPriceBandBounds(anchor);
   let nextBook = currentBook;
@@ -236,12 +228,15 @@ export const sweepSamePairOutOfBandOffers = (
       bandLabel: label,
       bandAnchor: anchor.toString(),
     });
-    nextBook = commitBookOverlay(applyCommand(nextBook, {
-      kind: 1,
-      ownerId: order.ownerId,
-      orderId: order.orderId,
-    }).state);
-    if (liveOffer) queueSameSwapResolve(pass, liveOffer.accountId, {
+    nextBook = commitBookOverlay(
+      applyCommand(nextBook, {
+        kind: 1,
+        ownerId: order.ownerId,
+        orderId: order.orderId,
+      }).state,
+    );
+    if (liveOffer)
+      queueSameSwapResolve(pass, liveOffer.accountId, {
         offerId: liveOffer.offerId,
         fillRatio: 0,
         cancelRemainder: true,

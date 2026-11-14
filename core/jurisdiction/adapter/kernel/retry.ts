@@ -10,14 +10,17 @@ type RetryOptions = {
   context?: string;
   factory?: (config: JAdapterConfig) => Promise<JAdapter>;
   onRetry?: (attempt: number, attempts: number, error: unknown) => void;
+  /** The owner supplied the complete EVM endpoint; operator metadata adds nothing. */
+  skipOperatorTransport?: boolean;
 };
 
 const errorText = (error: unknown): string => {
   if (error instanceof Error) {
     const code = 'code' in error ? String((error as Error & { code?: unknown }).code || '') : '';
-    const cause = 'cause' in error && (error as Error & { cause?: unknown }).cause instanceof Error
-      ? ` cause=${((error as Error & { cause?: Error }).cause as Error).message}`
-      : '';
+    const cause =
+      'cause' in error && (error as Error & { cause?: unknown }).cause instanceof Error
+        ? ` cause=${((error as Error & { cause?: Error }).cause as Error).message}`
+        : '';
     return `${error.name}: ${error.message}${code ? ` code=${code}` : ''}${cause}`;
   }
   return String(error);
@@ -45,14 +48,11 @@ const resolveAdapterTransport = async (config: JAdapterConfig): Promise<JAdapter
   return { ...config, ...transport };
 };
 
-export async function createJAdapterWithRetry(
-  config: JAdapterConfig,
-  options: RetryOptions = {},
-): Promise<JAdapter> {
+export async function createJAdapterWithRetry(config: JAdapterConfig, options: RetryOptions = {}): Promise<JAdapter> {
   const attempts = Math.max(1, Math.floor(options.attempts ?? 5));
   const baseDelayMs = Math.max(0, Math.floor(options.baseDelayMs ?? 150));
   const factory = options.factory ?? createJAdapter;
-  const effectiveConfig = await resolveAdapterTransport(config);
+  const effectiveConfig = options.skipOperatorTransport ? config : await resolveAdapterTransport(config);
   let lastError: unknown = null;
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {

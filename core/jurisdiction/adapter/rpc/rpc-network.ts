@@ -1,3 +1,5 @@
+import { assertArgument } from 'ethers';
+
 export type RpcChainIdReader = {
   send(method: string, params: readonly unknown[]): Promise<unknown>;
 };
@@ -8,10 +10,11 @@ export const readAndAssertRpcChainId = async (
 ): Promise<number> => {
   const raw = await provider.send('eth_chainId', []);
   const actualChainId = Number(BigInt(String(raw)));
-  if (actualChainId !== Number(configuredChainId)) {
-    throw new Error(
-      `[JAdapter:rpc] chainId mismatch: config=${configuredChainId} rpc=${actualChainId}. Refusing to sign/submit.`,
-    );
-  }
+  assertArgument(
+    actualChainId === Number(configuredChainId),
+    `[JAdapter:rpc] chainId mismatch: config=${configuredChainId} rpc=${actualChainId}. Refusing to sign/submit.`,
+    'chainId',
+    configuredChainId,
+  );
   return actualChainId;
 };

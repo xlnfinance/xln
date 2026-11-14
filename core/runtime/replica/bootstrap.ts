@@ -1,15 +1,12 @@
 import { assertTypeScriptAccountExecution } from '../config/account-execution';
-import {
-  deriveSignerAddressSync,
-  deriveSignerKeySync,
-  registerSignerKey,
-} from '../../account/crypto';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../account/crypto';
 import { createStructuredLogger } from '../../support/logger';
 import { attachEventEmitters } from '../observability/env-events';
 import { setRuntimeDeliveryReady } from '../envelope/p2p-lifecycle';
 import { nodeProcess, runtimeIsBrowser } from '../../support/process/runtime-process';
 import type { RuntimeReplica } from '../types';
 import type { TrustedJurisdictionRpcBinding } from '../recovery/j-adapter-restore';
+import type { RuntimeLoadOptions } from '../recovery/live-restore';
 
 const runtimeLog = createStructuredLogger('runtime');
 
@@ -21,6 +18,7 @@ export type RuntimeLocalSigner = Readonly<{
 export type RuntimeCreationOptions = Readonly<{
   trustedJurisdictionRpcBindings?: readonly TrustedJurisdictionRpcBinding[];
   localSigners?: readonly RuntimeLocalSigner[];
+  prepareLocalSigners?: RuntimeLoadOptions['prepareLocalSigners'];
   /** Cache warmup only; omitted numeric signers remain available lazily. */
   numericSignerPrewarmCount?: number;
   /**
@@ -28,6 +26,8 @@ export type RuntimeCreationOptions = Readonly<{
    * pass (setRuntimeDeliveryReady). A restored Runtime then starts behind it.
    */
   jCatchupFence?: boolean;
+  /** Owner wallets open from local state while a chain RPC is unreachable (see j-adapter-restore). */
+  tolerateUnreachableJurisdictions?: boolean;
 }>;
 
 export type RuntimeBootstrapDeps = {
@@ -35,16 +35,16 @@ export type RuntimeBootstrapDeps = {
   loadRuntime(
     runtimeId?: string | null,
     runtimeSeed?: string | null,
-    options?: Pick<RuntimeCreationOptions, 'trustedJurisdictionRpcBindings'>,
+    options?: Pick<
+      RuntimeCreationOptions,
+      'trustedJurisdictionRpcBindings' | 'tolerateUnreachableJurisdictions' | 'prepareLocalSigners'
+    >,
   ): Promise<RuntimeReplica | null>;
   loadGossipProfiles(env: RuntimeReplica): Promise<void>;
   startRuntimeLoop(env: RuntimeReplica): unknown;
 };
 
-const registerLocalRuntimeSigners = (
-  runtimeSeed: string | null,
-  signers: readonly RuntimeLocalSigner[],
-): void => {
+const registerLocalRuntimeSigners = (runtimeSeed: string | null, signers: readonly RuntimeLocalSigner[]): void => {
   if (signers.length > 0 && runtimeSeed === null) {
     throw new Error('RUNTIME_LOCAL_SIGNERS_REQUIRE_SEED');
   }
@@ -74,6 +74,8 @@ const restoreRuntimeAtBootstrap = async (
     ...(options?.trustedJurisdictionRpcBindings
       ? { trustedJurisdictionRpcBindings: options.trustedJurisdictionRpcBindings }
       : {}),
+    ...(options?.tolerateUnreachableJurisdictions ? { tolerateUnreachableJurisdictions: true } : {}),
+    ...(options?.prepareLocalSigners ? { prepareLocalSigners: options.prepareLocalSigners } : {}),
   });
   if (!env) return { env: baseEnv, restored: false };
   runtimeLog.info('main.restored', {
@@ -105,7 +107,9 @@ export const bootstrapRuntime = async (
   const numericSignerPrewarmCount = options?.numericSignerPrewarmCount;
   if (
     numericSignerPrewarmCount !== undefined &&
-    (!Number.isSafeInteger(numericSignerPrewarmCount) || numericSignerPrewarmCount < 1 || numericSignerPrewarmCount > 100)
+    (!Number.isSafeInteger(numericSignerPrewarmCount) ||
+      numericSignerPrewarmCount < 1 ||
+      numericSignerPrewarmCount > 100)
   ) {
     throw new Error(`RUNTIME_SIGNER_PREWARM_COUNT_INVALID:${String(numericSignerPrewarmCount)}`);
   }
@@ -116,6 +120,7 @@ export const bootstrapRuntime = async (
     deps,
   );
   const env = restored.env;
+  options?.prepareLocalSigners?.(env);
   attachEventEmitters(env);
   if (!restored.restored && !runtimeRestoreDisabled()) {
     await deps.loadGossipProfiles(env);
@@ -129,7 +134,8 @@ export const bootstrapRuntime = async (
     // work admitted and persisted before the restart may still propose and
     // sign. The host that asked for the fence opens it after every watcher's
     // first authenticated pass.
-    if (options?.jCatchupFence && restored.restored && env.state.eReplicas.size > 0) setRuntimeDeliveryReady(env, false);
+    if (options?.jCatchupFence && restored.restored && env.state.eReplicas.size > 0)
+      setRuntimeDeliveryReady(env, false);
     runtimeLog.info('main.loop_start_browser');
     deps.startRuntimeLoop(env);
   }

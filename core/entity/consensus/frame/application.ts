@@ -1,4 +1,4 @@
-import { haltRuntimeFailure } from "../../../protocol/errors/failure-taxonomy";
+import { haltRuntimeFailure } from '../../../protocol/errors/failure-taxonomy';
 
 /**
  * Entity consensus: validator replicas agree on entity frames, then route
@@ -17,6 +17,10 @@ import { shortHash, shortId, shortOrder } from '../../../support/logger';
 import { cumulativeMarksToPhases } from '../../../support/performance/profile';
 import { countOp } from '../../../support/performance/op-counters';
 import { getEntityFrameJRangeBudgetError } from '../../../jurisdiction/machine/range-budget';
+import {
+  getJReplicaByJurisdictionRef,
+  getJurisdictionIdentityRef,
+} from '../../../jurisdiction/machine/jurisdiction-runtime';
 import { replaceOrderbookPair, type OrderbookExtState } from '../../../swapbook';
 import {
   applyCommittedSwapCancelsToOrderbook,
@@ -29,9 +33,7 @@ import { compareStableText, safeStringify } from '../../../protocol/serializatio
 import { getNextSettlementNonce } from '../../../protocol/settlement/operations';
 import { getScheduledWakeFrameOrderError } from '../../scheduler/wake/scheduled-wake-validation';
 import { createEntityFrameCandidateState } from '../../state-clone';
-import {
-  getEntityAccountForWrite,
-} from '../../state/persistent-account-map';
+import { getEntityAccountForWrite } from '../../state/persistent-account-map';
 import { ensureEntityCollectionCandidate } from '../../state/persistent-collection-map';
 import { getAccountPerspective } from '../../../account/state/perspective';
 import { emitScopedEvents } from '../../../support/scoped-events';
@@ -42,7 +44,11 @@ import type { EntityRuntimeContext } from '../../runtime-context';
 import type { AccountConsensusContext } from '../../../account/consensus/context';
 import type { JInput } from '../../../jurisdiction/machine/input';
 import type { EntityTx } from '../../../types/entity-tx';
-import type { AccountJClaimNode, AccountJClaimNodeChanges, AccountJClaimNodeStore } from '../../../types/finance/account-j-claims';
+import type {
+  AccountJClaimNode,
+  AccountJClaimNodeChanges,
+  AccountJClaimNodeStore,
+} from '../../../types/finance/account-j-claims';
 import { getPerfMs } from '../../../support/time';
 import {
   assertRuntimeOutputAuthorization,
@@ -62,10 +68,7 @@ import {
   selectCrossJOpeningAccountProposalTxs,
 } from '../../transition/cross-j-proposer-materialization';
 import { initCrontab } from '../../scheduler';
-import {
-  applyEntityTx,
-  type ApplyEntityTxResult,
-} from '../../tx/apply';
+import { applyEntityTx, type ApplyEntityTxResult } from '../../tx/apply';
 import {
   processOrderbookCancels,
   processOrderbookSwaps,
@@ -74,25 +77,16 @@ import {
   type SwapOfferEvent,
 } from '../../tx/handlers/account';
 import { buildSettlementHankoDraft } from '../../tx/handlers/payments/settle';
-import {
-  failOriginatedPayment,
-  terminatePayment,
-} from '../../../paybook/lifecycle';
+import { failOriginatedPayment, terminatePayment } from '../../../paybook/lifecycle';
 import { MalformedEntityFrameInputError } from '../../tx/processing/invariant-errors';
 import { normalizeEntityProposalBoard } from '../../tx/processing/proposals';
 import { accountHasProposableMempool } from '../account/mempool-eligibility';
 import { applyRejectedLendingDraws, failedProposalHtlcFollowup } from '../account/failed-proposal-followups';
 import { traceAccountFlushHop } from '../../../support/performance/account-delivery-trace';
-import {
-  getProposableAccountIds,
-  getQueuedAccountIds,
-} from '../account/work-index';
+import { getProposableAccountIds, getQueuedAccountIds } from '../account/work-index';
 import { applyAccountInput } from '../../../account/consensus';
 import { requireAccountDeltaTransformerAddress } from '../../../account/consensus/helpers';
-import {
-  inboundAccountEvidenceFrameRejection,
-  resolveInboundAccount,
-} from '../../tx/handlers/account/inbound-account';
+import { inboundAccountEvidenceFrameRejection, resolveInboundAccount } from '../../tx/handlers/account/inbound-account';
 import { createAccountConsensusContext } from '../../account/account-consensus-context';
 import { getEntityFrameTxByteBudgetError } from '../frame';
 import { invalidateEntityAccountCommitment } from '../state-root';
@@ -103,15 +97,9 @@ import { applyEntityTxReturnedEffects, applyLocalAccountEffects } from './tx-eff
 import { demandSavingsRenewals } from '../../../lendbook/renewals';
 import { collectLendingWithdrawals } from '../../../lendbook/withdrawals';
 import { selectSettlementContinuation } from '../account/settlement-continuation';
-import {
-  buildChangedEntityProfileHashToSign,
-  computeEntityProfileHash,
-} from '../../profile/profile-descriptor';
+import { buildChangedEntityProfileHashToSign, computeEntityProfileHash } from '../../profile/profile-descriptor';
 
-import {
-  entityFrameProfileEnabled,
-  entityFrameSlowMs,
-} from './profile';
+import { entityFrameProfileEnabled, entityFrameSlowMs } from './profile';
 import { entityLog } from '../entity-log';
 import { admitOrderbookOfferForMatching } from '../account/orderbook-admission';
 import { applyCrossJurisdictionOrderbookFill } from '../../tx/handlers/account-cross-j-followups';
@@ -201,17 +189,14 @@ const applyNestedEntityTx = async (
   };
 };
 
-const assertEntityTxAuthorization = (
-  context: ApplyEntityTxsInOrderContext,
-  tx: EntityTx,
-): void => {
+const assertEntityTxAuthorization = (context: ApplyEntityTxsInOrderContext, tx: EntityTx): void => {
   if (isEntityCommandForbiddenTx(tx)) return;
   // Salvage is derived from certified source-dispute evidence and mirrored by
   // Runtime inside one WAL candidate. A signed user/board command is not an
   // equivalent lane: it could update one sibling or start a target dispute
   // without the source J event that authorizes the pull reveal.
   if (tx.type === 'crossJurisdictionSalvage' && !context.authorizedRuntimeOutput) {
-    throw haltRuntimeFailure("CROSS_J_SALVAGE_RUNTIME_OUTPUT_REQUIRED", 'CROSS_J_SALVAGE_RUNTIME_OUTPUT_REQUIRED');
+    throw haltRuntimeFailure('CROSS_J_SALVAGE_RUNTIME_OUTPUT_REQUIRED', 'CROSS_J_SALVAGE_RUNTIME_OUTPUT_REQUIRED');
   }
   if (context.authorizedCommand && !isIndividualEntityCommandTx(tx)) {
     throw new Error(`ENTITY_COMMAND_COLLECTIVE_ACTION_REQUIRES_PROPOSAL:${tx.type}`);
@@ -219,19 +204,12 @@ const assertEntityTxAuthorization = (
   if (context.authorizedCollective && !isCollectiveEntityActionTx(tx)) {
     throw new Error(`ENTITY_COLLECTIVE_ACTION_TX_FORBIDDEN:${tx.type}`);
   }
-  if (
-    !context.authorizedCommand &&
-    !context.authorizedCollective &&
-    !context.authorizedRuntimeOutput
-  ) {
+  if (!context.authorizedCommand && !context.authorizedCollective && !context.authorizedRuntimeOutput) {
     throw new Error(`ENTITY_COMMAND_REQUIRED:${tx.type}`);
   }
 };
 
-const collectEntityTxResult = (
-  context: ApplyEntityTxsInOrderContext,
-  result: ApplyEntityTxResult,
-): void => {
+const collectEntityTxResult = (context: ApplyEntityTxsInOrderContext, result: ApplyEntityTxResult): void => {
   context.storageChanges.push(...result.storageChanges);
   context.candidateEffects.push(...result.candidateEffects);
   for (const { hash, node } of result.accountJClaimNodeChanges?.newNodes ?? []) {
@@ -250,11 +228,7 @@ const collectEntityTxResult = (
     const accountId = work.accountId.toLowerCase();
     // This is Channel.ts's one flushable lane with an explicit force bit.
     // A later pure ACK sets false and therefore cannot trigger an ACK loop.
-    setProposableAccountForce(
-      context.proposableAccounts,
-      accountId,
-      work.force,
-    );
+    setProposableAccountForce(context.proposableAccounts, accountId, work.force);
     if (work.force) {
       const response = work.response;
       if (response === undefined) {
@@ -267,22 +241,18 @@ const collectEntityTxResult = (
     const account = result.newState.accounts.get(accountId);
     if (!account) throw new Error(`ACCOUNT_INPUT_WORK_ACCOUNT_MISSING:${accountId}`);
     if (work.force) {
-      traceAccountFlushHop(
-        'entity-response-required',
-        result.newState.entityId,
-        accountId,
-        account,
-        undefined,
-      );
+      traceAccountFlushHop('entity-response-required', result.newState.entityId, accountId, account, undefined);
     }
   }
-  context.allOutputs.push(...filterEntityFrameBroadcastContinuations(
-    context.allOutputs,
-    result.outputs,
-    result.newState.entityId,
-    context.entityTxs.some(tx => tx.type === 'j_broadcast'),
-    result.newState.jBatchState?.sentBatch !== undefined,
-  ));
+  context.allOutputs.push(
+    ...filterEntityFrameBroadcastContinuations(
+      context.allOutputs,
+      result.outputs,
+      result.newState.entityId,
+      context.entityTxs.some(tx => tx.type === 'j_broadcast'),
+      result.newState.jBatchState?.sentBatch !== undefined,
+    ),
+  );
   if (result.jOutputs) context.allJOutputs.push(...result.jOutputs);
   if (result.hashesToSign?.length) {
     for (const hashInfo of result.hashesToSign) {
@@ -382,12 +352,7 @@ async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Pro
         currentEntityState = nested.state;
         continue;
       }
-      currentEntityState = await applyRegularEntityTx(
-        context,
-        currentEntityState,
-        entityTx,
-        manualBroadcastInInput,
-      );
+      currentEntityState = await applyRegularEntityTx(context, currentEntityState, entityTx, manualBroadcastInInput);
     } catch (error) {
       // Rebind on each recursive unwind: only the outer signed command is
       // admitted to the mempool. Retaining its failing child would prevent
@@ -413,9 +378,7 @@ const materializeSettlementContinuation = async (
   if (disposition.kind === 'none' || disposition.kind === 'wait') return state;
   if (disposition.kind === 'discard') {
     state.settlementContinuations?.delete(disposition.counterpartyId);
-    addMessages(state, [
-      `Settlement continuation cleared: ${disposition.reason.replaceAll('_', ' ')}`,
-    ]);
+    addMessages(state, [`Settlement continuation cleared: ${disposition.reason.replaceAll('_', ' ')}`]);
     return state;
   }
   const nextState = await applyEntityTxsInOrder({
@@ -487,11 +450,7 @@ async function materializeDeferredSettlementApprovals(
     const account = getEntityAccountForWrite(state.accounts, accountId);
     if (!account) throw new Error(`SETTLEMENT_DEFERRED_ACCOUNT_MISSING:${accountId}`);
     const draft = buildSettlementHankoDraft(account, state, accountId, env);
-    const admission = await applyAccountInput(
-      accountConsensusContext,
-      account,
-      { kind: 'enqueue', txs: [draft.tx] },
-    );
+    const admission = await applyAccountInput(accountConsensusContext, account, { kind: 'enqueue', txs: [draft.tx] });
     if (!admission.ok || admission.admittedAccountTxCount !== 1) {
       throw new Error(`SETTLEMENT_DEFERRED_HANKO_NOT_ADMITTED:${accountId}`);
     }
@@ -513,11 +472,11 @@ const isStaleUncommittedSettlementHanko = (
   workspaceHash: string,
   expectedNonce: number,
 ): tx is SettlementHankoTx =>
-  tx.type === 'settle_transition'
-  && tx.data.kind === 'hanko'
-  && tx.data.revision === revision
-  && tx.data.workspaceHash.toLowerCase() === workspaceHash
-  && tx.data.settlementNonce !== expectedNonce;
+  tx.type === 'settle_transition' &&
+  tx.data.kind === 'hanko' &&
+  tx.data.revision === revision &&
+  tx.data.workspaceHash.toLowerCase() === workspaceHash &&
+  tx.data.settlementNonce !== expectedNonce;
 
 function refreshStaleUncommittedSettlementHankos(state: EntityState, storageChanges: RuntimeOverlayRecord[]): void {
   for (const accountId of [...getQueuedAccountIds(state)].sort(compareStableText)) {
@@ -527,7 +486,11 @@ function refreshStaleUncommittedSettlementHankos(state: EntityState, storageChan
     if (!workspace || workspace.nonceAtSign !== undefined || visible.pendingFrame) continue;
     const workspaceHash = assertCanonicalSettlementWorkspace(visible.state, workspace);
     const expectedNonce = getNextSettlementNonce(visible);
-    if (!visible.mempool.some(tx => isStaleUncommittedSettlementHanko(tx, workspace.revision, workspaceHash, expectedNonce))) {
+    if (
+      !visible.mempool.some(tx =>
+        isStaleUncommittedSettlementHanko(tx, workspace.revision, workspaceHash, expectedNonce),
+      )
+    ) {
       continue;
     }
 
@@ -546,10 +509,7 @@ function refreshStaleUncommittedSettlementHankos(state: EntityState, storageChan
       return false;
     });
     recordFrameAccountChange(storageChanges, state.entityId, accountId);
-    state.deferredAccountProposals = ensureEntityCollectionCandidate(
-      state.deferredAccountProposals,
-      value => value,
-    );
+    state.deferredAccountProposals = ensureEntityCollectionCandidate(state.deferredAccountProposals, value => value);
     const existing = state.deferredAccountProposals.get(accountId);
     if (existing && existing !== workspaceHash) {
       throw new Error(`SETTLEMENT_REFRESH_DEFERRED_CONFLICT:${accountId}:${existing}:${workspaceHash}`);
@@ -573,8 +533,8 @@ const proposeAccountFrameCandidate = async (
   scheduleAccount: (accountId: string) => void,
 ): Promise<AccountFrameProposal | undefined> => {
   const { currentEntityState: state, collectedHashes, proposableAccounts, storageChanges } = context;
-  const authorityPrepared = context.accountConsensusContext.accountAuthorityExecutionScope
-    ?.hasPreparedAccountProposal?.(accountKey) === true;
+  const authorityPrepared =
+    context.accountConsensusContext.accountAuthorityExecutionScope?.hasPreparedAccountProposal?.(accountKey) === true;
   if (!authorityPrepared && !accountHasProposableMempool(account, state)) return undefined;
   const proposal = await proposeAccountFrame(
     context.accountConsensusContext,
@@ -592,11 +552,19 @@ const proposeAccountFrameCandidate = async (
   if (isProposedAccountFrame(proposal) && proposal.hashesToSign) {
     collectedHashes.push(...proposal.hashesToSign);
   }
-  for (const { data, reason } of ('failedDirectPayments' in proposal ? proposal.failedDirectPayments : undefined) ?? []) {
-    context.candidateEffects.push({ kind: 'runtimeEvent', eventName: 'PaymentFailed', data: {
-      entityId: state.entityId, targetEntityId: data.route?.at(-1) ?? data.toEntityId,
-      tokenId: data.tokenId, amount: data.amount, reason,
-    } });
+  for (const { data, reason } of ('failedDirectPayments' in proposal ? proposal.failedDirectPayments : undefined) ??
+    []) {
+    context.candidateEffects.push({
+      kind: 'runtimeEvent',
+      eventName: 'PaymentFailed',
+      data: {
+        entityId: state.entityId,
+        targetEntityId: data.route?.at(-1) ?? data.toEntityId,
+        tokenId: data.tokenId,
+        amount: data.amount,
+        reason,
+      },
+    });
   }
   for (const { hashlock, reason } of ('failedHtlcLocks' in proposal ? proposal.failedHtlcLocks : undefined) ?? []) {
     const followup = failedProposalHtlcFollowup(state, { hashlock, reason });
@@ -617,11 +585,7 @@ const proposeAccountFrameCandidate = async (
         `HTLC_FORWARD_FAILURE_ACCOUNT_MISSING:${hashlock}:${followup.accountId}`,
       );
     }
-    const admission = await applyAccountInput(
-      context.accountConsensusContext,
-      inboundAccount,
-      followup.input,
-    );
+    const admission = await applyAccountInput(context.accountConsensusContext, inboundAccount, followup.input);
     if (!admission.ok || admission.admittedAccountTxCount === 0) {
       throw haltRuntimeFailure(
         'HTLC_FORWARD_FAILURE_RESOLVE_NOT_ADMITTED',
@@ -636,11 +600,7 @@ const proposeAccountFrameCandidate = async (
   return proposal;
 };
 
-const assertForcedAccountInputPreserved = (
-  accountKey: string,
-  required: AccountInput,
-  final: AccountInput,
-): void => {
+const assertForcedAccountInputPreserved = (accountKey: string, required: AccountInput, final: AccountInput): void => {
   const requiredAck = accountInputAck(required);
   const requiredProposal = accountInputProposal(required);
   const finalAck = accountInputAck(final);
@@ -726,10 +686,7 @@ function resolveCrossJOpeningProposalTxs(
 }
 
 async function proposePendingAccountFrames(context: ProposePendingAccountFramesContext): Promise<number> {
-  const {
-    currentEntityState,
-    proposableAccounts,
-  } = context;
+  const { currentEntityState, proposableAccounts } = context;
   const worklist = createCanonicalAccountWorklist(proposableAccounts);
   let proposedFrames = 0;
 
@@ -754,30 +711,20 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
       continue;
     }
 
-    const requiredResponse = force
-      ? context.forcedAccountInputs.get(accountKey)
-      : undefined;
+    const requiredResponse = force ? context.forcedAccountInputs.get(accountKey) : undefined;
     if (force && requiredResponse === undefined) {
       throw new Error(`ACCOUNT_FORCED_RESPONSE_MISSING:${accountKey}:${account.currentHeight}`);
     }
-    traceAccountFlushHop(
-      'entity-flush-start',
-      currentEntityState.entityId,
-      accountKey,
-      account,
-      requiredResponse,
-      { proposable: accountHasProposableMempool(account, currentEntityState) },
-    );
+    traceAccountFlushHop('entity-flush-start', currentEntityState.entityId, accountKey, account, requiredResponse, {
+      proposable: accountHasProposableMempool(account, currentEntityState),
+    });
 
-    const proposal = crossJOpeningProposalTxs === null
-      ? undefined
-      : await proposeAccountFrameCandidate(
-          context,
-          accountKey,
-          account,
-          crossJOpeningProposalTxs,
-          accountId => { worklist.add(accountId); },
-        );
+    const proposal =
+      crossJOpeningProposalTxs === null
+        ? undefined
+        : await proposeAccountFrameCandidate(context, accountKey, account, crossJOpeningProposalTxs, accountId => {
+            worklist.add(accountId);
+          });
     // Idle/rejected Account attempts are not frames. Counting either result as
     // committed work keeps an otherwise empty Entity preview alive, advances
     // Entity height, and immediately schedules the same impossible attempt
@@ -786,37 +733,18 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
       proposedFrames += 1;
     }
 
-    const finalAccountInput = proposal && isProposedAccountFrame(proposal)
-      ? proposal.accountInput
-      : requiredResponse;
-    traceAccountFlushHop(
-      'entity-flush-done',
-      currentEntityState.entityId,
-      accountKey,
-      account,
-      requiredResponse,
-      {
-        proposalDisposition: proposal === undefined
-          ? 'none'
-          : isProposedAccountFrame(proposal)
-            ? 'proposed'
-            : 'rejected',
-        finalInputKind: finalAccountInput?.kind ?? null,
-      },
-    );
+    const finalAccountInput = proposal && isProposedAccountFrame(proposal) ? proposal.accountInput : requiredResponse;
+    traceAccountFlushHop('entity-flush-done', currentEntityState.entityId, accountKey, account, requiredResponse, {
+      proposalDisposition: proposal === undefined ? 'none' : isProposedAccountFrame(proposal) ? 'proposed' : 'rejected',
+      finalInputKind: finalAccountInput?.kind ?? null,
+    });
     if (!finalAccountInput) {
       continue;
     }
     if (requiredResponse) {
       assertForcedAccountInputPreserved(accountKey, requiredResponse, finalAccountInput);
     }
-    routeFinalAccountInput(
-      context,
-      accountKey,
-      cpId,
-      finalAccountInput,
-      proposal,
-    );
+    routeFinalAccountInput(context, accountKey, cpId, finalAccountInput, proposal);
   }
 
   return proposedFrames;
@@ -859,10 +787,7 @@ const collectOffersForMatching = (
   const enriched = created.map(offer => {
     const fromEntity = normalizeEntityRef(offer.fromEntity);
     const toEntity = normalizeEntityRef(offer.toEntity);
-    return normalizeSwapOfferForOrderbook(
-      offer,
-      fromEntity === hubEntity ? toEntity : fromEntity,
-    );
+    return normalizeSwapOfferForOrderbook(offer, fromEntity === hubEntity ? toEntity : fromEntity);
   });
   const seen = new Set<string>();
   const admitted: WorkingOrderbookOffer[] = [];
@@ -881,10 +806,7 @@ const collectOffersForMatching = (
       });
       continue;
     }
-    if (
-      offer.crossJurisdiction &&
-      crossJurisdictionBookOwnerRef(offer.crossJurisdiction) !== hubEntity
-    ) {
+    if (offer.crossJurisdiction && crossJurisdictionBookOwnerRef(offer.crossJurisdiction) !== hubEntity) {
       entityLog.debug('crossj.orderbook.skip_non_owner', {
         offer: shortOrder(offer.offerId, 8),
         owner: shortId(crossJurisdictionBookOwnerRef(offer.crossJurisdiction), 8),
@@ -906,12 +828,7 @@ const applyOrderbookAccountTxs = async (
   result: OrderbookMatchResult,
   accountOutputVerifiedOffers: ReadonlySet<string>,
 ): Promise<void> => {
-  const {
-    accountConsensusContext,
-    currentEntityState: state,
-    proposableAccounts,
-    storageChanges,
-  } = context;
+  const { accountConsensusContext, currentEntityState: state, proposableAccounts, storageChanges } = context;
   const localBatches = new Map<string, { account: AccountReplica; txs: AccountTx[] }>();
   for (const { accountId, tx } of result.accountTxs) {
     const visible = state.accounts.get(accountId);
@@ -925,18 +842,27 @@ const applyOrderbookAccountTxs = async (
         continue;
       }
       if (
-        !visible?.state.swapOffers?.has(tx.data.offerId)
-        && !accountOutputVerifiedOffers.has(swapKey(accountId, tx.data.offerId))
+        !visible?.state.swapOffers?.has(tx.data.offerId) &&
+        !accountOutputVerifiedOffers.has(swapKey(accountId, tx.data.offerId))
       ) {
-        throw haltRuntimeFailure("ORDERBOOK_SWAP_OWNER_NOT_LOCAL", `ORDERBOOK_SWAP_OWNER_NOT_LOCAL: account=${accountId} offer=${tx.data.offerId} entity=${state.entityId}`);
+        throw haltRuntimeFailure(
+          'ORDERBOOK_SWAP_OWNER_NOT_LOCAL',
+          `ORDERBOOK_SWAP_OWNER_NOT_LOCAL: account=${accountId} offer=${tx.data.offerId} entity=${state.entityId}`,
+        );
       }
     }
     if (!visible) {
-      throw haltRuntimeFailure('ORDERBOOK_ACCOUNT_TX_ACCOUNT_MISSING', `ORDERBOOK_ACCOUNT_TX_ACCOUNT_MISSING: account=${accountId} entity=${state.entityId} tx=${tx.type}`);
+      throw haltRuntimeFailure(
+        'ORDERBOOK_ACCOUNT_TX_ACCOUNT_MISSING',
+        `ORDERBOOK_ACCOUNT_TX_ACCOUNT_MISSING: account=${accountId} entity=${state.entityId} tx=${tx.type}`,
+      );
     }
     const account = getEntityAccountForWrite(state.accounts, accountId);
     if (!account) {
-      throw haltRuntimeFailure('ORDERBOOK_ACCOUNT_TX_ACCOUNT_MISSING', `ORDERBOOK_ACCOUNT_TX_ACCOUNT_MISSING: account=${accountId} entity=${state.entityId} tx=${tx.type}`);
+      throw haltRuntimeFailure(
+        'ORDERBOOK_ACCOUNT_TX_ACCOUNT_MISSING',
+        `ORDERBOOK_ACCOUNT_TX_ACCOUNT_MISSING: account=${accountId} entity=${state.entityId} tx=${tx.type}`,
+      );
     }
     const batch = localBatches.get(accountId);
     if (batch) batch.txs.push(tx);
@@ -953,10 +879,7 @@ const applyOrderbookAccountTxs = async (
   }
 };
 
-const commitOrderbookMatchResult = (
-  context: ApplyOrderbookMatchingContext,
-  result: OrderbookMatchResult,
-): void => {
+const commitOrderbookMatchResult = (context: ApplyOrderbookMatchingContext, result: OrderbookMatchResult): void => {
   const { env, currentEntityState: state, storageChanges, candidateEffects } = context;
   const ext = state.orderbookExt as OrderbookExtState;
   const previousTradeCounts = new Map<string, number>();
@@ -993,9 +916,7 @@ const commitOrderbookMatchResult = (
   }
 };
 
-async function applyOrderbookMatching(
-  context: ApplyOrderbookMatchingContext,
-): Promise<OrderbookFrameStats> {
+async function applyOrderbookMatching(context: ApplyOrderbookMatchingContext): Promise<OrderbookFrameStats> {
   const { env, currentEntityState, allSwapOffersCreated, resumeSamePairIds } = context;
   const stats = emptyOrderbookFrameStats();
   const books = currentEntityState.orderbookExt?.books;
@@ -1009,11 +930,7 @@ async function applyOrderbookMatching(
   // the user endpoint commits Account state and intentionally does no book
   // work. This is an ownership boundary, not an alternate settlement path.
   if (!currentEntityState.orderbookExt) return stats;
-  if (
-    allSwapOffersCreated.length === 0 &&
-    resumeSamePairIds.length === 0 &&
-    !stats.hasPersistedCrossJurisdictionBook
-  ) {
+  if (allSwapOffersCreated.length === 0 && resumeSamePairIds.length === 0 && !stats.hasPersistedCrossJurisdictionBook) {
     return stats;
   }
 
@@ -1024,11 +941,15 @@ async function applyOrderbookMatching(
 
   const offersToMatch = collectOffersForMatching(env, currentEntityState, allSwapOffersCreated);
   const accountOutputVerifiedOffers = new Set(
-    offersToMatch
-      .filter(offer => offer.accountOutputVerified)
-      .map(offer => swapKey(offer.accountId, offer.offerId)),
+    offersToMatch.filter(offer => offer.accountOutputVerified).map(offer => swapKey(offer.accountId, offer.offerId)),
   );
+  const stack = getJurisdictionIdentityRef(currentEntityState.config.jurisdiction);
+  const registry = getJReplicaByJurisdictionRef(env, stack)?.tokenRegistry;
+  if (!registry) {
+    throw haltRuntimeFailure('ORDERBOOK_TOKEN_REGISTRY_MISSING', `ORDERBOOK_TOKEN_REGISTRY_MISSING:${stack}`);
+  }
   const matchResult = processOrderbookSwaps(currentEntityState, offersToMatch, {
+    tokenRegistry: registry,
     candidateEffects: context.candidateEffects,
     resumeSamePairIds,
   });
@@ -1053,9 +974,7 @@ type ApplySwapCancelRequestsContext = {
   storageChanges: RuntimeOverlayRecord[];
 };
 
-async function applySwapCancelRequests(
-  context: ApplySwapCancelRequestsContext,
-): Promise<void> {
+async function applySwapCancelRequests(context: ApplySwapCancelRequestsContext): Promise<void> {
   const {
     env,
     accountConsensusContext,
@@ -1081,11 +1000,7 @@ async function applySwapCancelRequests(
   for (const { accountId, tx } of cancelResult.accountTxs) {
     const account = getEntityAccountForWrite(currentEntityState.accounts, accountId);
     if (!account) continue;
-    const admission = await applyAccountInput(
-      accountConsensusContext,
-      account,
-      { kind: 'enqueue', txs: [tx] },
-    );
+    const admission = await applyAccountInput(accountConsensusContext, account, { kind: 'enqueue', txs: [tx] });
     if (!admission.ok || admission.admittedAccountTxCount === 0) continue;
     markProposableAccount(proposableAccounts, accountId);
     recordFrameAccountChange(storageChanges, currentEntityState.entityId, accountId);
@@ -1137,10 +1052,7 @@ const initializeEntityFrameState = (
     throw new Error(`ENTITY_FRAME_TIMESTAMP_INVALID:${String(timestamp)}`);
   }
   if (timestamp < state.timestamp) {
-    throw new Error(
-      `ENTITY_FRAME_TIMESTAMP_REGRESSION:previous=${state.timestamp}:` +
-        `proposed=${timestamp}`,
-    );
+    throw new Error(`ENTITY_FRAME_TIMESTAMP_REGRESSION:previous=${state.timestamp}:` + `proposed=${timestamp}`);
   }
   state.timestamp = timestamp;
   return state;
@@ -1164,10 +1076,9 @@ const createEntityFrameApplyContext = (
     // `validateEntityInfraContext` proves canonical ordering and uniqueness.
     // Build this once per Entity frame: rebuilding it for every committed
     // Account HTLC made a 500-entry batch quadratic.
-    preparedHtlcEntriesByBinding: new Map(entityContext.htlc.entries.map(entry => [
-      preparedHtlcBindingKey(entry.binding),
-      entry,
-    ])),
+    preparedHtlcEntriesByBinding: new Map(
+      entityContext.htlc.entries.map(entry => [preparedHtlcBindingKey(entry.binding), entry]),
+    ),
     accountConsensusContext: createAccountConsensusContext(env, accountJClaimNodeStore, currentEntityState),
     entityTxs,
     currentEntityState,
@@ -1191,9 +1102,7 @@ const createEntityFrameApplyContext = (
   };
 };
 
-const primeEntityFrameAccountWork = async (
-  context: ApplyEntityTxsInOrderContext,
-): Promise<void> => {
+const primeEntityFrameAccountWork = async (context: ApplyEntityTxsInOrderContext): Promise<void> => {
   const state = context.currentEntityState;
   markRuntimeEntityFramePhase(context.env, 'apply.entity.frame.prime-account-index');
   for (const accountId of getProposableAccountIds(state)) {
@@ -1208,28 +1117,27 @@ const getEntityFrameInfraBindingError = (
   const expectedEntityId = entityState.entityId.trim().toLowerCase();
   const expectedParentFrameHash = entityState.height === 0 ? 'genesis' : String(entityState.prevFrameHash || '');
   if (
-    entityContext.entityId === expectedEntityId
-    && entityContext.proposerReplicaId === `${expectedEntityId}:${entityContext.proposerSignerId}`
-    && entityContext.parentFrameHash === expectedParentFrameHash
-    && entityContext.height === entityState.height + 1
-  ) return null;
-  return (
-    `ENTITY_INFRA_CONTEXT_BINDING_MISMATCH:${safeStringify({
-      actual: {
-        entityId: entityContext.entityId,
-        height: entityContext.height,
-        parentFrameHash: entityContext.parentFrameHash,
-        proposerReplicaId: entityContext.proposerReplicaId,
-        proposerSignerId: entityContext.proposerSignerId,
-      },
-      expected: {
-        entityId: expectedEntityId,
-        height: entityState.height + 1,
-        parentFrameHash: expectedParentFrameHash,
-        proposerReplicaId: `${expectedEntityId}:${entityContext.proposerSignerId}`,
-      },
-    })}`
-  );
+    entityContext.entityId === expectedEntityId &&
+    entityContext.proposerReplicaId === `${expectedEntityId}:${entityContext.proposerSignerId}` &&
+    entityContext.parentFrameHash === expectedParentFrameHash &&
+    entityContext.height === entityState.height + 1
+  )
+    return null;
+  return `ENTITY_INFRA_CONTEXT_BINDING_MISMATCH:${safeStringify({
+    actual: {
+      entityId: entityContext.entityId,
+      height: entityContext.height,
+      parentFrameHash: entityContext.parentFrameHash,
+      proposerReplicaId: entityContext.proposerReplicaId,
+      proposerSignerId: entityContext.proposerSignerId,
+    },
+    expected: {
+      entityId: expectedEntityId,
+      height: entityState.height + 1,
+      parentFrameHash: expectedParentFrameHash,
+      proposerReplicaId: `${expectedEntityId}:${entityContext.proposerSignerId}`,
+    },
+  })}`;
 };
 
 // At frame top level only protocol txs stand alone; everything else must
@@ -1254,14 +1162,14 @@ export const getEntityFrameShapeError = (
   entityContext: import('../../../types/entity/infra-context').EntityInfraContext,
   entityTxs: EntityTx[],
 ): string | null =>
-  getEntityFrameInfraBindingError(entityState, entityContext)
-  ?? getEntityFrameTxByteBudgetError(entityTxs)
-  ?? getEntityFrameJRangeBudgetError(entityTxs)
-  ?? getScheduledWakeFrameOrderError(entityTxs)
-  ?? (entityTxs.some(entityTxContainsCrossJSetup) && entityTxs.some(entityTxContainsAccountTransition)
+  getEntityFrameInfraBindingError(entityState, entityContext) ??
+  getEntityFrameTxByteBudgetError(entityTxs) ??
+  getEntityFrameJRangeBudgetError(entityTxs) ??
+  getScheduledWakeFrameOrderError(entityTxs) ??
+  (entityTxs.some(entityTxContainsCrossJSetup) && entityTxs.some(entityTxContainsAccountTransition)
     ? 'CROSS_J_SETUP_ACCOUNT_TRANSITION_MIXED'
-    : null)
-  ?? getTopLevelEntityTxError(entityTxs);
+    : null) ??
+  getTopLevelEntityTxError(entityTxs);
 
 const prepareEntityFrameWorkingSet = async (
   env: EntityRuntimeContext,
@@ -1275,21 +1183,14 @@ const prepareEntityFrameWorkingSet = async (
   if (shapeError) throw new Error(shapeError);
   const crossJSetupPhase = entityTxs.some(entityTxContainsCrossJSetup);
   markRuntimeEntityFramePhase(env, 'apply.entity.frame.prepare.normalize');
-  const normalized = normalizeEntityProposalBoard(
-    env,
-    normalizeEntityCommandNonceBoard(env, entityState),
-  );
-  const authorizedBoardHandoverConfig = getBoardHandoverFrameConfig(
-    env,
-    normalized,
-    entityTxs,
-  );
+  const normalized = normalizeEntityProposalBoard(env, normalizeEntityCommandNonceBoard(env, entityState));
+  const authorizedBoardHandoverConfig = getBoardHandoverFrameConfig(env, normalized, entityTxs);
   markRuntimeEntityFramePhase(
     env,
     `apply.entity.frame.prepare.authority:${entityTxs.map(tx => tx.type).join('+') || 'empty'}`,
   );
-  const authorityTransitionOnly = authorizedBoardHandoverConfig !== null ||
-    await isSelfBoardAuthorityTransitionFrame(env, normalized, entityTxs);
+  const authorityTransitionOnly =
+    authorizedBoardHandoverConfig !== null || (await isSelfBoardAuthorityTransitionFrame(env, normalized, entityTxs));
   const frameProfileStartMs = getPerfMs();
   const frameProfileMarks: Record<string, number> = {};
   const markFrameProfile = (label: string): void => {
@@ -1297,11 +1198,7 @@ const prepareEntityFrameWorkingSet = async (
   };
   entityLog.debug('frame.apply', { txs: entityTxs.map(tx => tx.type) });
   markRuntimeEntityFramePhase(env, 'apply.entity.frame.prepare.candidate');
-  const currentEntityState = initializeEntityFrameState(
-    env,
-    normalized,
-    frameTimestamp,
-  );
+  const currentEntityState = initializeEntityFrameState(env, normalized, frameTimestamp);
   markFrameProfile('clone');
   markRuntimeEntityFramePhase(env, 'apply.entity.frame.prepare.context');
   const context = createEntityFrameApplyContext(
@@ -1375,8 +1272,7 @@ const buildEntityFrameResult = (
   accountsToProposeFramesCount,
   events: readEntityFrameEvents(currentEntityState),
   collectedHashes: context.collectedHashes,
-  ...(context.accountJClaimNewNodes.size > 0 ||
-  context.accountJClaimReplacedNodeHashes.size > 0
+  ...(context.accountJClaimNewNodes.size > 0 || context.accountJClaimReplacedNodeHashes.size > 0
     ? {
         accountJClaimNodeChanges: {
           newNodes: Array.from(context.accountJClaimNewNodes, ([hash, node]) => ({ hash, node })),
@@ -1392,16 +1288,15 @@ type PostEntityTxPhases = {
   accountsToProposeFramesCount: number;
 };
 
-const refreshChangedAccountCommitments = (
-  state: EntityState,
-  context: ApplyEntityTxsInOrderContext,
-): void => {
-  const changedAccountIds = new Set(collectTouchedAccountIds(
-    state.entityId,
-    context.proposableAccounts.keys(),
-    context.storageChanges,
-    dirtyAccountIdsFromState(state),
-  ));
+const refreshChangedAccountCommitments = (state: EntityState, context: ApplyEntityTxsInOrderContext): void => {
+  const changedAccountIds = new Set(
+    collectTouchedAccountIds(
+      state.entityId,
+      context.proposableAccounts.keys(),
+      context.storageChanges,
+      dirtyAccountIdsFromState(state),
+    ),
+  );
   // Every Account mutation contributes a leaf to the signed Entity root.
   // `proposableAccounts` covers proposal-envelope changes, while
   // `storageChanges` also covers transactions such as openAccount that create
@@ -1431,9 +1326,7 @@ const drainPostOrderbookAccountWork = async (
   );
 };
 
-const applyPostEntityTxPhases = async (
-  working: EntityFrameWorkingSet,
-): Promise<PostEntityTxPhases> => {
+const applyPostEntityTxPhases = async (working: EntityFrameWorkingSet): Promise<PostEntityTxPhases> => {
   const { context, crossJSetupPhase, markFrameProfile } = working;
   let currentEntityState = working.currentEntityState;
   let resumeSamePairIds: readonly string[] = [];
@@ -1472,22 +1365,22 @@ const applyPostEntityTxPhases = async (
   markRuntimeEntityFramePhase(context.env, 'apply.entity.frame.post-orderbook');
   await drainPostOrderbookAccountWork(context, currentEntityState);
   await applyLocalAccountEffects(context, currentEntityState, collectLendingWithdrawals(currentEntityState));
-  await applyLocalAccountEffects(context, currentEntityState, demandSavingsRenewals(currentEntityState)
-    .filter(work => work.triggerAt <= currentEntityState.timestamp));
-  const proposalAccountIds = crossJSetupPhase
-    ? []
-    : [...context.proposableAccounts.keys()];
+  await applyLocalAccountEffects(
+    context,
+    currentEntityState,
+    demandSavingsRenewals(currentEntityState).filter(work => work.triggerAt <= currentEntityState.timestamp),
+  );
+  const proposalAccountIds = crossJSetupPhase ? [] : [...context.proposableAccounts.keys()];
   markRuntimeEntityFramePhase(context.env, 'apply.entity.frame.authority-outbound');
-  await context.env.accountAuthorityEntityStage
-    ?.prepareEntityAccountOutbound({
-      entityState: currentEntityState,
-      entityHeight: context.entityContext.height,
-      accounts: currentEntityState.accounts,
-      accountForWrite: accountId => getEntityAccountForWrite(currentEntityState.accounts, accountId),
-      proposalAccountIds,
-      timestamp: currentEntityState.timestamp,
-      jHeight: currentEntityState.lastFinalizedJHeight ?? 0,
-    });
+  await context.env.accountAuthorityEntityStage?.prepareEntityAccountOutbound({
+    entityState: currentEntityState,
+    entityHeight: context.entityContext.height,
+    accounts: currentEntityState.accounts,
+    accountForWrite: accountId => getEntityAccountForWrite(currentEntityState.accounts, accountId),
+    proposalAccountIds,
+    timestamp: currentEntityState.timestamp,
+    jHeight: currentEntityState.lastFinalizedJHeight ?? 0,
+  });
   markRuntimeEntityFramePhase(context.env, 'apply.entity.frame.account-proposals');
   const accountsToProposeFramesCount = crossJSetupPhase
     ? 0
@@ -1509,10 +1402,7 @@ const applyPostEntityTxPhases = async (
   // (pending frame and Hanko state). Refresh each dirty leaf only
   // after that final mutation. Doing it earlier would preserve a valid-looking
   // but stale incremental Entity root.
-  refreshChangedAccountCommitments(
-    currentEntityState,
-    context,
-  );
+  refreshChangedAccountCommitments(currentEntityState, context);
   return {
     currentEntityState,
     orderbookStats,
@@ -1538,8 +1428,7 @@ const logEntityFrameProfile = (
     jOutputs: context.allJOutputs.length,
     collectedHashes: context.collectedHashes.length,
     swapOffersCreated: context.allSwapOffersCreated.length,
-    swapCancels:
-      context.allSwapCancelRequests.length + context.allSwapOffersCancelled.length,
+    swapCancels: context.allSwapCancelRequests.length + context.allSwapOffersCancelled.length,
     hasOrderbookExt: Boolean(post.currentEntityState.orderbookExt),
     ...post.orderbookStats,
     phases: cumulativeMarksToPhases(frameProfileMarks, elapsedMs),
@@ -1586,10 +1475,7 @@ const finishAuthorityTransitionOnly = async (
     entityState: working.currentEntityState,
     entityHeight: entityContext.height,
     accounts: working.currentEntityState.accounts,
-    accountForWrite: accountId => getEntityAccountForWrite(
-      working.currentEntityState.accounts,
-      accountId,
-    ),
+    accountForWrite: accountId => getEntityAccountForWrite(working.currentEntityState.accounts, accountId),
     proposalAccountIds: [],
     timestamp: working.currentEntityState.timestamp,
     jHeight: working.currentEntityState.lastFinalizedJHeight ?? 0,
@@ -1632,23 +1518,11 @@ const applyEntityFrameWithIsolation = async (
   const previousProfileHash = computeEntityProfileHash(entityState);
   const previousProfileHashMs = Math.round(getPerfMs() - profileHashStartedAt);
   markRuntimeEntityFramePhase(env, 'apply.entity.frame.prepare');
-  const working = await prepareEntityFrameWorkingSet(
-    env,
-    entityState,
-    entityContext,
-    entityTxs,
-    frameTimestamp,
-  );
-  markRuntimeEntityFramePhase(
-    env,
-    `apply.entity.frame.tx-loop:${entityTxs.map(tx => tx.type).join('+') || 'empty'}`,
-  );
+  const working = await prepareEntityFrameWorkingSet(env, entityState, entityContext, entityTxs, frameTimestamp);
+  markRuntimeEntityFramePhase(env, `apply.entity.frame.tx-loop:${entityTxs.map(tx => tx.type).join('+') || 'empty'}`);
   working.currentEntityState = await applyEntityTxsInOrder(working.context);
   markRuntimeEntityFramePhase(env, 'apply.entity.frame.settlement');
-  working.currentEntityState = await materializeSettlementContinuation(
-    working.context,
-    working.currentEntityState,
-  );
+  working.currentEntityState = await materializeSettlementContinuation(working.context, working.currentEntityState);
   working.markFrameProfile('entityTxLoop');
   markRuntimeEntityFramePhase(env, 'apply.entity.frame.books');
   const accountStage = working.context.env.accountAuthorityEntityStage;
@@ -1663,27 +1537,13 @@ const applyEntityFrameWithIsolation = async (
     applyBookIntentProgram(working.currentEntityState, working.context.bookIntents);
   }
   working.markFrameProfile('books');
-  const authorityOnlyResult = await finishAuthorityTransitionOnly(
-    working,
-    entityTxs,
-    entityContext,
-  );
+  const authorityOnlyResult = await finishAuthorityTransitionOnly(working, entityTxs, entityContext);
   if (authorityOnlyResult) return authorityOnlyResult;
   markRuntimeEntityFramePhase(env, 'apply.entity.frame.post');
   const post = await applyPostEntityTxPhases(working);
-  appendFinalProfileHash(
-    working,
-    entityState,
-    post.currentEntityState,
-    previousProfileHash,
-    previousProfileHashMs,
-  );
+  appendFinalProfileHash(working, entityState, post.currentEntityState, previousProfileHash, previousProfileHashMs);
   logEntityFrameProfile(working, entityTxs, post);
-  return buildEntityFrameResult(
-    post.currentEntityState,
-    working.context,
-    post.accountsToProposeFramesCount,
-  );
+  return buildEntityFrameResult(post.currentEntityState, working.context, post.accountsToProposeFramesCount);
 };
 
 /**
@@ -1700,11 +1560,4 @@ export const applyEntityFrame = (
   frameTimestamp?: number,
   inProcessInfraValidated = false,
 ): Promise<EntityFrameResult> =>
-  applyEntityFrameWithIsolation(
-    env,
-    entityState,
-    entityContext,
-    entityTxs,
-    frameTimestamp,
-    inProcessInfraValidated,
-  );
+  applyEntityFrameWithIsolation(env, entityState, entityContext, entityTxs, frameTimestamp, inProcessInfraValidated);

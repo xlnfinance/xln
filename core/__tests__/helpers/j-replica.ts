@@ -1,15 +1,15 @@
 import type { JReplica } from '../../types/jurisdiction-runtime';
+import { getKnownTokenIds, getTokenInfo } from '../../account/utils';
+
+/** These EVM unit fixtures use the built-in registry; native cases supply theirs. */
+export const catalogTokenRegistry = getKnownTokenIds().map(tokenId => ({
+  tokenId,
+  decimals: getTokenInfo(tokenId).decimals,
+}));
 
 type CanonicalJReplicaFixtureField =
-  | 'blockNumber'
-  | 'stateRoot'
-  | 'mempool'
-  | 'blockDelayMs'
-  | 'lastBlockTimestamp'
-  | 'position';
-type TestJReplicaOverrides =
-  & Pick<JReplica, 'name'>
-  & Partial<Omit<JReplica, 'name' | CanonicalJReplicaFixtureField>>;
+  'blockNumber' | 'stateRoot' | 'mempool' | 'blockDelayMs' | 'lastBlockTimestamp' | 'position';
+type TestJReplicaOverrides = Pick<JReplica, 'name'> & Partial<Omit<JReplica, 'name' | CanonicalJReplicaFixtureField>>;
 
 /** Build a complete persisted JReplica while keeping each test's domain fields explicit. */
 export const createTestJReplica = (overrides: TestJReplicaOverrides): JReplica => ({
