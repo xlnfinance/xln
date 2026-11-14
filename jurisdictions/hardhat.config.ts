@@ -2,6 +2,7 @@ import hardhatToolboxMochaEthers from "@nomicfoundation/hardhat-toolbox-mocha-et
 import { defineConfig } from "hardhat/config";
 import { dirname, resolve } from 'node:path';
 import { xlnDeploy, xlnChainStack } from './tasks/xln-deploy.ts';
+import { xlnVerify } from './tasks/xln-verify.ts';
 
 const deployerAccounts = () => {
   const key = process.env['DEPLOYER_PRIVATE_KEY'];
@@ -18,7 +19,7 @@ const etherscanApiKey = process.env['ETHERSCAN_API_KEY'] || "";
 const stackManagerChainId = Number(process.env['XLN_STACK_MANAGER_CHAIN_ID'] || 0);
 
 const config = defineConfig({
-  tasks: [xlnDeploy, xlnChainStack],
+  tasks: [xlnDeploy, xlnChainStack, xlnVerify],
   plugins: [hardhatToolboxMochaEthers, {
     id: 'xln-local-solc',
     hookHandlers: { solidity: () => import('./scripts/compiler/local-solc.ts') },

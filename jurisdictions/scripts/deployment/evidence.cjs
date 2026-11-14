@@ -68,4 +68,4 @@ const sanitizeDeploymentMessage = (value, privateKeyHex, rpcUrl) => {
     .replaceAll('\n', ' ').replaceAll('\r', ' ').slice(-4_096).trim();
 };
 
-module.exports = { captureArtifactDigests, captureCandidateSources, candidateRevision, deploymentErrorCode, sanitizeDeploymentMessage };
+module.exports = { candidatePaths, captureArtifactDigests, captureCandidateSources, candidateRevision, deploymentErrorCode, sanitizeDeploymentMessage };

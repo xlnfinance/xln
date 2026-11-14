@@ -2,6 +2,7 @@ import { Contract, Interface, JsonRpcProvider } from 'ethers';
 import type { JurisdictionStackManifest } from './types';
 import { readConfirmedReceipt } from './receipts';
 import { encodeBoard, hashBoard } from '../../../entity/factory';
+import { readDeploymentExecutionBlock } from './execution-block';
 
 const verifyBinding = async (
   provider: JsonRpcProvider, manifest: JurisdictionStackManifest, confirmations: number,
@@ -36,7 +37,8 @@ export const verifyStackBindings = async (provider: JsonRpcProvider, manifest: J
   await verifyBinding(provider, manifest, confirmations, 'shareDepositoryBinding', blockTag);
   const authority = await readStackFoundationAuthority(provider, manifest.contracts.entityProvider, manifest.foundationRecipient, blockTag);
   if (authority.nonce !== 1n) throw new Error('STACK_MANAGER_FOUNDATION_NONCE_MISMATCH');
-  if (authority.registrationBlock !== BigInt(manifest.entityProviderDeploymentBlock)) throw new Error('STACK_MANAGER_FOUNDATION_AUTHORITY_MISMATCH');
+  const executionBlock = await readDeploymentExecutionBlock(provider, manifest.chainId, manifest.evmContracts.entityProvider);
+  if (authority.registrationBlock !== executionBlock) throw new Error('STACK_MANAGER_FOUNDATION_AUTHORITY_MISMATCH');
 };
 
 export const readStackFoundationAuthority = async (provider: JsonRpcProvider, address: string, recipient: string, blockTag: number | 'latest' = 'latest') => {

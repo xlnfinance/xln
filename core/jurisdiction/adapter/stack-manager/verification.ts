@@ -109,9 +109,8 @@ export const assertCanonicalStablecoinRegistration = (
   }
 };
 
-const artifactUrl = (path: string): URL =>
-  new URL(`../../../../jurisdictions/artifacts/${path}`, import.meta.url);
-const buildInfoUrl = new URL('../../../../jurisdictions/artifacts/build-info/', import.meta.url);
+const defaultArtifactsRoot = new URL('../../../../jurisdictions/artifacts/', import.meta.url);
+const artifactUrl = (path: string, artifactsRoot: URL): URL => new URL(path, artifactsRoot);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value && typeof value === 'object' && !Array.isArray(value));
@@ -141,8 +140,8 @@ const decodeArtifact = (value: unknown, name: string): Artifact => {
   return { deployedBytecode: value['deployedBytecode'], deployedLinkReferences };
 };
 
-const readArtifact = async (name: StackContractName): Promise<Artifact> => {
-  const value: unknown = JSON.parse(await readFile(artifactUrl(STACK_ARTIFACTS[name].path), 'utf8'));
+const readArtifact = async (name: StackContractName, artifactsRoot: URL): Promise<Artifact> => {
+  const value: unknown = JSON.parse(await readFile(artifactUrl(STACK_ARTIFACTS[name].path, artifactsRoot), 'utf8'));
   return decodeArtifact(value, name);
 };
 
@@ -179,7 +178,9 @@ export const verifyJurisdictionStack = async (
   manifest: JurisdictionStackManifest,
   confirmations: number,
   blockTag: number | 'latest' = 'latest',
+  artifactsRoot: URL = defaultArtifactsRoot,
 ): Promise<void> => {
+  const buildInfoUrl = new URL('build-info/', artifactsRoot);
   if (confirmations < 12) throw new Error('STACK_MANAGER_CONFIRMATIONS_BELOW_ADMISSION_MINIMUM');
   const network = await provider.getNetwork();
   if (Number(network.chainId) !== manifest.chainId) throw new Error('STACK_MANAGER_MANIFEST_CHAIN_ID_MISMATCH');
@@ -197,7 +198,7 @@ export const verifyJurisdictionStack = async (
       return receipt;
     }, blockTag === 'latest' ? undefined : blockTag);
     const code = (await provider.getCode(deployment.address, receipt.blockNumber)).toLowerCase();
-    const linked = linkExpectedBytecode(await readArtifact(name), manifest, name);
+    const linked = linkExpectedBytecode(await readArtifact(name, artifactsRoot), manifest, name);
     const descriptor = STACK_ARTIFACTS[name];
     const compilerEvidence = await readCompilerBytecodeEvidence(
       buildInfoUrl,
@@ -267,7 +268,7 @@ export const verifyJurisdictionStack = async (
       return receipt;
     }, blockTag === 'latest' ? undefined : blockTag);
     const artifactValue: unknown = JSON.parse(await readFile(
-      artifactUrl('contracts/ERC20Mock.sol/ERC20Mock.json'),
+      artifactUrl('contracts/ERC20Mock.sol/ERC20Mock.json', artifactsRoot),
       'utf8',
     ));
     const artifact = decodeArtifact(artifactValue, 'stablecoin');
