@@ -297,9 +297,31 @@ Stack Manager adapter test files aligned at `2df74f251` are checked separately:
 their 29 tests, owning types and lint are not included in this profile. The
 separate run is retained at `2df74f251:docs/night-work-plan.md`; the
 [current handoff](../night-work-plan.md#last-green-command) records the latest task verification.
-The existing `verify`/pre-push path still runs the full repository check and
-contract suite; it has not been adapted to select this scoped profile. GitHub
-workflows remain manually dispatched under the existing owner policy.
+`verify` and pre-push select `check:deployment` only when every changed path
+belongs to the narrow [deployment scope](../../scripts/verification/profile.ts).
+Broader or unknown paths, application API/UI, Runtime, Rust, shared signing/hash
+sources, root dependencies and verification tooling retain the full `check`
+followed by `test:contracts:full`. This includes the shared Solidity schemas
+`Types.sol` and `EntityTypes.sol`. Generated contract artifacts alone do not
+expand the scope. The deployment profile already runs Hardhat, so it is not
+followed by a duplicate contract-suite invocation.
+
+Pre-push uses Git's actual destination OID as the base and includes the entire
+pending range with renames represented as deletion plus addition. It never
+selects by branch name or an environment override. A new remote branch or a
+standalone invocation without a base uses the full profile. A non-ancestor base
+also uses full verification; an unavailable base fails before running checks.
+For an explicit local comparison, run `bun run verify --base main` from the root.
+The result records the resolved base, changed paths, selection reason, command,
+budget and outcome under `.git/xln-verification/`. Its schema is 2; deployment
+results have `contracts: null` because the extra full-profile step is absent.
+
+Full checks retain their five-minute budgets per command. Deployment verification
+has a 26-minute outer budget around the runner's existing 25-minute stand budget
+and cleanup. Install the local hook with `bun run verify:install`; the installer
+rejects conflicting hooks/configuration. Dirty source and hidden index flags
+still block verification before any suite starts. GitHub workflows remain
+manually dispatched and unchanged under the existing owner policy.
 Under the owner-approved
 [verification scope](../../AGENTS.md#verification-scope), green `check:deployment`
 and owning checks are the gate for qualifying contract/deployment-only work.

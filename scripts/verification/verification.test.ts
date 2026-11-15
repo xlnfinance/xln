@@ -1,73 +1,15 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import {
-  chmodSync,
-  closeSync,
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  openSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { closeSync, existsSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { safeStringify } from '../../core/protocol/serialization';
 import { git } from './git';
 import { install } from './install';
 import { runBoundedCommand } from './process';
 import { verify } from './verify';
+import { createVerificationFixtures } from './fixtures';
 
-const temporary = mkdtempSync(join(tmpdir(), 'xln-verification-'));
+const { temporary, project, fixture, copyGate, commit } = createVerificationFixtures();
 let sequence = 0;
-const project = resolve(import.meta.dir, '../..');
-const commit = (root: string): void => {
-  git(root, ['add', '.']);
-  git(root, ['-c', 'commit.gpgsign=false', 'commit', '-qm', 'verification fixture']);
-};
-
-const fixture = (
-  body = 'console.log("fixture-check-output");',
-  contracts = 'console.log("fixture-contracts-output");',
-): string => {
-  const root = join(temporary, `repo ${sequence++}`);
-  mkdirSync(root);
-  git(root, ['init', '-b', 'main']);
-  git(root, ['config', 'user.name', 'Verification Test']);
-  git(root, ['config', 'user.email', 'verification@example.invalid']);
-  writeFileSync(
-    join(root, 'package.json'),
-    safeStringify({
-      packageManager: 'bun@1.4.3',
-      scripts: { check: 'bun check.ts', 'test:contracts:full': 'bun contracts.ts' },
-    }),
-  );
-  writeFileSync(join(root, 'check.ts'), body);
-  writeFileSync(join(root, 'contracts.ts'), contracts);
-  writeFileSync(join(root, 'input.txt'), 'committed\n');
-  commit(root);
-  return root;
-};
-
-const copyGate = (root: string): void => {
-  for (const path of [
-    ...['git', 'install', 'pre-push', 'process', 'verify'].map(name => `scripts/verification/${name}.ts`),
-    'core/scripts/e2e/runners/process-group.ts',
-    'core/protocol/serialization/index.ts',
-    'core/protocol/serialization/base64.ts',
-    'core/protocol/errors/failure-taxonomy.ts',
-    'tools/release-snapshot/scope.ts',
-    'tools/checks/check-environment.ts',
-    '.githooks/pre-push',
-  ]) {
-    mkdirSync(dirname(join(root, path)), { recursive: true });
-    copyFileSync(join(project, path), join(root, path));
-  }
-  chmodSync(join(root, '.githooks/pre-push'), 0o755);
-  commit(root);
-};
 
 afterAll(() => rmSync(temporary, { recursive: true, force: true }));
 
@@ -81,7 +23,7 @@ describe('host-independent verification', () => {
     expect(result.command.argv).toEqual([process.execPath, 'run', 'check']);
     expect(result.command.budgetMs).toBe(300_000);
     expect(result.tools.bun.executable).toBe(process.execPath);
-    expect(result.contracts.argv).toEqual([process.execPath, 'run', 'test:contracts:full']);
+    expect(result.contracts?.argv).toEqual([process.execPath, 'run', 'test:contracts:full']);
     expect(readFileSync(result.logPath, 'utf8')).toContain('fixture-check-output');
     expect(readFileSync(result.logPath, 'utf8')).toContain('fixture-contracts-output');
     expect(JSON.parse(readFileSync(result.resultPath, 'utf8')).passed).toBe(true);
@@ -125,7 +67,7 @@ describe('host-independent verification', () => {
   test('skips the contract suite when check fails', async () => {
     const result = await verify(fixture('process.exit(7);', 'throw new Error("must not execute");'));
     expect(result.problem).toBe('VERIFY_CHECK_FAILED:exitCode=7');
-    expect(result.contracts.result).toBeNull();
+    expect(result.contracts?.result).toBeNull();
   });
 
   test('rejects index flags that hide modified tracked source without resetting them', async () => {

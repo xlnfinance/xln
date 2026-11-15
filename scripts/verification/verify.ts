@@ -6,10 +6,8 @@ import { join } from 'node:path';
 import { safeStringify } from '../../core/protocol/serialization';
 import { repository, sourceProblem, sourceState, type SourceState } from './git';
 import { runBoundedCommand, type CommandResult } from './process';
+import { fullProfile, verificationBudget, verificationProfile } from './profile';
 
-// The aggregate release check includes the full repository lint and parallel gates;
-// its measured 186-second run exceeds the ordinary single-check 60-second budget.
-const CHECK_TIMEOUT_MS = 300_000;
 // `check` runs only the Foundry invariant subset; the Hardhat suite (~48 s) once stayed
 // red for 22 pushed commits after a Solidity change, so every push runs it as well.
 const CONTRACTS_TIMEOUT_MS = 300_000;
@@ -44,7 +42,7 @@ const atomicResult = (path: string, value: unknown): void => {
   renameSync(temporary, path);
 };
 
-export const verify = async (cwd: string) => {
+export const verify = async (cwd: string, base?: string) => {
   assertCheckEnvironment();
   const { root, commonDir } = repository(cwd);
   const before = sourceState(root);
@@ -63,7 +61,9 @@ export const verify = async (cwd: string) => {
   let command: CommandResult | null = null;
   let contracts: CommandResult | null = null;
   let problem = sourceProblem(before);
-  const commandLine = [process.execPath, 'run', 'check'] as const;
+  let profile = fullProfile('source-not-admitted', base ?? null);
+  let commandLine: readonly [string, ...string[]] = [process.execPath, 'run', 'check'];
+  let checkTimeoutMs = verificationBudget(profile);
   const contractsLine = [process.execPath, 'run', 'test:contracts:full'] as const;
   const versions = tools();
   const commandProblem = (name: string, result: CommandResult, budgetMs: number): string | null => {
@@ -75,10 +75,14 @@ export const verify = async (cwd: string) => {
   };
   try {
     if (!problem) {
-      command = await runBoundedCommand(commandLine, root, logFd, CHECK_TIMEOUT_MS);
-      problem = commandProblem('CHECK', command, CHECK_TIMEOUT_MS);
+      profile = verificationProfile(root, before.head, base);
+      commandLine = [process.execPath, 'run', profile.name === 'deployment' ? 'check:deployment' : 'check'];
+      checkTimeoutMs = verificationBudget(profile);
+      console.log(`VERIFY_PROFILE:${profile.name}:reason=${profile.reason}:base=${profile.base ?? 'none'}`);
+      command = await runBoundedCommand(commandLine, root, logFd, checkTimeoutMs);
+      problem = commandProblem('CHECK', command, checkTimeoutMs);
     }
-    if (!problem) {
+    if (!problem && profile.name === 'full') {
       contracts = await runBoundedCommand(contractsLine, root, logFd, CONTRACTS_TIMEOUT_MS);
       problem = commandProblem('CONTRACTS', contracts, CONTRACTS_TIMEOUT_MS);
     }
@@ -93,8 +97,9 @@ export const verify = async (cwd: string) => {
     closeSync(logFd);
   }
   const result = {
-    schema: 1,
-    passed: problem === null && command?.exitCode === 0 && contracts?.exitCode === 0,
+    schema: 2,
+    passed: problem === null && command?.exitCode === 0 && (profile.name === 'deployment' || contracts?.exitCode === 0),
+    profile,
     problem,
     startedAt,
     finishedAt: new Date().toISOString(),
@@ -102,8 +107,9 @@ export const verify = async (cwd: string) => {
     root,
     before,
     after,
-    command: { argv: commandLine, budgetMs: CHECK_TIMEOUT_MS, result: command },
-    contracts: { argv: contractsLine, budgetMs: CONTRACTS_TIMEOUT_MS, result: contracts },
+    command: { argv: commandLine, budgetMs: checkTimeoutMs, result: command },
+    contracts:
+      profile.name === 'full' ? { argv: contractsLine, budgetMs: CONTRACTS_TIMEOUT_MS, result: contracts } : null,
     tools: versions,
     logPath,
   };
@@ -116,7 +122,11 @@ export const verify = async (cwd: string) => {
 };
 
 if (import.meta.main) {
-  verify(process.cwd())
+  const args = process.argv.slice(2);
+  if (args.length !== 0 && (args.length !== 2 || args[0] !== '--base' || !args[1])) {
+    throw new Error('VERIFY_ARGUMENTS_INVALID:expected=--base <git-ref>');
+  }
+  verify(process.cwd(), args[1])
     .then(result => {
       process.exitCode = result.passed ? 0 : 1;
     })

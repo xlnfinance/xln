@@ -98,9 +98,9 @@ test.each(['main', 'testnets_deploy'])('requires branch-matched exact HEAD updat
   const ref = `refs/heads/${branch}`;
   const other = `refs/heads/${branch === 'main' ? 'testnets_deploy' : 'main'}`;
   const update = (local: string, remote: string): string => `${local} ${head} ${remote} ${zero}\n`;
-  expect(validateUpdates(update(ref, ref), head, branch)).toBe(true);
-  expect(validateUpdates(update('HEAD', ref), head, branch)).toBe(true);
-  expect(validateUpdates(`(delete) ${zero} refs/heads/retired ${head}\n`, head, branch)).toBe(false);
+  expect(validateUpdates(update(ref, ref), head, branch)).toEqual({ base: zero });
+  expect(validateUpdates(update('HEAD', ref), head, branch)).toEqual({ base: zero });
+  expect(validateUpdates(`(delete) ${zero} refs/heads/retired ${head}\n`, head, branch)).toBeNull();
   for (const [local, remote] of [
     [ref, other],
     [other, ref],

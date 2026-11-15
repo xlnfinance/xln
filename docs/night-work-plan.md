@@ -2,41 +2,50 @@
 
 ## Current SHA
 
-- Verified parent: `acb66be38f9896b58be36b08257f1d3b5afdf81c`, owner-approved `testnets_deploy`. This handoff accompanies the approved Git-exclusion commit; resolve its resulting SHA with `git rev-parse HEAD`. Executable source, tests and contract artifacts are unchanged.
-- `main`: `019d45beb5954e77fe806d643845f6a4dca4fa82`, unchanged. Apply the [owner-approved execution and Git route exceptions](deployment/ignition-stack-design.md#owner-approved-execution-exceptions).
-- Allowed code-update routes are branch-matched `main -> main` and `testnets_deploy -> testnets_deploy`; `HEAD` aliases only the checked-out branch's own target. SHA and branch stability are checked across verification and against push-start identity.
-- Full verification commands, BrainVault scope, tracked-source and hidden-index checks, deletion semantics and budgets remain unchanged. No actual project push, PR, hook installation or public financial operation occurred in this step.
+- Verified parent: `514ddbd5f86173d332bfb87998db9e5930f5f006`, owner-approved `testnets_deploy`. This handoff accompanies the approved verification-profile commit; resolve its resulting SHA with `git rev-parse HEAD`. All eight executable source/test hashes match the checked candidate.
+- `main`: `019d45beb5954e77fe806d643845f6a4dca4fa82`, unchanged. Apply the [owner-approved execution exceptions](deployment/ignition-stack-design.md#owner-approved-execution-exceptions).
+- The local hook is installed as `core.hooksPath=.githooks`. No real project push, PR or public financial operation occurred in this step.
 
 ## Last green command
 
 ```sh
-bun run stand:run --reason generated-output-ignore-boundary --timeout-ms 30000 -- \
-  bun /private/tmp/xln-ignore-boundary-20261115.ts
+bun run stand:run --reason verification-profiles-types-regression --timeout-ms 60000 -- \
+  bun test ./scripts/verification/profile.test.ts \
+  ./scripts/verification/profile-push.test.ts \
+  ./scripts/verification/verification.test.ts \
+  ./scripts/verification/source-scope.test.ts \
+  ./scripts/verification/process.test.ts \
+  ./tools/checks/check-environment.test.ts
 ```
 
-**8/8 boundary checks passed**, using the actual `.gitignore`, production
-`sourceState`/`sourceProblem`, a real temporary Git repository and the unchanged
-owner checkout. Exactly 200 existing untracked output paths are excluded.
-Unknown source, tracked source changes, changes to already tracked reports and
-hidden index flags still reject. Neighboring and nested paths stay visible.
-All 219 existing evidence, journal and owner files checked before the change
-remain byte-identical. No permanent test source was added for this Git-only change.
+**83 tests / 291 assertions / 6 files / 10.68 s**, zero failures. Actual hooks and
+Git pushes ran only against temporary local bare remotes. These tests exercise
+selection/control using real fixture commands; they do not rerun the financial
+suites or establish public-network readiness.
+Strict scoped typechecking and ESLint passed for all twelve verification
+source/test files, with zero lint findings or approved debt rows. The shared-schema
+regression requires full verification even when generated artifacts change
+alongside it. Independent read-only review confirmed this boundary. Existing
+process timeout/cleanup tests retain their deadlines and assertions. The initial
+sandbox run could not invoke `ps`; its exact orphan group was stopped, then the
+same checks passed with process inspection permitted.
 
 ## First red command/error
 
-None in the selected Git-exclusion scope. After committing the three owned
-paths, the real checkout still correctly returns `VERIFY_DIRTY_SOURCE` for the
-unrelated `public-proof-smoke.ts` edit and the untracked Svelte tracker file.
-The three output roots no longer contribute untracked paths.
+The installed hook correctly rejects the current checkout with
+`VERIFY_DIRTY_SOURCE` before launching suites. After committing the owned paths,
+the unrelated `public-proof-smoke.ts` edit and Svelte tracker file remain.
+No source exception was added. A read-only comparison of the 165 committed paths
+against `main` selects full verification; the branch includes broader changes.
 The inherited `AGENTS.md` formatting finding remains outside this change.
 
 ## Artifact path
 
-- Implementation: root `.gitignore`; [retention and Git policy](deployment/ignition-stack-design.md#local-fixture-retention). Journal preservation and deployment input-integrity checks remain mandatory.
-- Boundary probe and compact result: `/private/tmp/xln-ignore-boundary-20261115.ts`, `/private/var/folders/z0/tl1lmzfs49df8y9b6k411m0c0000gq/T/xln-git-ignore-5fdNdU/boundary-result.json`.
-- The unchanged Git-route/lint candidate passed 41 tests / 175 assertions, strict scoped types and zero-finding lint before commit `acb66be38`. Those earlier checks are not reruns of this Git-exclusion change.
-- Previous [deployment profile](evidence/deployment-check/2026-11-15T17-06-34.478Z-89550-xQMyi9/result.json) stays **6/6 green** for byte-identical 588 covered source/configuration files. It does not cover the changed Git-policy scripts; their focused checks are recorded separately.
-- All existing public deployment/USDC evidence and unrelated owner files remain protected. The real hook is still uninstalled.
+- [Profile selection and budgets](../scripts/verification/profile.ts); [operator documentation](deployment/ignition-stack-design.md#focused-verification).
+- Owning test/type/lint logs and installed-hook result pointer: `/private/tmp/xln-verification-profiles-20261116-B7q1AL/`.
+- Installed-hook refusal: `.git/xln-verification/514ddbd5f86173d332bfb87998db9e5930f5f006/2026-11-15T21-11-37.303Z-aa304ed4-910a-4e38-a444-58ea19c2910a/result.json`.
+- The previous [deployment profile](evidence/deployment-check/2026-11-15T17-06-34.478Z-89550-xQMyi9/result.json) stays 6/6 green for its unchanged 588 source/configuration files and 181 contract artifacts. It does not cover this new verification policy; its owning checks are recorded above.
+- Existing public deployment/USDC records and unrelated owner files remain protected. Generated output exclusions are unchanged.
 
 ## Next single command
 
@@ -44,12 +53,12 @@ The inherited `AGENTS.md` formatting finding remains outside this change.
 git show --stat --oneline HEAD
 ```
 
-Review the approved three-path Git-exclusion commit. Existing public records
-and unrelated edits remain untouched. The owner authorized this commit;
-no actual push or hook installation is requested.
+Review the approved ten-path verification-profile commit. Existing public
+records and unrelated edits are excluded. Actual publication remains a separate
+owner instruction.
 
 ## Remaining final gates
 
-- The approved generated-output exclusions are implemented and passed their owning Git boundary checks. Preserve existing tracked-source and unknown-path rejection; do not broaden these exclusions silently.
-- Verification profile selection, disposition of the unrelated dirty source/tracker and actual hook activation remain separate steps. Global and deployment suites were not rerun for this Git-only change.
-- Actual publication requires the owner's instruction. Whole-product/mainnet acceptance, browser/UI and Cross-J remain separate work; this change runs none of those flows.
+- Profile selection, owning type/lint/regression checks and local hook installation are complete; preserve the checked candidate when preparing commits.
+- The real checkout is not release-clean. Resolve unrelated owner source/tracker edits explicitly before a successful verification or push; do not hide or discard them.
+- Full repository and deployment suites were not rerun in this step. Whole-product/mainnet acceptance, public financial flows, Cross-J, UI and optional manual-CI profile selection remain separate work.
