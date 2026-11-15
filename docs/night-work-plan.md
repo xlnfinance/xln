@@ -2,58 +2,65 @@
 
 ## Current SHA
 
-- Verification base: `33412633535326c29d72168f6c0acc5848f77419`, owner-approved `testnets_deploy`. The cleanup candidate was checked with a dirty tree; the report retains that original identity. Resolve a later scoped commit with `git rev-parse HEAD`.
-- `main`: `019d45beb5954e77fe806d643845f6a4dca4fa82`, unchanged. Apply the [owner-approved execution exceptions](deployment/ignition-stack-design.md#owner-approved-execution-exceptions).
-- All 588 covered source/configuration hashes remained identical throughout the final profile. Documentation-only finalization followed; no clean-tree release is claimed.
-- Both earlier public reserve roundtrips remain complete. Their original execution identities and public receipts are unchanged; see the [operator guide](deployment/usdc-reserve-roundtrip.md). No new public financial operation occurred.
+- Verified parent: `5bc71c46f737723d0bd44fc15ccbe46ec3318637`, owner-approved `testnets_deploy`. This handoff accompanies the approved Git-route/lint commit; resolve its resulting SHA with `git rev-parse HEAD`. All six executable source/test hashes match the checked candidate.
+- `main`: `019d45beb5954e77fe806d643845f6a4dca4fa82`, unchanged. Apply the [owner-approved execution and Git route exceptions](deployment/ignition-stack-design.md#owner-approved-execution-exceptions).
+- Allowed code-update routes are branch-matched `main -> main` and `testnets_deploy -> testnets_deploy`; `HEAD` aliases only the checked-out branch's own target. SHA and branch stability are checked across verification and against push-start identity.
+- Full verification commands, dirty/unknown-untracked/BrainVault/hidden-index rules, deletion semantics and budgets remain unchanged. No actual project push, PR, hook installation or public financial operation occurred.
 
 ## Last green command
 
 ```sh
-bun run check:deployment
+bun run stand:run --reason git-lint-fix-regressions --timeout-ms 60000 -- \
+  bun test ./scripts/verification/verification.test.ts \
+  ./scripts/verification/source-scope.test.ts ./scripts/verification/process.test.ts \
+  ./tools/checks/check-environment.test.ts
 ```
 
-**6/6 gates passed**: artifact parity, strict deployment types, scoped lint,
-**274 Hardhat tests**, **64 Foundry checks / 7 suites**, and **146 Bun tests /
-3,731 assertions / 30 files**. All native interruption cuts passed. The native
-gate took **1,050.045 s**; the six measured gates totalled **1,145.804 s**.
-All 588 source/configuration hashes were stable, all 181 compiler artifact
-hashes matched the baseline, and approved lint debt stayed unchanged.
-
-Before the profile, owning filesystem/child-process regressions passed
-**21 tests / 86 assertions**. The exact report-parent substitution probe
-preserved the foreign result. Two existing local Anvil scenarios then passed
-**153 assertions in 27.94 s**, proving both allocator families use the owned
-run directory and cleanup removes it after success.
+**41 tests / 175 assertions in 7.19 s**, using real temporary Git repositories,
+local bare remotes and the actual copied hook. Both named routes work; wrong
+OID, crossed routes, tags, mixed updates, unknown/detached branches, same-SHA
+branch switching, dirty source and hidden index flags are rejected.
+Strict scoped typechecking inherited the root TypeScript safety options and passed
+for all six owning source/test files. Scoped ESLint passed with **zero findings
+and zero approved debt rows**, without weakening rules or the debt baseline.
+Git metadata uses the existing safe serializer; the copied hook includes its
+three unchanged dependencies. Process cleanup preserves assertion and cleanup
+failures in one aggregate while attempting every cleanup step. Independent
+read-only review found no material issue in the frozen candidate.
 
 ## First red command/error
 
-None in the selected cleanup scope. The final profile exited zero with
-`passed: true`, `failure: null`, `fixtureEvidence.status: removed`.
-Direct focused tests retain their previous lifetime; broader product gates
-remain separate.
+None in the selected Git-route/lint scope. Functional tests, strict types,
+scoped lint and formatting passed.
+
+An expanded Markdown formatting check reports pre-existing `AGENTS.md` formatting
+also present in HEAD; none of its formatting-only differences touch the task's
+added route-policy link. Owning source, guide and handoff formatting are green.
+
+Live source-policy inspection accepts the task branch, then correctly returns
+`VERIFY_DIRTY_SOURCE`: unrelated tracked owner edits and existing untracked evidence
+remain. Profile selection and generated-output handling have not changed.
 
 ## Artifact path
 
-- [Final profile result](evidence/deployment-check/2026-11-15T17-06-34.478Z-89550-xQMyi9/result.json): seven compact result/log files, **360,978 bytes**. Its `fixtures/` subtree is absent.
-- [Representative local result](evidence/deployment-check/cleanup-representative-20261115-CTjJwz/result.json): both `case-*` and `fresh-*` observed, then removed; the old shared fixture parent was not created.
-- Owning implementation: `tools/deployment/test-evidence.ts`; [retention policy](deployment/ignition-stack-design.md#local-fixture-retention).
-- All **1,293** baseline evidence/owner files are unchanged, including public deployment journals, USDC receipts, existing tracked reports, `todo.md` and unrelated owner work. The stand is free.
+- Implementation: `scripts/verification/git.ts`, `pre-push.ts`, `verify.ts`; owning regression commands above, including `process.test.ts`.
+- [Owner-approved route policy](deployment/ignition-stack-design.md#owner-approved-execution-exceptions); [canonical Git instructions](../AGENTS.md#git-and-shared-workspace).
+- Bounded test/type/lint/baseline logs: `/private/tmp/xln-git-route-20261115-op2vczdy/`.
+- Previous [deployment profile](evidence/deployment-check/2026-11-15T17-06-34.478Z-89550-xQMyi9/result.json) stays **6/6 green** for byte-identical 588 covered source/configuration files. It does not cover the changed Git-policy scripts; their focused checks are recorded separately.
+- All existing public deployment/USDC evidence and unrelated owner files remain protected. The real hook is still uninstalled.
 
 ## Next single command
 
 ```sh
-git status --short
+git show --stat --oneline HEAD
 ```
 
-Inspect remaining generated evidence and unrelated owner edits after the
-owner-selected scoped commit. Its six code/configuration/test files match the
-checked candidate; two documentation files describe the completed work.
-Generated local/public evidence remains excluded from source commits. No push
-or additional financial operation is requested.
+Review the approved route/lint commit. Existing public evidence and unrelated
+edits are excluded. The owner authorized this commit; no actual push or hook
+installation is requested.
 
 ## Remaining final gates
 
-- None outstanding for this deployment-profile cleanup candidate. Keep its executable/configuration/test contents unchanged when preparing a commit; changed executable contents require owning checks and the applicable profile again.
-- Explicit keep, failed/interrupted/timed-out outcomes and foreign-directory protection are covered by owning regressions. Existing evidence is never swept retrospectively.
-- Direct focused runs, shared runner changes, `verify`/pre-push profile selection, Cross-J, browser/UI and whole-product/mainnet acceptance remain separate work.
+- None outstanding for the owned Git-route/lint candidate. Preserve its checked source/test contents and original verification provenance when preparing commits; changed executable contents require owning checks again.
+- Verification profile selection and exact handling of generated outputs/dirty source remain separate owner decisions; do not silently ignore changes or install a hook that cannot pass its own policy.
+- Actual publication requires the owner's instruction. Whole-product/mainnet acceptance, browser/UI and Cross-J remain separate work; this change runs none of those flows.

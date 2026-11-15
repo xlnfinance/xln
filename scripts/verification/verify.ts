@@ -3,6 +3,7 @@ import { assertCheckEnvironment } from '../../tools/checks/check-environment';
 import { closeSync, fsyncSync, mkdirSync, openSync, renameSync, writeSync } from 'node:fs';
 import { arch, hostname, platform, release } from 'node:os';
 import { join } from 'node:path';
+import { safeStringify } from '../../core/protocol/serialization';
 import { repository, sourceProblem, sourceState, type SourceState } from './git';
 import { runBoundedCommand, type CommandResult } from './process';
 
@@ -35,7 +36,7 @@ const atomicResult = (path: string, value: unknown): void => {
   const temporary = `${path}.tmp`;
   const fd = openSync(temporary, 'wx', 0o600);
   try {
-    writeSync(fd, `${JSON.stringify(value, null, 2)}\n`);
+    writeSync(fd, `${safeStringify(value, 2)}\n`);
     fsyncSync(fd);
   } finally {
     closeSync(fd);
@@ -84,6 +85,7 @@ export const verify = async (cwd: string) => {
     after = sourceState(root);
     problem ??= sourceProblem(after);
     if (after.head !== before.head || after.tree !== before.tree) problem = 'VERIFY_COMMIT_CHANGED_DURING_CHECK';
+    if (after.branch !== before.branch) problem = 'VERIFY_BRANCH_CHANGED_DURING_CHECK';
   } catch (error) {
     problem = error instanceof Error ? error.message : String(error);
   } finally {

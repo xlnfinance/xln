@@ -19,6 +19,7 @@ For this Sepolia deployment effort and the separately tracked
 the owner's session decisions establish these task-scoped exceptions:
 
 - Execute on the owner's MacBook Pro M5 and existing `testnets_deploy` branch. Preserve unrelated work and retain capacity-one stand locking.
+- Owner decision, 2026-11-15: verification accepts `main` and `testnets_deploy`; pre-push accepts only the matching routes `main -> main` and `testnets_deploy -> testnets_deploy`. `HEAD` targets the checked-out branch's own remote branch. Preserve exact-SHA, stable-branch, clean-source and hidden-index checks. This route policy does not initiate a push or PR.
 - The requirement for three different external AI reviewers is waived for this effort. This record authorizes no external-model dispatch.
 - Exclude generated local test evidence from commits and remove it after verification, retaining runnable tests, commands and brief measured results. Deleted detailed cases cannot be reconstructed from summaries alone.
 - Preserve active and future public deployment journals, sealed artifacts, receipts and original invocation outcomes. Their retention requirements are unchanged; exclusion from a source commit does not authorize deletion.

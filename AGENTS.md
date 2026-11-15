@@ -187,6 +187,8 @@ transitions, one canonical production path, no silent fallback.
 ## GIT AND SHARED WORKSPACE
 
 - Always work on `main` (owner 2026-10-17). No task branches or worktrees; never force-push.
+  Apply the [owner-approved Sepolia task exception](docs/deployment/ignition-stack-design.md#owner-approved-execution-exceptions)
+  when working on or validating its existing branch and publication route.
 - Preserve unrelated user changes on both Macs, including owner files held by the
   synchronization controller; synchronization never discards or overwrites them.
 - No `wip:` commits. Commit only owned paths with `git commit -- <paths>`. Before a shared-tree

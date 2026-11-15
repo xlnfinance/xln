@@ -33,12 +33,14 @@ export const sourceState = (root: string) => ({
 
 export type SourceState = ReturnType<typeof sourceState>;
 
+export const isVerificationBranch = (branch: string): boolean => branch === 'main' || branch === 'testnets_deploy';
+
 // Only the explicitly independent BrainVault tree is outside this gate. Unknown
 // paths still reject; --no-renames preserves both sides of moves across the boundary.
 const requiresCleanSource = (path: string): boolean => !path.startsWith('brainvault/') || isXlnReleasePath(path);
 
 export const sourceProblem = (state: SourceState): string | null => {
-  if (state.branch !== 'main') return `VERIFY_REQUIRES_MAIN:branch=${state.branch}`;
+  if (!isVerificationBranch(state.branch)) return `VERIFY_BRANCH_NOT_ALLOWED:branch=${state.branch}`;
   if (state.hiddenTracked.length) return `VERIFY_HIDDEN_INDEX_PATHS:count=${state.hiddenTracked.length}`;
   const tracked = state.tracked.filter(requiresCleanSource);
   const untracked = state.untracked.filter(requiresCleanSource);

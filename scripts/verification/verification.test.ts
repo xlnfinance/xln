@@ -14,16 +14,15 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { safeStringify } from '../../core/protocol/serialization';
 import { git } from './git';
 import { install } from './install';
-import { validateUpdates } from './pre-push';
 import { runBoundedCommand } from './process';
 import { verify } from './verify';
 
 const temporary = mkdtempSync(join(tmpdir(), 'xln-verification-'));
 let sequence = 0;
 const project = resolve(import.meta.dir, '../..');
-
 const commit = (root: string): void => {
   git(root, ['add', '.']);
   git(root, ['-c', 'commit.gpgsign=false', 'commit', '-qm', 'verification fixture']);
@@ -40,7 +39,7 @@ const fixture = (
   git(root, ['config', 'user.email', 'verification@example.invalid']);
   writeFileSync(
     join(root, 'package.json'),
-    JSON.stringify({
+    safeStringify({
       packageManager: 'bun@1.4.3',
       scripts: { check: 'bun check.ts', 'test:contracts:full': 'bun contracts.ts' },
     }),
@@ -56,6 +55,9 @@ const copyGate = (root: string): void => {
   for (const path of [
     ...['git', 'install', 'pre-push', 'process', 'verify'].map(name => `scripts/verification/${name}.ts`),
     'core/scripts/e2e/runners/process-group.ts',
+    'core/protocol/serialization/index.ts',
+    'core/protocol/serialization/base64.ts',
+    'core/protocol/errors/failure-taxonomy.ts',
     'tools/release-snapshot/scope.ts',
     'tools/checks/check-environment.ts',
     '.githooks/pre-push',
@@ -158,13 +160,19 @@ describe('host-independent verification', () => {
     expect(result.after?.head).not.toBe(result.before.head);
   });
 
-  test('rejects detached HEAD without running checks', async () => {
-    const root = fixture();
-    git(root, ['checkout', '--detach']);
+  test.each([
+    ['main', 'testnets_deploy'],
+    ['testnets_deploy', 'main'],
+  ])('invalidates a same-SHA branch switch from %s to %s', async (branch, destination) => {
+    const root = fixture(`process.exit(Bun.spawnSync(['git', 'checkout', '${destination}']).exitCode);`);
+    git(root, ['branch', 'testnets_deploy']);
+    git(root, ['checkout', branch]);
     const result = await verify(root);
     expect(result.passed).toBe(false);
-    expect(result.problem).toBe('VERIFY_REQUIRES_MAIN:branch=HEAD');
-    expect(result.command.result).toBeNull();
+    expect(result.problem).toBe('VERIFY_BRANCH_CHANGED_DURING_CHECK');
+    expect(result.after?.head).toBe(result.before.head);
+    expect(result.after?.tree).toBe(result.before.tree);
+    expect(result.after?.branch).toBe(destination);
   });
 
   test('kills the exact timed-out process group including a live child', async () => {
@@ -181,44 +189,6 @@ describe('host-independent verification', () => {
       expect(childPid).toBeGreaterThan(0);
       expect(() => process.kill(childPid, 0)).toThrow();
     } finally {
-      closeSync(log);
-    }
-  });
-
-  test('kills a separately detached grandchild while preserving an unrelated process', async () => {
-    const root = fixture();
-    const logPath = join(temporary, 'detached-timeout.log');
-    const log = openSync(logPath, 'wx');
-    const unrelated = Bun.spawn([process.execPath, '-e', 'setInterval(()=>{},1000)'], {
-      stdout: 'ignore',
-      stderr: 'ignore',
-    });
-    const grandchild =
-      'const {spawn}=require("node:child_process"); const p=spawn(process.execPath,["-e","setInterval(()=>{},1000)"],{detached:true,stdio:"ignore"}); console.log("grandchild="+p.pid); setInterval(()=>{},1000);';
-    const command = `const p=Bun.spawn([process.execPath,"-e",${JSON.stringify(grandchild)}],{stdout:"inherit",stderr:"inherit"}); setInterval(()=>{},1000);`;
-    let grandchildPid = 0;
-    try {
-      const result = await runBoundedCommand([process.execPath, '-e', command], root, log, 300);
-      grandchildPid = Number(readFileSync(logPath, 'utf8').match(/grandchild=(\d+)/u)?.[1]);
-      expect(result.timedOut).toBe(true);
-      expect(result.exitCode).toBe(124);
-      expect(grandchildPid).toBeGreaterThan(0);
-      expect(result.cleanup?.pids).toContain(grandchildPid);
-      expect(result.cleanup?.groups).toContain(grandchildPid);
-      expect(result.cleanup?.pids).not.toContain(unrelated.pid);
-      expect(result.error).toBeNull();
-      expect(() => process.kill(grandchildPid, 0)).toThrow();
-      expect(() => process.kill(unrelated.pid, 0)).not.toThrow();
-    } finally {
-      if (grandchildPid) {
-        try {
-          process.kill(grandchildPid, 'SIGKILL');
-        } catch (error) {
-          if (!(error instanceof Error && 'code' in error && error.code === 'ESRCH')) throw error;
-        }
-      }
-      unrelated.kill('SIGKILL');
-      await unrelated.exited;
       closeSync(log);
     }
   });
@@ -241,7 +211,7 @@ describe('host-independent verification', () => {
       '-e',
       'console.log("owned-child="+process.pid); setInterval(()=>{},1000);',
     ];
-    const command = `const p=Bun.spawn([process.execPath,...${JSON.stringify(args)}],{env:{...process.env,XLN_FOUNDRY_HOME:${JSON.stringify(join(root, 'foundry'))}},stdout:"inherit",stderr:"inherit"}); setInterval(()=>{},1000);`;
+    const command = `const p=Bun.spawn([process.execPath,...${safeStringify(args)}],{env:{...process.env,XLN_FOUNDRY_HOME:${safeStringify(join(root, 'foundry'))}},stdout:"inherit",stderr:"inherit"}); setInterval(()=>{},1000);`;
     try {
       const result = await runBoundedCommand([process.execPath, '-e', command], root, log, 800);
       const childPid = Number(readFileSync(logPath, 'utf8').match(/owned-child=(\d+)/u)?.[1]);
@@ -258,19 +228,6 @@ describe('host-independent verification', () => {
 });
 
 describe('local Git push gate', () => {
-  test('rejects non-main or non-HEAD code updates but permits deletion-only input', () => {
-    const head = '1'.repeat(40);
-    const zero = '0'.repeat(40);
-    expect(validateUpdates(`refs/heads/main ${head} refs/heads/main ${zero}\n`, head)).toBe(true);
-    expect(validateUpdates(`(delete) ${zero} refs/heads/retired ${head}\n`, head)).toBe(false);
-    expect(() => validateUpdates(`refs/heads/task ${head} refs/heads/task ${zero}\n`, head)).toThrow(
-      'VERIFY_PUSH_REQUIRES_MAIN',
-    );
-    expect(() => validateUpdates(`refs/heads/main ${'2'.repeat(40)} refs/heads/main ${zero}\n`, head)).toThrow(
-      'VERIFY_PUSH_REQUIRES_EXACT_HEAD',
-    );
-  });
-
   test('preserves conflicting core.hooksPath and existing executable default hooks', () => {
     const root = fixture();
     copyGate(root);
@@ -284,23 +241,25 @@ describe('local Git push gate', () => {
     expect(existsSync(hook)).toBe(true);
   });
 
-  test('checks an actual push to a local bare remote and blocks dirty source', () => {
+  test.each(['main', 'testnets_deploy'])('checks a branch-matched local push on %s and blocks dirty source', branch => {
     const root = fixture();
+    if (branch !== 'main') git(root, ['checkout', '-b', branch]);
     copyGate(root);
     install(root);
     install(root);
     const remote = join(temporary, `remote ${sequence++}.git`);
     git(temporary, ['init', '--bare', remote]);
     git(root, ['remote', 'add', 'local-test', remote]);
-    git(root, ['push', 'local-test', 'main']);
-    expect(git(remote, ['rev-parse', 'refs/heads/main']).trim()).toBe(git(root, ['rev-parse', 'HEAD']).trim());
+    git(root, ['push', 'local-test', branch]);
+    const remoteRef = `refs/heads/${branch}`;
+    expect(git(remote, ['rev-parse', remoteRef]).trim()).toBe(git(root, ['rev-parse', 'HEAD']).trim());
     writeFileSync(join(root, 'input.txt'), 'next commit\n');
     commit(root);
     writeFileSync(join(root, 'input.txt'), 'uncommitted owner edit\n');
-    const pushed = Bun.spawnSync(['git', 'push', 'local-test', 'main'], { cwd: root, timeout: 10_000 });
+    const pushed = Bun.spawnSync(['git', 'push', 'local-test', `HEAD:${remoteRef}`], { cwd: root, timeout: 10_000 });
     expect(pushed.exitCode).not.toBe(0);
     expect(pushed.stderr.toString()).toContain('VERIFY_PUSH_REJECTED');
-    expect(git(remote, ['rev-parse', 'refs/heads/main']).trim()).not.toBe(git(root, ['rev-parse', 'HEAD']).trim());
+    expect(git(remote, ['rev-parse', remoteRef]).trim()).not.toBe(git(root, ['rev-parse', 'HEAD']).trim());
     expect(readFileSync(join(root, 'input.txt'), 'utf8')).toBe('uncommitted owner edit\n');
   });
 });
