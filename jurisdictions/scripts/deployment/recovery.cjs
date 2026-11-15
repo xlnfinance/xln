@@ -5,7 +5,7 @@ const { assertNativeNonces } = require('./nonces.cjs');
 const { assertNativeReceipts } = require('./receipts.cjs');
 const { existsSync } = require('node:fs');
 const { join } = require('node:path');
-const { deploymentModuleIds, assertNativeDeploymentIdentity, assertNativeJournalIdentity } = require('./namespace.cjs');
+const { deploymentModuleIds, assertNativeDeploymentIdentity, assertNativeJournalIdentity } = require('./artifacts/namespace.cjs');
 const { readStackFoundationAuthority } = require('../../../core/jurisdiction/adapter/stack-manager/bindings.ts');
 
 const validateFoundation = async (attempt, prior, transactions, ethers) => {

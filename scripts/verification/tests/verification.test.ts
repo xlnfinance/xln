@@ -1,0 +1,207 @@
+import { afterAll, describe, expect, test } from 'bun:test';
+import { closeSync, existsSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { safeStringify } from '../../../core/protocol/serialization';
+import { git } from '../git';
+import { install } from '../install';
+import { runBoundedCommand } from '../process';
+import { verify } from '../verify';
+import { createVerificationFixtures } from '../fixtures';
+
+const { temporary, project, fixture, copyGate, commit } = createVerificationFixtures();
+let sequence = 0;
+
+afterAll(() => rmSync(temporary, { recursive: true, force: true }));
+
+describe('host-independent verification', () => {
+  test('records exact clean commit, command, machine versions and complete log', async () => {
+    const root = fixture();
+    const result = await verify(root);
+    expect(result.passed).toBe(true);
+    expect(result.before.head).toBe(git(root, ['rev-parse', 'HEAD']).trim());
+    expect(result.before.tree).toBe(git(root, ['rev-parse', 'HEAD^{tree}']).trim());
+    expect(result.command.argv).toEqual([process.execPath, 'run', 'check']);
+    expect(result.command.budgetMs).toBe(300_000);
+    expect(result.tools.bun.executable).toBe(process.execPath);
+    expect(result.contracts?.argv).toEqual([process.execPath, 'run', 'test:contracts:full']);
+    expect(readFileSync(result.logPath, 'utf8')).toContain('fixture-check-output');
+    expect(readFileSync(result.logPath, 'utf8')).toContain('fixture-contracts-output');
+    expect(JSON.parse(readFileSync(result.resultPath, 'utf8')).passed).toBe(true);
+    expect(readdirSync(dirname(result.resultPath)).sort()).toEqual(['check.log', 'result.json']);
+    expect((await verify(root)).resultPath).not.toBe(result.resultPath);
+  });
+
+  test('rejects dirty tracked and untracked paths without running or modifying them', async () => {
+    const root = fixture('throw new Error("must not execute");');
+    writeFileSync(join(root, 'input.txt'), 'owner edit\n');
+    writeFileSync(join(root, 'owner file $keep.txt'), 'owner untracked\n');
+    const result = await verify(root);
+    expect(result.passed).toBe(false);
+    expect(result.problem).toBe('VERIFY_DIRTY_SOURCE:tracked=1:untracked=1');
+    expect(result.command.result).toBeNull();
+    expect(result.before.untracked).toEqual(['owner file $keep.txt']);
+    expect(readFileSync(join(root, 'input.txt'), 'utf8')).toBe('owner edit\n');
+    expect(readFileSync(join(root, 'owner file $keep.txt'), 'utf8')).toBe('owner untracked\n');
+  });
+
+  test('retains a failing check exit and both output streams', async () => {
+    const result = await verify(
+      fixture('console.log("before-failure"); console.error("failure-detail"); process.exit(7);'),
+    );
+    expect(result.passed).toBe(false);
+    expect(result.problem).toBe('VERIFY_CHECK_FAILED:exitCode=7');
+    expect(result.command.result?.exitCode).toBe(7);
+    const log = readFileSync(result.logPath, 'utf8');
+    expect(log).toContain('before-failure');
+    expect(log).toContain('failure-detail');
+  });
+
+  test('rejects a red contract suite after a green check', async () => {
+    const result = await verify(fixture(undefined, 'console.error("contract-red"); process.exit(3);'));
+    expect(result.passed).toBe(false);
+    expect(result.problem).toBe('VERIFY_CONTRACTS_FAILED:exitCode=3');
+    expect(result.command.result?.exitCode).toBe(0);
+    expect(readFileSync(result.logPath, 'utf8')).toContain('contract-red');
+  });
+
+  test('skips the contract suite when check fails', async () => {
+    const result = await verify(fixture('process.exit(7);', 'throw new Error("must not execute");'));
+    expect(result.problem).toBe('VERIFY_CHECK_FAILED:exitCode=7');
+    expect(result.contracts?.result).toBeNull();
+  });
+
+  test('rejects index flags that hide modified tracked source without resetting them', async () => {
+    const root = fixture();
+    git(root, ['update-index', '--assume-unchanged', 'input.txt']);
+    writeFileSync(join(root, 'input.txt'), 'hidden owner edit\n');
+    expect(git(root, ['diff', '--name-only'])).toBe('');
+    const result = await verify(root);
+    expect(result.passed).toBe(false);
+    expect(result.problem).toBe('VERIFY_HIDDEN_INDEX_PATHS:count=1');
+    expect(result.before.hiddenTracked).toEqual(['input.txt']);
+    expect(git(root, ['ls-files', '-v', 'input.txt']).startsWith('h ')).toBe(true);
+    expect(readFileSync(join(root, 'input.txt'), 'utf8')).toBe('hidden owner edit\n');
+  });
+
+  test('invalidates a check that modifies tracked source', async () => {
+    const result = await verify(fixture('await Bun.write("input.txt", "changed during check");'));
+    expect(result.passed).toBe(false);
+    expect(result.problem).toBe('VERIFY_DIRTY_SOURCE:tracked=1:untracked=0');
+    expect(result.after?.tracked).toEqual(['input.txt']);
+  });
+
+  test('invalidates a check that changes HEAD even if source finishes clean', async () => {
+    const result = await verify(
+      fixture(
+        'const p=Bun.spawnSync(["git","-c","commit.gpgsign=false","commit","--allow-empty","-qm","concurrent commit"]); process.exit(p.exitCode);',
+      ),
+    );
+    expect(result.passed).toBe(false);
+    expect(result.problem).toBe('VERIFY_COMMIT_CHANGED_DURING_CHECK');
+    expect(result.after?.tracked).toEqual([]);
+    expect(result.after?.head).not.toBe(result.before.head);
+  });
+
+  test.each([
+    ['main', 'testnets_deploy'],
+    ['testnets_deploy', 'main'],
+  ])('invalidates a same-SHA branch switch from %s to %s', async (branch, destination) => {
+    const root = fixture(`process.exit(Bun.spawnSync(['git', 'checkout', '${destination}']).exitCode);`);
+    git(root, ['branch', 'testnets_deploy']);
+    git(root, ['checkout', branch]);
+    const result = await verify(root);
+    expect(result.passed).toBe(false);
+    expect(result.problem).toBe('VERIFY_BRANCH_CHANGED_DURING_CHECK');
+    expect(result.after?.head).toBe(result.before.head);
+    expect(result.after?.tree).toBe(result.before.tree);
+    expect(result.after?.branch).toBe(destination);
+  });
+
+  test('kills the exact timed-out process group including a live child', async () => {
+    const root = fixture();
+    const logPath = join(temporary, 'timeout.log');
+    const log = openSync(logPath, 'wx');
+    const command =
+      'const p=Bun.spawn([process.execPath,"-e","setInterval(()=>{},1000)"],{stdout:"inherit",stderr:"inherit"}); console.log("child="+p.pid); setInterval(()=>{},1000);';
+    try {
+      const result = await runBoundedCommand([process.execPath, '-e', command], root, log, 200);
+      expect(result.timedOut).toBe(true);
+      expect(result.exitCode).toBe(124);
+      const childPid = Number(readFileSync(logPath, 'utf8').match(/child=(\d+)/u)?.[1]);
+      expect(childPid).toBeGreaterThan(0);
+      expect(() => process.kill(childPid, 0)).toThrow();
+    } finally {
+      closeSync(log);
+    }
+  });
+
+  test('lets the existing cleanup wrapper stop its detached child and release its fixture lease', async () => {
+    const root = fixture();
+    const logPath = join(temporary, 'cleanup-wrapper.log');
+    const log = openSync(logPath, 'wx');
+    const wrapper = join(project, 'core/scripts/e2e/runners/run-with-test-cleanup.ts');
+    const args = [
+      wrapper,
+      '--reason=verification-timeout',
+      '--cwd',
+      root,
+      '--child-cwd',
+      root,
+      '--keep-test-artifacts',
+      '--',
+      process.execPath,
+      '-e',
+      'console.log("owned-child="+process.pid); setInterval(()=>{},1000);',
+    ];
+    const command = `const p=Bun.spawn([process.execPath,...${safeStringify(args)}],{env:{...process.env,XLN_FOUNDRY_HOME:${safeStringify(join(root, 'foundry'))}},stdout:"inherit",stderr:"inherit"}); setInterval(()=>{},1000);`;
+    try {
+      const result = await runBoundedCommand([process.execPath, '-e', command], root, log, 800);
+      const childPid = Number(readFileSync(logPath, 'utf8').match(/owned-child=(\d+)/u)?.[1]);
+      expect(result.timedOut).toBe(true);
+      expect(result.error).toBeNull();
+      expect(childPid).toBeGreaterThan(0);
+      expect(result.cleanup?.groups).toContain(childPid);
+      expect(() => process.kill(childPid, 0)).toThrow();
+      expect(existsSync(join(root, '.logs/.test-artifact-run-lock.json'))).toBe(false);
+    } finally {
+      closeSync(log);
+    }
+  });
+});
+
+describe('local Git push gate', () => {
+  test('preserves conflicting core.hooksPath and existing executable default hooks', () => {
+    const root = fixture();
+    copyGate(root);
+    git(root, ['config', '--local', 'core.hooksPath', 'owner-hooks']);
+    expect(() => install(root)).toThrow('VERIFY_HOOK_CONFIG_CONFLICT');
+    expect(git(root, ['config', '--local', '--get', 'core.hooksPath']).trim()).toBe('owner-hooks');
+    git(root, ['config', '--local', '--unset', 'core.hooksPath']);
+    const hook = join(root, '.git/hooks/pre-commit');
+    writeFileSync(hook, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    expect(() => install(root)).toThrow('VERIFY_EXISTING_HOOKS_CONFLICT');
+    expect(existsSync(hook)).toBe(true);
+  });
+
+  test.each(['main', 'testnets_deploy'])('checks a branch-matched local push on %s and blocks dirty source', branch => {
+    const root = fixture();
+    if (branch !== 'main') git(root, ['checkout', '-b', branch]);
+    copyGate(root);
+    install(root);
+    install(root);
+    const remote = join(temporary, `remote ${sequence++}.git`);
+    git(temporary, ['init', '--bare', remote]);
+    git(root, ['remote', 'add', 'local-test', remote]);
+    git(root, ['push', 'local-test', branch]);
+    const remoteRef = `refs/heads/${branch}`;
+    expect(git(remote, ['rev-parse', remoteRef]).trim()).toBe(git(root, ['rev-parse', 'HEAD']).trim());
+    writeFileSync(join(root, 'input.txt'), 'next commit\n');
+    commit(root);
+    writeFileSync(join(root, 'input.txt'), 'uncommitted owner edit\n');
+    const pushed = Bun.spawnSync(['git', 'push', 'local-test', `HEAD:${remoteRef}`], { cwd: root, timeout: 10_000 });
+    expect(pushed.exitCode).not.toBe(0);
+    expect(pushed.stderr.toString()).toContain('VERIFY_PUSH_REJECTED');
+    expect(git(remote, ['rev-parse', remoteRef]).trim()).not.toBe(git(root, ['rev-parse', 'HEAD']).trim());
+    expect(readFileSync(join(root, 'input.txt'), 'utf8')).toBe('uncommitted owner edit\n');
+  });
+});

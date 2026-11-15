@@ -10,29 +10,25 @@ import { assertEslintDebt } from '../../core/scripts/checks/architecture/eslint/
 import { assertCheckEnvironment } from '../checks/check-environment';
 import { inheritedStandLock, standLockStatus } from '../stand-lock';
 import { createDeploymentTestEvidence, finishDeploymentTestEvidence, withDeploymentTestFixtures } from './test-evidence';
+import { discoverDeploymentTests } from './discovery';
 
 const root = resolve(import.meta.dir, '../..');
 const configPath = join(root, 'tsconfig.deployment.json');
 const nativeTestDirectory = 'core/__tests__/orchestrator/standalone-deployment';
 const owningTests = [
   'core/__tests__/testing/tooling/deployment/deployment-test-evidence.test.ts',
+  'core/__tests__/testing/tooling/deployment/deployment-test-discovery.test.ts',
   'core/__tests__/testing/tooling/lint/eslint-debt.test.ts',
   'core/__tests__/operations/release/foundation-hanko-deploy.test.ts',
   'core/__tests__/orchestrator/stack-manager-routing.test.ts',
   'core/__tests__/orchestrator/stack-manager-validation.test.ts',
   'core/__tests__/orchestrator/stack-manager-ignition-anvil.test.ts',
   'core/__tests__/network/jurisdiction/wrapped-native-listing.test.ts',
-  'core/__tests__/network/jurisdiction/usdc-reserve-roundtrip.test.ts',
-  'core/__tests__/network/jurisdiction/usdc-reserve-roundtrip-evidence.test.ts',
+  'core/__tests__/network/jurisdiction/usdc/usdc-reserve-roundtrip.test.ts',
+  'core/__tests__/network/jurisdiction/usdc/usdc-reserve-roundtrip-evidence.test.ts',
 ];
 
-const nativeTests = (): string[] => {
-  const files = readdirSync(join(root, nativeTestDirectory))
-    .filter(name => /^standalone-deployment.*\.test\.ts$/.test(name)).sort()
-    .map(name => `${nativeTestDirectory}/${name}`);
-  if (files.length === 0) throw new Error('DEPLOYMENT_NATIVE_TASK_TESTS_MISSING');
-  return files;
-};
+const nativeTests = (): string[] => discoverDeploymentTests(join(root, nativeTestDirectory), root);
 
 const deploymentProgram = (): ts.Program => {
   const config = ts.readConfigFile(configPath, ts.sys.readFile);

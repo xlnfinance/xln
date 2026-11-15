@@ -19,7 +19,7 @@ hash_contract_inputs() {
     find \
       scripts/sync-contract-artifacts.sh \
       jurisdictions/contracts \
-      jurisdictions/scripts/generate-typechain.cjs \
+      jurisdictions/scripts/compiler/generate-typechain.cjs \
       jurisdictions/scripts/compiler/local-solc.ts \
       jurisdictions/hardhat.config.ts \
       jurisdictions/package.json \
@@ -110,7 +110,7 @@ else
   rm -rf "$ROOT_DIR/jurisdictions/node_modules"
   HARDHAT_EXPERIMENTAL_ALLOW_NON_LOCAL_INSTALLATION=true "$ROOT_DIR/node_modules/.bin/hardhat" clean
   HARDHAT_EXPERIMENTAL_ALLOW_NON_LOCAL_INSTALLATION=true "$ROOT_DIR/node_modules/.bin/hardhat" compile --force
-  "$NODE_BIN" scripts/generate-typechain.cjs
+  "$NODE_BIN" scripts/compiler/generate-typechain.cjs
 
   if [[ ! -f "$TYPECHAIN_BUILD_PATH/index.ts" ]]; then
     echo "[contracts-sync] ERROR: generated TypeChain index is missing" >&2

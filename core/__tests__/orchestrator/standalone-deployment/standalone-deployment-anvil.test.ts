@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { startStandaloneNode, assertVariantLaneLocked } from './standalone-deployment-support';
+import { startStandaloneNode, assertVariantLaneLocked } from './support/standalone-deployment-support';
 import { until } from '../stack-manager-recovery/stack-manager-resume-support';
 import { safeStringify } from '../../../protocol/serialization';
 

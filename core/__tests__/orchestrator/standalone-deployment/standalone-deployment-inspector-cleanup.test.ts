@@ -4,8 +4,8 @@ import { mkdir, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { safeStringify } from '../../../protocol/serialization';
 import { stopProcessGroup } from '../../../scripts/e2e/runners/process-group';
-import { launchInspectedDeployment } from './standalone-deployment-inspector-support';
-import { startStandaloneNode } from './standalone-deployment-support';
+import { launchInspectedDeployment } from './support/standalone-deployment-inspector-support';
+import { startStandaloneNode } from './support/standalone-deployment-support';
 
 const ownedInspectors = (directory: string) => execFileSync('ps', ['-axo', 'pid=,pgid=,command='], { encoding: 'utf8' })
   .split('\n').flatMap(line => {

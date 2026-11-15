@@ -2,10 +2,10 @@ import { expect, test } from 'bun:test';
 import { link, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { safeStringify } from '../../../protocol/serialization';
-import { startStandaloneNode } from './standalone-deployment-support';
-import { launchDeployment } from './standalone-deployment-process-support';
-import { finish } from './standalone-deployment-transactions-support';
-import { committedDeploymentConfig, directoryDigests, verifyCli } from './standalone-deployment-readonly-support';
+import { startStandaloneNode } from './support/standalone-deployment-support';
+import { launchDeployment } from './support/standalone-deployment-process-support';
+import { finish } from './support/standalone-deployment-transactions-support';
+import { committedDeploymentConfig, directoryDigests, verifyCli } from './support/standalone-deployment-readonly-support';
 
 const rejectsTamper = async (
   fixture: Awaited<ReturnType<typeof startStandaloneNode>>,

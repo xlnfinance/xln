@@ -1,6 +1,6 @@
 import type { JsonRpcProvider } from 'ethers';
 import { readNativeJournal, readNativeTransactions } from '../transactions.cjs';
-import { assertNativeJournalIdentity } from '../namespace.cjs';
+import { assertNativeJournalIdentity } from '../artifacts/namespace.cjs';
 import { assertNativeReceipts } from '../receipts.cjs';
 import { STACK_ARTIFACTS } from '../../../../core/jurisdiction/adapter/stack-manager/verification.ts';
 import { record } from './inputs.ts';

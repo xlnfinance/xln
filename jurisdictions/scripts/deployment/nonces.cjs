@@ -1,4 +1,4 @@
-const { deploymentModuleIds } = require('./namespace.cjs');
+const { deploymentModuleIds } = require('./artifacts/namespace.cjs');
 const { readNativeTransactions, readNativeJournal } = require('./transactions.cjs');
 
 const assertBroadcastNonce = async (attempt, transaction) => {

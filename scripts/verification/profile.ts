@@ -36,9 +36,9 @@ const deploymentFiles = new Set([
   'core/__tests__/orchestrator/stack-manager-routing.test.ts',
   'core/__tests__/orchestrator/stack-manager-validation.test.ts',
   'core/__tests__/network/jurisdiction/wrapped-native-listing.test.ts',
-  'core/__tests__/network/jurisdiction/usdc-reserve-roundtrip.test.ts',
-  'core/__tests__/network/jurisdiction/usdc-reserve-roundtrip-support.ts',
-  'core/__tests__/network/jurisdiction/usdc-reserve-roundtrip-evidence.test.ts',
+  'core/__tests__/network/jurisdiction/usdc/usdc-reserve-roundtrip.test.ts',
+  'core/__tests__/network/jurisdiction/usdc/usdc-reserve-roundtrip-support.ts',
+  'core/__tests__/network/jurisdiction/usdc/usdc-reserve-roundtrip-evidence.test.ts',
   'tsconfig.deployment.json',
   'docs/night-work-plan.md',
 ]);

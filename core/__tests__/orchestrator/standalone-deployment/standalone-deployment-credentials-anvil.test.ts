@@ -2,9 +2,9 @@ import { expect, test } from 'bun:test';
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { safeStringify } from '../../../protocol/serialization';
-import { startStandaloneNode } from './standalone-deployment-support';
-import { launchDeployment } from './standalone-deployment-process-support';
-import { readJson } from './standalone-deployment-transactions-support';
+import { startStandaloneNode } from './support/standalone-deployment-support';
+import { launchDeployment } from './support/standalone-deployment-process-support';
+import { readJson } from './support/standalone-deployment-transactions-support';
 
 const querySecret = 'public_anvil_fixture_query_credential';
 const pathSecret = 'public_anvil_fixture_path_credential';

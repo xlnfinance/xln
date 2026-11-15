@@ -25,7 +25,7 @@ import {
   type JurisdictionGossipAnnouncement,
 } from '../../gossip/announcement';
 const { deploymentModuleIds, assertNativeDeploymentIdentity } = createRequire(import.meta.url)(
-  '../../../../jurisdictions/scripts/deployment/namespace.cjs',
+  '../../../../jurisdictions/scripts/deployment/artifacts/namespace.cjs',
 ) as Readonly<{
   deploymentModuleIds: (deploymentId: string) => { stack: string; listing: string };
   assertNativeDeploymentIdentity: (prior: Awaited<ReturnType<typeof status>>, deploymentId: string) => void;

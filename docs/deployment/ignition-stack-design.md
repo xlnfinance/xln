@@ -292,7 +292,11 @@ checks, browser E2E and unrelated Runtime/performance gates are excluded.
 CJS exports are inferred and linted with `checkJs=false`; this is not strict JS
 checking. The existing exact ESLint debt authority remains 315 rows with its
 unchanged SHA; the focused profile admits only its exact scoped subset.
-The native recovery cases from tickets 04–07 are included. The eleven existing
+The native recovery cases from tickets 04–07 are included. Native test discovery
+is recursive and preserves the previous basename order;
+support files are excluded and an empty test set rejects. The relocated suite
+retains all 21 native test files, including nested recovery and reorg cases.
+The eleven existing
 Stack Manager adapter test files aligned at `2df74f251` are checked separately:
 their 29 tests, owning types and lint are not included in this profile. The
 separate run is retained at `2df74f251:docs/night-work-plan.md`; the

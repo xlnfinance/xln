@@ -11,7 +11,7 @@ import {
 } from '../../../../jurisdictions/scripts/deployment/operator/inputs';
 import { sanitizeDeploymentMessage } from '../../../../jurisdictions/scripts/deployment/evidence.cjs';
 import { privateKey } from '../stack-manager-recovery/stack-manager-resume-support';
-import { startStandaloneNode } from './standalone-deployment-support';
+import { startStandaloneNode } from './support/standalone-deployment-support';
 
 const tokenAddress = '0x1111111111111111111111111111111111111111';
 const otherAccount = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8';

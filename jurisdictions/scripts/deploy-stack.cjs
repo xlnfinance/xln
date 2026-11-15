@@ -1,11 +1,11 @@
 /** Canonical staged Ignition executor, shared by Stack Manager and chain tooling. */
 const { buildFoundationTokenListing, foundationEntityId } = require('./foundation-hanko.cjs');
-const { stackModule, listingModule } = require('./deployment/modules.cjs');
+const { stackModule, listingModule } = require('./deployment/artifacts/modules.cjs');
 const { readToken, publishManifest } = require('./deployment/preflight.cjs');
 const { createModuleDeployer } = require('./deployment/engine.cjs');
 const { deriveManifest, save } = require('./deployment/manifest.cjs');
 const { readRecovery, recoverAddresses } = require('./deployment/recovery.cjs');
-const { deploymentModuleIds } = require('./deployment/namespace.cjs');
+const { deploymentModuleIds } = require('./deployment/artifacts/namespace.cjs');
 
 const prepareListing = async (ethers, attempt, addresses, token, predecessorNonce) => {
   // The signer owns the genesis Foundation. Nonce one binds actual deployed

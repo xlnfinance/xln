@@ -3,10 +3,10 @@ import { Transaction, keccak256 } from 'ethers';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { safeStringify } from '../../../protocol/serialization';
-import { startStandaloneNode } from './standalone-deployment-support';
-import { launchDeployment } from './standalone-deployment-process-support';
-import { observeRpc } from './standalone-deployment-rpc-support';
-import { awaitVerification, readJson } from './standalone-deployment-transactions-support';
+import { startStandaloneNode } from './support/standalone-deployment-support';
+import { launchDeployment } from './support/standalone-deployment-process-support';
+import { observeRpc } from './support/standalone-deployment-rpc-support';
+import { awaitVerification, readJson } from './support/standalone-deployment-transactions-support';
 
 test('depth eleven stays running; a tip advancing during receipt observation completes at a static canonical point', async () => {
   const fixture = await startStandaloneNode(0);

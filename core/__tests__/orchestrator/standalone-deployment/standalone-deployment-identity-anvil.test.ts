@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
-import { startStandaloneNode } from './standalone-deployment-support';
-import { launchDeployment } from './standalone-deployment-process-support';
-import { policyConfig } from './standalone-deployment-policy-config';
-import { awaitVerification } from './standalone-deployment-transactions-support';
+import { startStandaloneNode } from './support/standalone-deployment-support';
+import { launchDeployment } from './support/standalone-deployment-process-support';
+import { policyConfig } from './support/standalone-deployment-policy-config';
+import { awaitVerification } from './support/standalone-deployment-transactions-support';
 import { until } from '../stack-manager-recovery/stack-manager-resume-support';
 
 test('resume rejects a changed resolved native fee policy even with unchanged config source', async () => {

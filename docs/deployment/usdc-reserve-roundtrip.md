@@ -32,8 +32,8 @@ The wallet may differ from the original deployer; it controls its own lazy Entit
 ```sh
 bun run stand:status
 bun run stand:run --reason usdc-reserve-roundtrip --timeout-ms 300000 -- \
-  bun test core/__tests__/network/jurisdiction/usdc-reserve-roundtrip.test.ts \
-  core/__tests__/network/jurisdiction/usdc-reserve-roundtrip-evidence.test.ts
+  bun test core/__tests__/network/jurisdiction/usdc/usdc-reserve-roundtrip.test.ts \
+  core/__tests__/network/jurisdiction/usdc/usdc-reserve-roundtrip-evidence.test.ts
 ```
 
 The test creates a real local Anvil stack and explicitly labelled six-decimal

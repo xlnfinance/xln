@@ -2,11 +2,11 @@ import { expect, test } from 'bun:test';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { safeStringify } from '../../../protocol/serialization';
-import { startStandaloneNode } from './standalone-deployment-support';
-import { launchDeployment } from './standalone-deployment-process-support';
-import { finish, journalMessages, readJson } from './standalone-deployment-transactions-support';
-import { interruptAtReceipt, killNativeGroup, type ReceiptCut } from './standalone-deployment-matrix-barrier-support';
-import { intendedOperations, poisonCatalog, verifyMatrixCompletion, verifyCompletedReruns } from './standalone-deployment-matrix-assertions-support';
+import { startStandaloneNode } from './support/standalone-deployment-support';
+import { launchDeployment } from './support/standalone-deployment-process-support';
+import { finish, journalMessages, readJson } from './support/standalone-deployment-transactions-support';
+import { interruptAtReceipt, killNativeGroup, type ReceiptCut } from './support/standalone-deployment-matrix-barrier-support';
+import { intendedOperations, poisonCatalog, verifyMatrixCompletion, verifyCompletedReruns } from './support/standalone-deployment-matrix-assertions-support';
 
 const phases: readonly ReceiptCut[] = ['before-receipt-observation', 'after-receipt-observation'];
 const cases = intendedOperations.flatMap((name, index) => phases.map(phase => ({
