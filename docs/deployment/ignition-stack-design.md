@@ -296,7 +296,7 @@ The native recovery cases from tickets 04–07 are included. The eleven existing
 Stack Manager adapter test files aligned at `2df74f251` are checked separately:
 their 29 tests, owning types and lint are not included in this profile. The
 separate run is retained at `2df74f251:docs/night-work-plan.md`; the
-[current handoff](../night-work-plan.md#last-green-command) records the new probe run.
+[current handoff](../night-work-plan.md#last-green-command) records the latest task verification.
 The existing `verify`/pre-push path still runs the full repository check and
 contract suite; it has not been adapted to select this scoped profile. GitHub
 workflows remain manually dispatched under the existing owner policy.
@@ -328,6 +328,13 @@ gate artifacts before launch; they do not override this run-owned cleanup policy
 Direct focused `bun test` commands retain their existing evidence location and
 lifetime. Existing reports, other runs, public deployment journals and public
 USDC roundtrip receipts remain outside the cleanup boundary.
+
+The root `.gitignore` excludes untracked files only under the exact roots
+`/docs/evidence/deployment-check/`, `/docs/evidence/usdc-roundtrip/` and
+`/jurisdictions/ignition/deployments/` from automatic Git staging and source-dirt
+checks. Already tracked files and hidden-index checks remain enforced. Public
+journals and sealed artifacts stay in place as operational inputs; Git exclusion
+does not replace deployment preflight, identity or input-integrity checks.
 
 ## Expense accounting
 

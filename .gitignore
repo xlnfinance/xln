@@ -48,6 +48,11 @@ jurisdictions/cache/
 jurisdictions/ignition/deployments/chain-1337/
 jurisdictions/ignition/deployments/chain-31337/
 
+# Local deployment reports and operator records stay on disk.
+/docs/evidence/deployment-check/
+/docs/evidence/usdc-roundtrip/
+/jurisdictions/ignition/deployments/
+
 # Process management
 pids/
 *.pid
