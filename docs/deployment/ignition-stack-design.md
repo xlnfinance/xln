@@ -305,6 +305,29 @@ and owning checks are the gate for qualifying contract/deployment-only work.
 Broader changes and whole-XLN/mainnet release require the full repository and
 owning gates. Known unrelated global failures remain visible release constraints.
 
+### Local fixture retention
+
+Each `check:deployment` invocation owns a fresh report directory under
+`docs/evidence/deployment-check/`. Its `case-*` and `fresh-*` local fixtures
+are allocated inside that run's `fixtures/` subtree. After all six gates pass,
+source/configuration hashes remain unchanged and the measured result is recorded,
+the profile removes only its own fixture subtree. Its compact result and gate
+logs remain. The source snapshot includes both TypeScript configurations,
+`package.json` and `bun.lock` as well as the covered executable sources.
+
+Failed, interrupted or timed-out runs retain their fixtures for diagnosis.
+Cleanup errors fail the command and cannot leave a green result. Ownership of
+the report directory is checked before every result write; ownership of both
+directories is checked before deletion. Substituting a symlink cannot authorize
+writing into another report or recursively deleting another directory.
+
+Set `XLN_KEEP_TEST_ARTIFACTS=1` to retain this run's fixtures even after success.
+The existing wrapper's internal `--keep-test-artifacts` flags preserve preceding
+gate artifacts before launch; they do not override this run-owned cleanup policy.
+Direct focused `bun test` commands retain their existing evidence location and
+lifetime. Existing reports, other runs, public deployment journals and public
+USDC roundtrip receipts remain outside the cleanup boundary.
+
 ## Expense accounting
 
 `expenses.attemptTransactionFeesWei` sums unique canonical mined receipts for

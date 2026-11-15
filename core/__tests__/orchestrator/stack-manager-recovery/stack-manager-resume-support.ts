@@ -1,7 +1,8 @@
 import { safeStringify } from '../../../protocol/serialization';
 import { JsonRpcProvider, Wallet } from 'ethers';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
-import { resolve, join } from 'node:path';
+import { readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { allocateDeploymentTestFixture } from '../../../../tools/deployment/test-evidence';
 import { ERC20Mock__factory } from '../../../../jurisdictions/typechain-types/factories/ERC20Mock__factory';
 import { waitForRpcReady } from '../../../scripts/operations/settlement/rpc-settlement-anvil';
 
@@ -135,8 +136,7 @@ const createCallers = (directory: string, config: string, catalog: string, reque
 };
 
 export const startResumeNode = async (cut: Cut, extraNonce = 0) => {
-  await mkdir(resolve('docs/evidence/ignition-resume-20261112'), { recursive: true });
-  const directory = await mkdtemp(resolve('docs/evidence/ignition-resume-20261112/case-'));
+  const directory = allocateDeploymentTestFixture('case-');
   const port = await freePort();
   const target = `http://127.0.0.1:${port}`;
   const node = startAnvil(directory, port);

@@ -1,8 +1,9 @@
 import { safeStringify } from '../../protocol/serialization';
 import { expect, test } from 'bun:test';
 import { JsonRpcProvider, Wallet, getBytes, toBeHex, zeroPadValue } from 'ethers';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
-import { resolve, join } from 'node:path';
+import { readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { allocateDeploymentTestFixture } from '../../../tools/deployment/test-evidence';
 import { deployJurisdictionStack } from '../../jurisdiction/adapter/stack-manager/deploy';
 import { decodeDeployJurisdictionStackRequest } from '../../jurisdiction/adapter/stack-manager/validation';
 import { verifyJurisdictionStack } from '../../jurisdiction/adapter/stack-manager/verification';
@@ -17,8 +18,7 @@ test('fresh existing-USDC stack admits eleven Ignition operations only at depth 
   const port = reservation.port;
   await reservation.stop(true);
   const rpcUrl = `http://127.0.0.1:${port}`;
-  await mkdir(resolve('docs/evidence/ignition-resume-20261112'), { recursive: true });
-  const directory = await mkdtemp(resolve('docs/evidence/ignition-resume-20261112/fresh-'));
+  const directory = allocateDeploymentTestFixture('fresh-');
   const node = Bun.spawn(['anvil', '--host', '127.0.0.1', '--port', String(port), '--chain-id', '31337',
     '--hardfork', 'osaka', '--block-gas-limit', '60000000', '--silent'], { stdout: 'ignore', stderr: 'inherit' });
   const provider = new JsonRpcProvider(rpcUrl, 31337, { staticNetwork: true, cacheTimeout: -1, pollingInterval: 100 });

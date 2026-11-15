@@ -2,18 +2,20 @@
 import { ESLint } from 'eslint';
 import ts from 'typescript';
 import { createHash } from 'node:crypto';
-import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
+import { closeSync, fsyncSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { runBoundedCommand, type CommandResult } from '../../scripts/verification/process';
 import { safeStringify } from '../../core/protocol/serialization';
 import { assertEslintDebt } from '../../core/scripts/checks/architecture/eslint/debt';
 import { assertCheckEnvironment } from '../checks/check-environment';
 import { inheritedStandLock, standLockStatus } from '../stand-lock';
+import { createDeploymentTestEvidence, finishDeploymentTestEvidence, withDeploymentTestFixtures } from './test-evidence';
 
 const root = resolve(import.meta.dir, '../..');
 const configPath = join(root, 'tsconfig.deployment.json');
 const nativeTestDirectory = 'core/__tests__/orchestrator/standalone-deployment';
 const owningTests = [
+  'core/__tests__/testing/tooling/deployment/deployment-test-evidence.test.ts',
   'core/__tests__/testing/tooling/lint/eslint-debt.test.ts',
   'core/__tests__/operations/release/foundation-hanko-deploy.test.ts',
   'core/__tests__/orchestrator/stack-manager-routing.test.ts',
@@ -148,7 +150,8 @@ const sourceIdentity = (files: string[]) => {
     if (command.exitCode !== 0) throw new Error(`DEPLOYMENT_SOURCE_IDENTITY_FAILED:${command.stderr.toString()}`);
     return command.stdout.toString().trim();
   };
-  const hashes = Object.fromEntries(files.map(path => [path, createHash('sha256').update(readFileSync(join(root, path))).digest('hex')]));
+  const covered = [...new Set([...files, 'tsconfig.deployment.json', 'tsconfig.json', 'package.json', 'bun.lock'])];
+  const hashes = Object.fromEntries(covered.map(path => [path, createHash('sha256').update(readFileSync(join(root, path))).digest('hex')]));
   return { head: readGit(['rev-parse', 'HEAD']), status: readGit(['status', '--short']), hashes };
 };
 
@@ -169,26 +172,45 @@ const writeResult = (directory: string, result: unknown): void => {
   try { fsyncSync(parent); } finally { closeSync(parent); }
 };
 
-const runProfile = async (): Promise<void> => {
-  nativeTests();
-  const before = sourceIdentity(deploymentSources());
-  const directory = join(root, 'docs/evidence/deployment-check', `${new Date().toISOString().replaceAll(':', '-')}-${process.pid}`);
-  mkdirSync(directory, { recursive: true, mode: 0o700 });
-  const results: Array<{ name: string; command: Gate['command']; durationMs: number; result: CommandResult }> = [];
+type GateResult = Readonly<{ name: string; command: Gate['command']; durationMs: number; result: CommandResult }>;
+
+const runGate = async (directory: string, gate: Gate): Promise<GateResult> => {
+  const log = openSync(join(directory, `${gate.name}.log`), 'wx', 0o600);
+  const started = performance.now();
+  let result: CommandResult;
+  try { result = await runBoundedCommand(gate.command, root, log, gate.timeoutMs); }
+  finally { fsyncSync(log); closeSync(log); }
+  return { name: gate.name, command: gate.command, durationMs: Math.round(performance.now() - started), result };
+};
+
+const runGates = async (directory: string) => {
+  const results: GateResult[] = [];
   let failure: string | null = null;
   for (const gate of gates()) {
-    const log = openSync(join(directory, `${gate.name}.log`), 'wx', 0o600);
-    const started = performance.now();
-    let result: CommandResult;
-    try { result = await runBoundedCommand(gate.command, root, log, gate.timeoutMs); }
-    finally { fsyncSync(log); closeSync(log); }
-    results.push({ name: gate.name, command: gate.command, durationMs: Math.round(performance.now() - started), result });
-    console.log(`DEPLOYMENT_GATE:${gate.name}:exit=${result.exitCode}:ms=${Math.round(performance.now() - started)}`);
-    if (result.exitCode !== 0 || result.error || result.interrupted || result.timedOut) {
+    const measured = await runGate(directory, gate);
+    results.push(measured);
+    const { result } = measured;
+    console.log(`DEPLOYMENT_GATE:${gate.name}:exit=${result.exitCode}:ms=${measured.durationMs}`);
+    if (result.exitCode !== 0 || result.signal || result.error || result.interrupted || result.timedOut) {
       failure = `DEPLOYMENT_GATE_FAILED:${gate.name}:${result.error ?? result.exitCode}`;
       break;
     }
   }
+  return { results, failure };
+};
+
+const runProfile = async (): Promise<void> => {
+  nativeTests();
+  const before = sourceIdentity(deploymentSources());
+  const reports = join(root, 'docs/evidence/deployment-check');
+  mkdirSync(reports, { recursive: true, mode: 0o700 });
+  const directory = mkdtempSync(join(reports, `${new Date().toISOString().replaceAll(':', '-')}-${process.pid}-`));
+  const fixtures = createDeploymentTestEvidence(directory);
+  // Wrapper --keep-test-artifacts preserves preceding gates before launch;
+  // XLN_KEEP_TEST_ARTIFACTS separately retains this profile's new fixtures.
+  const execution = await withDeploymentTestFixtures(fixtures.directory, () => runGates(directory));
+  const { results } = execution;
+  let { failure } = execution;
   const after = sourceIdentity(deploymentSources());
   if (before.head !== after.head || Object.keys(before.hashes).length !== Object.keys(after.hashes).length
     || Object.entries(before.hashes).some(([path, hash]) => after.hashes[path] !== hash)) {
@@ -200,7 +222,7 @@ const runProfile = async (): Promise<void> => {
       lint: 'emitted value-import closure, CommonJS/TypeScript consumers and exact shared debt; generated TypeChain covered by parity/types',
       invariants: 'six Foundry invariant suites plus DisputeIngressGasTest; default Foundry runs/depth',
       deferred: ['repository check', 'browser/whole-product release', 'public networks and financial flows'] } };
-  writeResult(directory, result);
+  finishDeploymentTestEvidence(fixtures, result, completed => writeResult(directory, completed));
   console.log(`DEPLOYMENT_CHECK_RESULT:${join(directory, 'result.json')}`);
   if (failure) throw new Error(failure);
 };

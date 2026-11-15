@@ -17,6 +17,8 @@
     "jurisdictions/scripts/foundation-hanko.cjs",
     "jurisdictions/scripts/usdc-reserve-roundtrip.ts",
     "core/__tests__/operations/release/foundation-hanko-deploy.test.ts",
+    "core/__tests__/orchestrator/stack-manager-ignition-anvil.test.ts",
+    "core/__tests__/testing/tooling/deployment/deployment-test-evidence.test.ts",
     "core/__tests__/network/jurisdiction/wrapped-native-listing.test.ts",
     "core/__tests__/network/jurisdiction/usdc-reserve-roundtrip.test.ts",
     "core/__tests__/network/jurisdiction/usdc-reserve-roundtrip-evidence.test.ts",
