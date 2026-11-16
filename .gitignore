@@ -51,6 +51,7 @@ jurisdictions/ignition/deployments/chain-31337/
 # Local deployment reports and operator records stay on disk.
 /docs/evidence/deployment-check/
 /docs/evidence/usdc-roundtrip/
+/docs/evidence/rust-deployment-adapter-20261113/
 /jurisdictions/ignition/deployments/
 
 # Process management

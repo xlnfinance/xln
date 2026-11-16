@@ -2,45 +2,42 @@
 
 ## Current SHA
 
-- Verification parent: `589d7ca3dc16729c8b56cd5400ff42fe455fd1aa`, owner-approved `testnets_deploy`. This handoff accompanies the scanner-fix commit; resolve its resulting SHA with `git rev-parse HEAD`. The recorded checks ran before committing; their source hashes must match the committed files.
+- Cleanup parent: `fb23ed1988a0165c7363f4352ad977d8685379b2`, owner-approved `testnets_deploy`. This handoff accompanies the evidence-exclusion commit; resolve its resulting SHA with `git rev-parse HEAD`.
 - `main`: `019d45beb5954e77fe806d643845f6a4dca4fa82`, unchanged. Apply the [owner-approved execution exceptions](deployment/ignition-stack-design.md#owner-approved-execution-exceptions).
-- This commit contains only the reviewed scanner, CLI regression and handoff. No push, public transaction, dependency update or frontend change occurred in this step.
+- Eight generated evidence files (309,467 bytes) are removed from tracking and retained locally. The Rust report has an exact directory ignore rule; the seven deployment-profile files already fall under an existing rule. Earlier commits retain their history.
+- The [PR body draft](deployment/pull-request-draft.md) remains a separate untracked working document. No push, public transaction, frontend, dependency or executable-source change occurred in this cleanup.
 
 ## Last green command
 
 ```sh
-bun run stand:run --reason no-legacy-final-exact --timeout-ms 60000 -- bun tools/run-parallel-checks.ts check:no-legacy check:folder-width frozen-core:check
+git diff --cached --check
 ```
 
-All three gates passed. The vocabulary scan checked 4725 files with eight exact allowances. It excludes only the root Ignition deployment-evidence tree; current modules and deployment scripts remain checked. Two exact provider-owned RPC fixture URLs are permitted in the existing credential-rejection test. No protocol pattern was removed.
+The prospective source diff against `main` contains zero evidence paths. All eight local files and 185 public deployment files retain their original hashes. The prior deployment profile's 590 covered source/configuration hashes and 181 artifact hashes remain unchanged; no financial or global suite was repeated for this packaging change.
 
-Focused CLI regressions and existing Stack Manager validation passed **26 tests / 72 assertions**, including rejection in adjacent and similarly nested source paths. Strict scoped typechecking, focused ESLint, test formatting and `git diff --check` passed.
-
-The preceding deployment profile remains **6/6 green** for its original invocation: all **590** covered source/configuration hashes and **181** artifact hashes still match. It was not rerun or relabelled as clean-commit evidence for this candidate. All **185** preserved public deployment files remain unchanged.
+Prior owning results remain recorded under their actual invocation identities: deployment profile **6/6 green**, with 274 Hardhat, 64 Foundry and 148 Bun tests / 3739 assertions; scanner/Stack Manager regressions **26 tests / 72 assertions**. These are not fresh clean-commit executions of this cleanup candidate.
 
 ## First red command/error
 
-`bun run check` under the stand with host access exited 1 at `frontend/src/lib/view/DockRoot.svelte:474:64`: `Property 'panel' does not exist on type 'IDockviewPanel | undefined'`. Svelte reported one error and one warning. Other unfinished checks do not establish additional defects. The cancelled vocabulary check subsequently passed in the exact isolated rerun above.
-
-An earlier sandboxed attempt was stopped by denied GPG-agent access in temporary test commits and denied process-group signalling. Host-access repetition preserved test and GPG settings. The stand is free.
+The preceding `bun run check` exited 1 at `frontend/src/lib/view/DockRoot.svelte:474:64`: `Property 'panel' does not exist on type 'IDockviewPanel | undefined'`. The separate UI issue remains open; unfinished checks remain unproven. No full verification or publication readiness is claimed.
 
 ## Artifact path
 
-- [Current result](evidence/deployment-check/no-legacy-20261116-ilbss944/result.json), with focused and exact-check logs beside it.
+- [Cleanup result](evidence/deployment-check/evidence-untrack-20261116-z9su3niq/result.json): file inventory, preserved hashes and source-diff checks. This local report is ignored.
 - [Unchanged deployment profile](evidence/deployment-check/2026-11-15T22-22-24.950Z-65377-5MYXjb/result.json).
-- Original full-check log and scoped type/lint logs: `/private/tmp/xln-no-legacy-20261116-ilbss944/`.
+- [Scanner result](evidence/deployment-check/no-legacy-20261116-ilbss944/result.json) and its adjacent commit proof.
 - [Separate Svelte build-health issue](../.scratch/svelte-dockview-build-health/issues/01-active-panel-event.md).
 
 ## Next single command
 
 ```sh
-git show --stat --oneline HEAD
+git status --short
 ```
 
-Review the committed fix and [CLI regression](../core/__tests__/testing/tooling/policy/source-vocabulary.test.ts). Local evidence remains excluded from Git; no publication is implied.
+Review the remaining PR draft before deciding whether to commit or remove that working document. It is not hidden by an ignore rule or an index flag.
 
 ## Remaining final gates
 
-- Resolve the separately tracked Svelte build-health failure within its own scope. This deployment step does not modify frontend or dependencies.
-- After the separate blocker is resolved, repeat full `bun run verify` on the resulting clean SHA before publishing this broader branch. No global-green or publication-ready result is claimed.
-- Whole-product/mainnet acceptance, Cross-J and financial/recovery authority retain their separate gates.
+- Resolve the separately tracked Svelte build-health failure within its own scope.
+- Handle the untracked PR draft, then run full `bun run verify` on the resulting clean SHA before publishing this broader branch. Actual publication still requires the owner's instruction.
+- Whole-product/mainnet acceptance, Cross-J and application/UI integration retain their separate scope and authority.
