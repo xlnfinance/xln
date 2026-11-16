@@ -56,6 +56,9 @@ const SCAN_EXTENSIONS = [
   '.yml',
   '.yaml',
 ] as const;
+// Sealed compiler inputs preserve upstream source. Current deployment modules,
+// tasks and scripts remain in the first-party source scan.
+const DEPLOYMENT_EVIDENCE_DIRECTORY = 'jurisdictions/ignition/deployments';
 const SKIP_PATH_FRAGMENTS = [
   '/generated/',
   '/node_modules/',
@@ -76,6 +79,7 @@ const SKIP_PATH_FRAGMENTS = [
   '/audits/evidence/',
   // This checker and its siblings necessarily name the words they forbid.
   'core/scripts/checks/policy/check-no-legacy.ts',
+  'core/__tests__/testing/tooling/policy/source-vocabulary.test.ts',
   'core/scripts/checks/architecture/check-canonical-vocabulary.ts',
   'core/scripts/checks/consensus/check-canonical-identity-scan.ts',
   'core/scripts/checks/consensus/check-failure-taxonomy-scan.ts',
@@ -141,12 +145,25 @@ const ALLOWLIST: readonly Allowance[] = [
     match: 'https://sourcify.dev/server/v2/',
     reason: 'Sourcify owns and requires this external verification API route.',
   },
+  {
+    file: 'core/__tests__/orchestrator/stack-manager-validation.test.ts',
+    match: "'https://eth-sepolia.g.alchemy.com/v2/EXAMPLE_API_KEY'",
+    reason: 'Alchemy owns this RPC route; the test requires rejection of its credential-bearing URL.',
+  },
+  {
+    file: 'core/__tests__/orchestrator/stack-manager-validation.test.ts',
+    match: "'https://sepolia.infura.io/v3/EXAMPLE_API_KEY'",
+    reason: 'Infura owns this RPC route; the test requires rejection of its credential-bearing URL.',
+  },
 ];
 
 const listFiles = (directory: string): string[] => readdirSync(directory, {
   withFileTypes: true,
 }).flatMap(entry => {
   const path = join(directory, entry.name);
+  if (path === DEPLOYMENT_EVIDENCE_DIRECTORY || path.startsWith(`${DEPLOYMENT_EVIDENCE_DIRECTORY}/`)) return [];
+  const rootedPath = `/${path.replace(/^\/+/, '')}`;
+  if (SKIP_PATH_FRAGMENTS.some(fragment => rootedPath.includes(fragment))) return [];
   if (entry.isDirectory()) return listFiles(path);
   return entry.isFile() && SCAN_EXTENSIONS.some(ext => path.endsWith(ext)) ? [path] : [];
 });
@@ -159,8 +176,6 @@ let scanned = 0;
 
 for (const root of SCAN_ROOTS) {
   for (const path of listFiles(root)) {
-    const rootedPath = `/${path.replace(/^\/+/, '')}`;
-    if (SKIP_PATH_FRAGMENTS.some(fragment => rootedPath.includes(fragment))) continue;
     scanned += 1;
     const lines = readFileSync(path, 'utf8').split('\n');
     lines.forEach((line, index) => {
