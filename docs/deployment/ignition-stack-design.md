@@ -311,10 +311,10 @@ expand the scope. The deployment profile already runs Hardhat, so it is not
 followed by a duplicate contract-suite invocation.
 
 Owner decision, 2026-11-16: aggregate `check` and its pre-push invocation omit
-`check:frontend`. Svelte dependency restoration and build health belong to the
+`check:frontend` and `check:ui-types`. Frontend dependency/compiler restoration belongs to the
 [separate deferred task](../../.scratch/svelte-dockview-build-health/issues/01-active-panel-event.md).
-The standalone frontend gate remains required for Svelte source/dependency
-changes and whole-product/mainnet acceptance. Source checks, React types,
+Each standalone frontend gate remains required for its source/dependency
+changes; both are required for whole-product/mainnet acceptance. Source checks,
 contract tests, adapter obligations and verification-tooling checks retain
 their existing scope. Profile selection and exact-SHA push guards are unchanged.
 
