@@ -59,7 +59,7 @@ type StablecoinRegistrationTransaction = Readonly<{
   data: string;
 }>;
 
-export const readStackStablecoinMetadata = async (
+const readStackStablecoinMetadata = async (
   provider: JsonRpcProvider,
   address: string,
   blockTag: number | 'latest' = 'latest',

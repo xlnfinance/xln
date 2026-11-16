@@ -2,31 +2,31 @@
 
 ## Current SHA
 
-- Verification parent: `f975e2f6e30dce3448edcd1eeb4673a7261ab22c`, owner-approved `testnets_deploy`. This handoff accompanies the frontend-deferral follow-up commit; resolve its resulting SHA with `git rev-parse HEAD`.
-- Local `main` remains `019d45beb5954e77fe806d643845f6a4dca4fa82`. The fetched `origin/main` is `bdc53c7b48b8d55216c7c2801e015988332befde`; no main changes were merged. Apply the [execution exceptions](deployment/ignition-stack-design.md#owner-approved-execution-exceptions).
-- Owner decision, 2026-11-16: aggregate `check` omits `check:frontend` and `check:ui-types`; each standalone frontend gate remains required for its owning changes, and both for whole-product/mainnet acceptance. The [frontend task](../.scratch/svelte-dockview-build-health/issues/01-active-panel-event.md) is deferred. Source/contract/adapter/tooling obligations and profile-selection guards remain unchanged.
-- No frontend source, dependency, lockfile or production contract changes belong to this step. The PR body remains an untracked working document.
+- Verification parent: `fed0cc97659f5c02312fe3c6457eba1274851917`, owner-approved `testnets_deploy`. This handoff accompanies the native-CLI analysis fix; resolve its resulting SHA with `git rev-parse HEAD`.
+- Local `main` remains `019d45beb5954e77fe806d643845f6a4dca4fa82`; fetched `origin/main` is `bdc53c7b48b8d55216c7c2801e015988332befde`. No main changes were merged. Apply the [execution exceptions](deployment/ignition-stack-design.md#owner-approved-execution-exceptions).
+- Owner decision, 2026-11-16: aggregate `check` excludes `check:frontend` and `check:ui-types`; each remains required for owning changes, and both for whole-product/mainnet acceptance. The [frontend task](../.scratch/svelte-dockview-build-health/issues/01-active-panel-event.md) is deferred. Profile-selection and exact-SHA push guards remain unchanged.
+- Knip now includes native Hardhat/USDC CLI consumers. Two helpers used only inside their files are private; their function bodies are unchanged. No frontend source/dependency or production Solidity change occurred. The PR body remains an untracked working document.
 
 ## Last green command
 
 ```sh
-bun run stand:run --reason svelte-deferral-verification-tests --timeout-ms 60000 -- bun test scripts/verification/tests
+bun run stand:run --reason native-deployment-surface-readonly-rerun --timeout-ms 240000 -- bun /private/tmp/xln-svelte-scope-20261116-91kkjxau/run-readonly-check.ts
 ```
 
-**73 tests / 273 assertions / 5 files passed**, including real local pre-push and remote-preservation cases. The package diff changes only `scripts.check:long`, retaining `check:src` and both standalone frontend gates. Compared with the prior deployment profile, only the root package script differs among 590 covered paths; all 181 artifact hashes and 185 public deployment files remain unchanged.
+**21 tests / 113 assertions / 3 files passed** in 44.31 s: the existing unused-surface unit vectors, Stack Manager validation and real Anvil readonly CLI/tamper scenario. The profile-owned successful fixtures were removed. The first temporary wrapper run failed after all tests passed because it read a void cleanup return; the corrected exact rerun exited zero.
 
-The preceding deployment profile remains 6/6 green for its original invocation (274 Hardhat, 64 Foundry, 148 Bun tests / 3739 assertions). It does not certify a fresh run of the changed aggregate command.
+`check:unused-surface`, `check:dead-code`, strict deployment types and full ESLint passed. Runtime/non-runtime unused debt is zero; ESLint retains exactly 315 approved rows and its original hash. The prior 73 verification tests / 273 assertions remain applicable to unchanged verification source/tests. The historical deployment profile is not a fresh run of this changed source candidate.
 
 ## First red command/error
 
-The latest publication attempt on clean `f975e2f6e` passed all three short checks, then React typechecking failed with `TS5025: Unknown compiler option --checkers`. Its local compiler is 5.9.3 despite the 7.0.2 manifest. No remote ref was updated. Both frontend type/build gates are now explicitly deferred by the owner; the updated full pre-push result is pending. No whole-product acceptance is claimed.
+The preceding clean `fed0cc976` push failed on three unused Stack Manager exports. The analyzer omitted their native CLI consumers; the corrected graph and two truly internal helper exports are now checked. Full pre-push on the resulting committed candidate is pending. Deferred frontend failures remain unverified product constraints.
 
 ## Artifact path
 
-- [Scope-change result](evidence/deployment-check/svelte-deferral-20261116-91kkjxau/result.json).
-- [Previous rejected publication](evidence/deployment-check/pr-publication-20261116-32_38s39/verification-result.json).
+- [Readonly scenario result](evidence/deployment-check/native-surface-20261116-n82nNM/result.json) and its adjacent source proof.
+- [Previous rejected publication](evidence/deployment-check/pr-publication-20261116-7hmru6i8/verification-result.json).
+- Static/type/lint/focused-test logs: `/private/tmp/xln-svelte-scope-20261116-91kkjxau/`.
 - [Historical deployment profile](evidence/deployment-check/2026-11-15T22-22-24.950Z-65377-5MYXjb/result.json).
-- Original focused-test log: `/private/tmp/xln-svelte-scope-20261116-91kkjxau/verification-tests.log`.
 
 ## Next single command
 
@@ -38,6 +38,6 @@ Run on the committed candidate with a clean source tree. Preserve the working PR
 
 ## Remaining final gates
 
-- Full pre-push on the clean committed candidate, including aggregate `check` and Hardhat. Diagnose only an observed remaining failure.
-- Verify the remote head, then create the requested PR using the prepared body. This authorizes no merge or new public financial operation.
-- The separate frontend task, whole-product/mainnet acceptance and Cross-J retain their owning gates.
+- Full pre-push on the clean committed candidate, including aggregate `check` and Hardhat; fix only an observed remaining failure.
+- Verify the remote head, then create the requested PR. This authorizes no merge or new public financial operation.
+- Frontend restoration, whole-product/mainnet acceptance and Cross-J retain their separate gates.

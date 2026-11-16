@@ -13,7 +13,7 @@ import {
 import type { JurisdictionStackManifest } from '../../../../core/jurisdiction/adapter/stack-manager/types.ts';
 
 const repository = fileURLToPath(new URL('../../../../', import.meta.url));
-export const digest = (bytes: Uint8Array | string): string => createHash('sha256').update(bytes).digest('hex');
+const digest = (bytes: Uint8Array | string): string => createHash('sha256').update(bytes).digest('hex');
 
 const hashMap = (input: unknown): Record<string, string> =>
   Object.fromEntries(

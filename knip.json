@@ -29,6 +29,8 @@
     "core/qa/tools/code-fingerprint-cli.ts",
     "core/qa/tools/runtime-state-diff-cli.ts",
     "jurisdictions/hardhat.config.ts",
+    "jurisdictions/tasks/*.ts",
+    "jurisdictions/scripts/usdc-reserve-roundtrip.ts",
     "jurisdictions/test/**/*.{ts,mjs}"
   ],
   "project": [
@@ -36,11 +38,13 @@
     "scripts/**/*.ts",
     "tools/**/*.ts",
     "custody/**/*.ts",
+    "jurisdictions/tasks/**/*.ts",
+    "jurisdictions/scripts/deploy-stack.cjs",
+    "jurisdictions/scripts/deployment/**/*.{ts,cjs}",
+    "jurisdictions/scripts/usdc-reserve-roundtrip/**/*.ts",
     "jurisdictions/test/**/*.{ts,mjs}"
   ],
-  "ignore": [
-    "frontend/**"
-  ],
+  "ignore": ["frontend/**"],
   "ignoreDependencies": [
     "@openzeppelin/contracts",
     "buffer",
