@@ -195,7 +195,7 @@
     "check": "bun run check:short && bun run check:long",
     "check:deployment": "bun tools/deployment/check.ts",
     "check:short": "bun tools/run-parallel-checks.ts check:first-hub-account check:contract-artifact-drift check:frontend-file-size",
-    "check:long": "bun tools/run-parallel-checks.ts check:src check:frontend check:ui-types",
+    "check:long": "bun tools/run-parallel-checks.ts check:src check:ui-types",
     "check:first-hub-account": "bun tools/checks/check-environment.ts && bun test --tsconfig-override ./ui/tsconfig.json ./ui/src/runtime/first-hub-account.test.ts && bun test ./core/__tests__/entity/profile/open-account-profile-advertise.test.ts tools/checks/check-environment.test.ts",
     "check:brainvault": "bun tools/checks/check-environment.ts && bun test ./brainvault/tests/core.test.ts ./tests/unit/brainvault-workers.test.ts ./tests/unit/brainvault-native.test.ts ./core/__tests__/api/server/server-rpc-startup-gate.test.ts ./core/__tests__/api/runtime-adapter/radapter-remote-reconnect.test.ts",
     "check:contract-artifact-drift": "bun core/scripts/checks/contracts/check-contract-artifact-drift.ts",

@@ -247,6 +247,10 @@ for execution host, branch, external review and local evidence retention.
   R/E/A transitions, consensus, storage, shared Hanko/crypto protocol semantics or application
   API/UI behavior outside deployment require the broader path. A `core/` location,
   transitive import or generated contract-artifact destination alone does not expand scope.
+- **Svelte deferral (owner 2026-11-16):** aggregate `check` and its pre-push invocation
+  exclude `check:frontend`. Keep the [frontend restoration task](.scratch/svelte-dockview-build-health/issues/01-active-panel-event.md)
+  separate; run `check:frontend` for Svelte source/dependency changes and whole-product/mainnet
+  acceptance. Other source, contract, adapter and verification-tooling gates remain required.
 - Run focused checks first, then the applicable profile once per executable candidate.
   For documentation-only updates within this scope, validate the diff and links; reuse
   green evidence only when covered executable source, configuration, tests and artifacts

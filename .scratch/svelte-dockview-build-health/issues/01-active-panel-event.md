@@ -1,37 +1,40 @@
-# 01: Fix the Svelte Dockview active-panel callback type
+# 01: Restore locked Svelte dependencies and verify frontend health
 
 Type: implementation
 Category: bug
 Completed: no
-Status: ready-for-agent
+Status: ready-for-human
 Blocked by: None
 
 ## Problem
 
-The historical full repository check reported a callback mismatch at `frontend/src/lib/view/DockRoot.svelte:474`: the installed frontend Dockview SDK passes `IDockviewPanel | undefined` directly, while the callback destructures `{ panel }`. The source line is unchanged from commit `019d45beb5954e77fe806d643845f6a4dca4fa82`. No fresh typecheck, browser check or full repository check was run for this record.
+The frontend manifest and both lockfiles require Dockview 8.6.0. The root installation contains 8.6.0, but `frontend/node_modules` contains Dockview and dockview-core 4.13.1. The nearer frontend installation shadows the root package.
 
-Observed error: `Property 'panel' does not exist on type 'IDockviewPanel | undefined'`.
+The observed `DockRoot.svelte:474` error is `Property 'panel' does not exist on type 'IDockviewPanel | undefined'`. Dockview 4.13.1 passes the panel directly; 8.6.0 passes `{ panel, origin }`. The current `({ panel }) =>` callback matches the installed root 8.6.0 declarations. A source change to match 4.13.1 is not justified by this failure.
 
-The owner explicitly chose to keep this UI build-health fix separate from the contract-deployment task on 2026-11-11. This record does not authorize starting UI implementation in that task.
+## Scope and authority
 
-## Scope
+Owner decision, 2026-11-16: defer this frontend work and isolate it from the Sepolia deployment/publication effort. Aggregate `check` and pre-push omit `check:frontend`; its standalone command is retained. This task is not selected for implementation.
 
-First establish the intended frontend dependency resolution against its own manifest and lockfile. Static inspection on 2026-11-16 found installed `dockview` and `dockview-core` at `4.13.1`, while `frontend/package.json` declares `dockview: ^8.6.0`. Do not choose a code fix solely to accommodate an inconsistent installation.
+When frontend work resumes, restore its installation from the existing lockfile before diagnosing source behavior. Keep manifest/lockfile changes separate from installation repair. Only change the callback if the correctly resolved SDK still demonstrates a source defect. Preserve Graph3D activation and the no-active-panel case.
 
-Adapt the callback to the intended SDK's actual signature, preserving optional `panel?.id` handling and Graph3D initialization. For the currently observed direct-panel signature, the change is from `({ panel }) =>` to `(panel) =>`. The installed declaration is `frontend/node_modules/dockview-core/dist/cjs/api/component.api.d.ts`; a different root SDK does not establish frontend compatibility.
-
-Svelte is frozen except for build health under AGENTS.md. This record authorizes no wallet feature, dependency upgrade, cross-version adapter, suppression or type assertion.
+This task authorizes no dependency upgrade, wallet feature, compatibility adapter, suppression or type assertion. Deployment code, public journals, seals, receipts and unrelated owner work remain outside its scope.
 
 ## Acceptance criteria
 
-- [ ] Frontend manifest, lockfile and resolved SDK consistency is established before choosing the callback fix.
-- [ ] The frontend type checker accepts the callback against that dependency resolution.
-- [ ] Existing Graph3D selection behavior and the undefined-panel case are verified with an appropriate owning browser check under the stand lock.
-- [ ] `bun run check` passes on the final candidate; other unrun or unrelated gates are reported explicitly.
-- [ ] Contract-deployment changes and the owner's unrelated work are preserved.
+- [ ] Frontend installation matches its manifest and existing lockfile; record actual resolved Dockview/dockview-core paths and versions.
+- [ ] Run `bun run check:frontend` against that installation and retain the first remaining error, or its green result.
+- [ ] Any necessary source fix follows the intended SDK contract and verifies Graph3D activation plus the no-active-panel case through an owning browser check under the stand lock.
+- [ ] Run the applicable source/contract gates; full product acceptance also requires the standalone frontend gate.
+- [ ] Record how frontend verification is invoked when frontend work resumes; keep the owning gate mandatory for Svelte source/dependency changes.
+- [ ] Preserve deployment changes, public evidence and unrelated owner work.
 
-## Evidence
+## Evidence and limits
 
-Current evidence is static source, declaration and package-metadata inspection only. It does not establish a fresh checker failure or a completed UI fix. The task remains open and requires its own verification.
+Public-push verification on clean `3ec2309be09df916458d3e6e103590a065515873` reproduced the Svelte checker failure and rejected the push. Its local result is at `docs/evidence/deployment-check/pr-publication-20261116-32_38s39/verification-result.json`.
 
-Under [AGENTS.md verification scope](../../../AGENTS.md#verification-scope), contract/deployment-only readiness uses `check:deployment` plus owning checks; this separate Svelte issue does not reopen a completed deployment ticket. The full repository check remains required for the UI change and broader release scope. Do not mark this UI task complete from static inspection alone.
+Static inspection confirmed both installed event signatures and the version mismatch. No frozen reinstall, checker run against a consistent frontend 8.6.0 installation or owning browser verification has been performed. This task remains deferred and incomplete.
+
+## Comments
+
+- The owner isolated UI work from deployment on 2026-11-11 and confirmed this deferral on 2026-11-16. Removing the aggregate frontend step does not waive source, contract, adapter or verification-tooling checks, or certify whole-product/mainnet acceptance. See [verification scope](../../../AGENTS.md#verification-scope).

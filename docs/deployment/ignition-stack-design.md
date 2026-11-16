@@ -310,6 +310,14 @@ followed by `test:contracts:full`. This includes the shared Solidity schemas
 expand the scope. The deployment profile already runs Hardhat, so it is not
 followed by a duplicate contract-suite invocation.
 
+Owner decision, 2026-11-16: aggregate `check` and its pre-push invocation omit
+`check:frontend`. Svelte dependency restoration and build health belong to the
+[separate deferred task](../../.scratch/svelte-dockview-build-health/issues/01-active-panel-event.md).
+The standalone frontend gate remains required for Svelte source/dependency
+changes and whole-product/mainnet acceptance. Source checks, React types,
+contract tests, adapter obligations and verification-tooling checks retain
+their existing scope. Profile selection and exact-SHA push guards are unchanged.
+
 Pre-push uses Git's actual destination OID as the base and includes the entire
 pending range with renames represented as deletion plus addition. It never
 selects by branch name or an environment override. A new remote branch or a
