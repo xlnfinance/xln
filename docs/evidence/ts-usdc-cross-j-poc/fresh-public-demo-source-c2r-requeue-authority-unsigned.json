@@ -1,0 +1,45 @@
+{
+  "apiBase": "http://localhost:8080",
+  "approved": false,
+  "candidateDigest": "7c1dc0e7b67b7e79389845459ff95c673128c348320ac669dbd229cb19295fc4",
+  "candidateHead": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26",
+  "catalogDigest": "a46f46e495c3085057c3eeed7d0d17b8ac595b9338d96440b4f124461852dbf1",
+  "chain": {
+    "anchorHash": "0x9c06539c5fed02f8f32fa58a854e5cf1ca42610be2d38bd4b233a9842894f7c2",
+    "anchorNumber": 12164807,
+    "chainId": 11155111,
+    "codeHashes": {
+      "0x175343fc9d198b31f493cafe2639fe6dcda59c77": "0x64ebb5db40c6deb7a16b733a30481752a3e64a51323fd51c41fa1c4b4b24eac5",
+      "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238": "0xcd3f29e2ea9c61dadd48bfeaf8b2884b6de9dfee7bf45329452c4c33d0868ceb",
+      "0x32a4a72992ad142e36fa1c5989b95fed60987818": "0xd56dbdedd8973d72780dd49bbe5b25d9cc6a2cf00d5182651b448d9782005a51",
+      "0x9c4173eed1dc7c24c5207a705382488c859588e3": "0xc0333495db29b94d20a25de1df465e4e4b95cd1981dacd9627dc83f03da84334",
+      "0xa2950f711292216419d0691b2aa17dd3ac947e35": "0x02413ad800e58e168089146dd8b10a7e36316bfbe35a201f1e6f02c12a2ed717",
+      "0xa8674d878bce007812beea6b131a80dde43ef4cf": "0x2b53ca548ebd0cb7cd1eca973f6857deea6203c12ea29e1f14f06fae5e117a9c"
+    },
+    "depository": "0x32a4a72992ad142e36fa1c5989b95fed60987818",
+    "entityProvider": "0x9c4173eed1dc7c24c5207a705382488c859588e3",
+    "token": "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238"
+  },
+  "expiresAt": 1795049760000,
+  "hubEntity": "0x64abda6ea9caaae7ecc550e8d4531200893574572d253a8c7e3495d725995260",
+  "operation": "source-c2r",
+  "payer": {
+    "address": "0x944d742ada37d5416774d6303a649326eb1e9478",
+    "firstNonce": 0,
+    "gasLimit": "800000",
+    "maxFeePerGasWei": "1000000000",
+    "maxPriorityFeePerGasWei": "100000000",
+    "totalFeeLimitWei": "800000000000000"
+  },
+  "settlement": {
+    "accountNonce": 8,
+    "accountNonceBefore": 0,
+    "amountAtoms": "1000000",
+    "hubBatchNonce": "1",
+    "hubReserveBeforeAtoms": "1",
+    "userReserveBeforeAtoms": "0"
+  },
+  "userEntity": "0xcfcdd2d155d6ee85d446d49045cb444a78df66b89a18c84959665a040671dae2",
+  "userSigner": "0x61ff4c022bcc7d342d0d68a7b85f18e0fd7d9446",
+  "version": 1
+}

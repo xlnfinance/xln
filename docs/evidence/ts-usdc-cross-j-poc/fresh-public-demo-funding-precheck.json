@@ -1,0 +1,243 @@
+{
+  "activeExecutableAndCatalogMatch": true,
+  "authorityApproved": false,
+  "authorityPath": ".logs/ts-usdc-cross-j-poc/demo/fresh-w4vGds/one-run-funding.2YBlNpQj/authority.json",
+  "chains": [
+    {
+      "allowanceAtoms": "0",
+      "anchorHash": "0x108262ad652db3ca59084fe09a1055bf9feb9258147602f5212d8febbaf5754e",
+      "anchorNumber": 12163178,
+      "assetAndCodeVerified": true,
+      "before": {
+        "backing": "1000000",
+        "entityNonce": "3",
+        "funderNativeWei": "41201929995985112185",
+        "funderNonce": 109,
+        "funderUsdc": "8000000",
+        "hubDebt": "0",
+        "hubNativeWei": "0",
+        "hubReserve": "0",
+        "point": {
+          "hash": "0x108262ad652db3ca59084fe09a1055bf9feb9258147602f5212d8febbaf5754e",
+          "number": 12163178
+        },
+        "user": {
+          "nativeWei": "0",
+          "usdc": "0"
+        }
+      },
+      "calls": [
+        {
+          "estimate": "139993",
+          "gasLimit": "200000",
+          "stage": "approval",
+          "withinLimit": true
+        },
+        {
+          "estimate": null,
+          "gasLimit": "600000",
+          "reason": "authorized-hanko-and-confirmed-allowance-required",
+          "stage": "deposit"
+        },
+        {
+          "estimate": "207391",
+          "gasLimit": "300000",
+          "stage": "native-topup",
+          "withinLimit": true
+        },
+        {
+          "estimate": "154151",
+          "gasLimit": "200000",
+          "stage": "user-principal-transfer",
+          "withinLimit": true
+        },
+        {
+          "estimate": "207391",
+          "gasLimit": "300000",
+          "stage": "user-native-topup",
+          "withinLimit": true
+        }
+      ],
+      "chainId": 11155111,
+      "confirmedAfter": 109,
+      "feeLimits": [
+        {
+          "fits": true,
+          "maxFeePerGasWei": "1000000000",
+          "maxPriorityFeePerGasWei": "100000000",
+          "stage": "approval"
+        },
+        {
+          "fits": true,
+          "maxFeePerGasWei": "1000000000",
+          "maxPriorityFeePerGasWei": "100000000",
+          "stage": "deposit"
+        },
+        {
+          "fits": true,
+          "maxFeePerGasWei": "1000000000",
+          "maxPriorityFeePerGasWei": "100000000",
+          "stage": "native-topup"
+        },
+        {
+          "fits": true,
+          "maxFeePerGasWei": "1000000000",
+          "maxPriorityFeePerGasWei": "100000000",
+          "stage": "user-principal-transfer"
+        },
+        {
+          "fits": true,
+          "maxFeePerGasWei": "1000000000",
+          "maxPriorityFeePerGasWei": "100000000",
+          "stage": "user-native-topup"
+        }
+      ],
+      "feeSample": {
+        "baseFeePerGasWei": "15",
+        "block": 12163205,
+        "hash": "0x593e30ce85054f974366508e46fc7e78d9af00ac99dcde9d3c1571bd4934ed5d"
+      },
+      "liveNonce": 109,
+      "observed": {
+        "backing": "1000000",
+        "entityNonce": "3",
+        "funderNativeWei": "41201929995985112185",
+        "funderNonce": 109,
+        "funderUsdc": "8000000",
+        "hubDebt": "0",
+        "hubNativeWei": "0",
+        "hubReserve": "0",
+        "point": {
+          "hash": "0x593e30ce85054f974366508e46fc7e78d9af00ac99dcde9d3c1571bd4934ed5d",
+          "number": 12163205
+        },
+        "user": {
+          "nativeWei": "0",
+          "usdc": "0"
+        }
+      },
+      "pendingAfter": 109,
+      "pendingNonce": 109,
+      "requiredNativeWei": "4600000000000000",
+      "requiredUsdcAtoms": "1000001",
+      "status": "read-only-precheck-passed",
+      "unusedSlots": 5
+    },
+    {
+      "allowanceAtoms": "0",
+      "anchorHash": "0x8567560815e69c01d8574b2d1455a04400905f3745573894960f1da3e6e55c90",
+      "anchorNumber": 330496531,
+      "assetAndCodeVerified": true,
+      "before": {
+        "backing": "5000000",
+        "entityNonce": "3",
+        "funderNativeWei": "528464472972889600",
+        "funderNonce": 33,
+        "funderUsdc": "15000000",
+        "hubDebt": "0",
+        "hubNativeWei": "0",
+        "hubReserve": "0",
+        "point": {
+          "hash": "0x8567560815e69c01d8574b2d1455a04400905f3745573894960f1da3e6e55c90",
+          "number": 330496531
+        },
+        "user": {
+          "nativeWei": "0",
+          "usdc": "0"
+        }
+      },
+      "calls": [
+        {
+          "estimate": "56240",
+          "gasLimit": "90000",
+          "stage": "approval",
+          "withinLimit": true
+        },
+        {
+          "estimate": null,
+          "gasLimit": "600000",
+          "reason": "authorized-hanko-and-confirmed-allowance-required",
+          "stage": "deposit"
+        },
+        {
+          "estimate": "21000",
+          "gasLimit": "300000",
+          "stage": "native-topup",
+          "withinLimit": true
+        },
+        {
+          "estimate": "21000",
+          "gasLimit": "300000",
+          "stage": "user-native-topup",
+          "withinLimit": true
+        }
+      ],
+      "chainId": 421614,
+      "confirmedAfter": 33,
+      "feeLimits": [
+        {
+          "fits": true,
+          "maxFeePerGasWei": "100000000",
+          "maxPriorityFeePerGasWei": "0",
+          "stage": "approval"
+        },
+        {
+          "fits": true,
+          "maxFeePerGasWei": "100000000",
+          "maxPriorityFeePerGasWei": "0",
+          "stage": "deposit"
+        },
+        {
+          "fits": true,
+          "maxFeePerGasWei": "100000000",
+          "maxPriorityFeePerGasWei": "0",
+          "stage": "native-topup"
+        },
+        {
+          "fits": true,
+          "maxFeePerGasWei": "100000000",
+          "maxPriorityFeePerGasWei": "0",
+          "stage": "user-native-topup"
+        }
+      ],
+      "feeSample": {
+        "baseFeePerGasWei": "20102000",
+        "block": 330497841,
+        "hash": "0x442558b68c995e71f4f5acd62dbbd813fdc5443025cd1d84a4b63dd2d4e00e47"
+      },
+      "liveNonce": 33,
+      "observed": {
+        "backing": "5000000",
+        "entityNonce": "3",
+        "funderNativeWei": "528464472972889600",
+        "funderNonce": 33,
+        "funderUsdc": "15000000",
+        "hubDebt": "0",
+        "hubNativeWei": "0",
+        "hubReserve": "0",
+        "point": {
+          "hash": "0xad212eac8201d3fa898d206b8381bd7fa6e03642ce9360a709a83db4f69c3869",
+          "number": 330497817
+        },
+        "user": {
+          "nativeWei": "0",
+          "usdc": "0"
+        }
+      },
+      "pendingAfter": 33,
+      "pendingNonce": 33,
+      "requiredNativeWei": "329000000000000",
+      "requiredUsdcAtoms": "1000000",
+      "status": "read-only-precheck-passed",
+      "unusedSlots": 4
+    }
+  ],
+  "expiresAt": "2026-11-19T18:21:49.260Z",
+  "observedAt": "2026-11-18T18:27:49.838Z",
+  "publicBroadcasts": 0,
+  "publicSignatures": 0,
+  "sha256": "999ec4043cb8e29f771e13363a8a61a7e78897f99db226e5fc6ec8bf8cb88cf1",
+  "signerAvailable": true,
+  "signerMatches": true,
+  "startedAt": "2026-11-18T18:27:29.387Z"
+}

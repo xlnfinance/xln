@@ -1,8 +1,10 @@
 # Ethereum Sepolia to Arbitrum Sepolia: retained plan and decisions
 
-Updated: 2026-11-14. Repository HEAD inspected for this documentation alignment:
-`2df74f251d3ff3a869738ee1b77787f4be58185b`, `testnets_deploy`, with unrelated
-working-tree changes preserved. The original research inspected
+Updated: 2026-11-16. The TypeScript rehearsal decisions below were accepted
+against inspected source baseline `b2dceb3438ff2582cee0c5741fe4a0528f5cbd26`;
+the owner has started the source-funding implementation. The preceding
+documentation alignment inspected `2df74f251d3ff3a869738ee1b77787f4be58185b`,
+`testnets_deploy`, with unrelated working-tree changes preserved. The original research inspected
 `019d45beb5954e77fe806d643845f6a4dca4fa82` on 2026-11-10. Its historical network
 observations are not current deployment proof. Public roundtrip observations
 below refer to the separate recorded financial runs and their raw reports;
@@ -72,18 +74,38 @@ remain valid algorithm behavior. Cancellation, a source remainder or an
 unsecured Account claim does not satisfy this rehearsal. This criterion does
 not add a new cross-chain atomicity rule or guaranteed unsecured-debt recovery.
 
-## Open terms and economic prerequisites
+## Accepted TypeScript rehearsal decisions (2026-11-16)
 
-**UNKNOWN:** executable quote/spread, accepted gross/net limits, effective
-versioned token fees, minimum lots/amounts and whether one source token can fully
-execute under those terms. Reconcile every rounding remainder and fee exactly.
-The former Q4/Q5 quote/tariff proposals were not accepted. Their illustrative
-numeric payout was not a guarantee; no such price or fee is fixed here.
+- Follow deposit, Account funding, Cross-J/MM execution, collateral cover and
+  external withdrawal. A separate Pay between two users belongs to a later scenario.
+- Use ordinary effective signed Hub tariffs and executable MM pricing.
+- Use a dedicated user vault with the existing per-jurisdiction signer and lazy
+  Entity derivation, hosted by one user TS Runtime. Hub/MM authority remains separate.
+- Withdraw to the user's own target-jurisdiction signer EOA, address B.
+- Require at least `850_000` target USDC atomic units of Net External Payout.
+  The difference from the `1_000_000` source deposit is at most `150_000` units,
+  including exchange pricing and token fees; native gas is separate.
+- Grant user-to-Hub credit only as required for the rehearsal, with target credit
+  equal to the selected gross target quote and no automatic increase.
+- Estimate native gas for all payers on both networks, including cover and
+  recovery, then obtain explicit numeric ETH spending limits before the public
+  financial run. Current per-gas/replacement ceilings are not a cumulative budget.
 
-Concrete operator identities, authorized credit, prefund amounts/funding
-transactions, signer and final external recipient must be prepared for that
-later phase. Quote/tariff choices remain owner decisions. These preparations
-are not prerequisites for deploying the contract stacks.
+The [complete working specification](../../.scratch/ts-usdc-cross-j-poc/spec.md)
+tracks the approved implementation. Execution on the owner's current
+computer is authorized by [AGENTS.md](../../AGENTS.md).
+
+## Execution inputs and economic prerequisites
+
+**UNKNOWN:** actual executable quote/spread, effective versioned tariffs,
+minimum lots/amounts and whether one source token can fully execute under the
+accepted budget. Reconcile every rounding remainder and fee exactly.
+
+Prepare actual user/operator addresses, per-Account credit amounts, prefunding,
+reachable transport, recipient identity and approved numeric native budgets
+from the selected production candidate. These preparations are not prerequisites
+for deploying the contract stacks. No live financial values were refreshed by
+this documentation update.
 
 ## Eventual financial and recovery acceptance
 

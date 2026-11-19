@@ -1,0 +1,135 @@
+{
+  "approved": false,
+  "candidateDigest": "7c1dc0e7b67b7e79389845459ff95c673128c348320ac669dbd229cb19295fc4",
+  "candidateHead": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26",
+  "catalogDigest": "a46f46e495c3085057c3eeed7d0d17b8ac595b9338d96440b4f124461852dbf1",
+  "chains": [
+    {
+      "anchorHash": "0xf144dad2cb4bd581667f852c9a629fd33689b836c703b6adf0dde8db1e6eb677",
+      "anchorNumber": 12169844,
+      "chainId": 11155111,
+      "codeHashes": {
+        "0x175343fc9d198b31f493cafe2639fe6dcda59c77": "0x64ebb5db40c6deb7a16b733a30481752a3e64a51323fd51c41fa1c4b4b24eac5",
+        "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238": "0xcd3f29e2ea9c61dadd48bfeaf8b2884b6de9dfee7bf45329452c4c33d0868ceb",
+        "0x32a4a72992ad142e36fa1c5989b95fed60987818": "0xd56dbdedd8973d72780dd49bbe5b25d9cc6a2cf00d5182651b448d9782005a51",
+        "0x9c4173eed1dc7c24c5207a705382488c859588e3": "0xc0333495db29b94d20a25de1df465e4e4b95cd1981dacd9627dc83f03da84334",
+        "0xa2950f711292216419d0691b2aa17dd3ac947e35": "0x02413ad800e58e168089146dd8b10a7e36316bfbe35a201f1e6f02c12a2ed717",
+        "0xa8674d878bce007812beea6b131a80dde43ef4cf": "0x2b53ca548ebd0cb7cd1eca973f6857deea6203c12ea29e1f14f06fae5e117a9c"
+      },
+      "depository": "0x32a4a72992ad142e36fa1c5989b95fed60987818",
+      "entityNonce": "4",
+      "entityProvider": "0x9c4173eed1dc7c24c5207a705382488c859588e3",
+      "funder": {
+        "address": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+        "firstNonce": 114
+      },
+      "funderEntity": "0xaaa77fe2366ac1c1bc54cdcee97e0e95afb7bd999720ea9858257c75fad9d88b",
+      "hubEntity": "0x088c57a2803f70d7ee168cf5067e45a3c9a77bc8879e6b5f072e3ecc0d2245e7",
+      "hubReserveBefore": "0",
+      "hubSigner": "0x02e42216729d4db2981b1b0d2780d97c7582a9f6",
+      "limits": {
+        "amount": "1",
+        "calls": {
+          "approval": {
+            "gasLimit": "200000",
+            "maxFeePerGasWei": "1000000000",
+            "maxPriorityFeePerGasWei": "100000000"
+          },
+          "deposit": {
+            "gasLimit": "600000",
+            "maxFeePerGasWei": "1000000000",
+            "maxPriorityFeePerGasWei": "100000000"
+          },
+          "native-topup": {
+            "gasLimit": "300000",
+            "maxFeePerGasWei": "1000000000",
+            "maxPriorityFeePerGasWei": "100000000"
+          }
+        },
+        "chainId": 11155111,
+        "hubTopupWei": "1000000000000000",
+        "totalFeeLimitWei": "1600000000000000",
+        "totalNativeOutflowLimitWei": "4600000000000000",
+        "userFunding": {
+          "nativeTopup": {
+            "gasLimit": "300000",
+            "maxFeePerGasWei": "1000000000",
+            "maxPriorityFeePerGasWei": "100000000"
+          },
+          "nativeTopupWei": "2000000000000000",
+          "principalTransfer": {
+            "gasLimit": "200000",
+            "maxFeePerGasWei": "1000000000",
+            "maxPriorityFeePerGasWei": "100000000"
+          },
+          "signer": "0xa45408c58813bbd64b4fccbb2d45a479e05d3d05",
+          "usdcAtoms": "1000000"
+        }
+      },
+      "token": "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238"
+    },
+    {
+      "anchorHash": "0x6532dafb634a1ee7c8fbb5846e43580ad9677dcacbc101ac8c13176340f3ca2b",
+      "anchorNumber": 330800173,
+      "chainId": 421614,
+      "codeHashes": {
+        "0x2b65518871ea15d5a1bc43218e3c95621b54ccec": "0xeffc7111141a0b22ada7a83fc538d312951a0538610aff119f7bb0376d938e7d",
+        "0x37a9bdc2f8736bb31ffefb778a70ba7d544ff103": "0x02413ad800e58e168089146dd8b10a7e36316bfbe35a201f1e6f02c12a2ed717",
+        "0x3dae23be54dab4e88b92d4e4c3db42f7d9ce0df9": "0x22fb345563a7b06d7dfb6ff95e8f56a6f678f6b59da6c926dd67e32c06c38b87",
+        "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d": "0x9a736af6aac290d9196883e8686fc1d127ff657ca534fe4b88d6d40dc0bc6750",
+        "0x8223aa4c60adb851f53a120c3d3841de9e77c188": "0x8474e986e82636c385f7ca9ef92c97e3d400ba862fa065eb51807b774ad9a72c",
+        "0xcb7053c91ea02890b3ca702caaaea69656dc3ccf": "0x64ebb5db40c6deb7a16b733a30481752a3e64a51323fd51c41fa1c4b4b24eac5"
+      },
+      "depository": "0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+      "entityNonce": "4",
+      "entityProvider": "0x3dae23be54dab4e88b92d4e4c3db42f7d9ce0df9",
+      "funder": {
+        "address": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+        "firstNonce": 37
+      },
+      "funderEntity": "0xaaa77fe2366ac1c1bc54cdcee97e0e95afb7bd999720ea9858257c75fad9d88b",
+      "hubEntity": "0xccf32e2712576c8684040614a5073fb1b26e6e6e705730037dddbf2a8b9c86d8",
+      "hubReserveBefore": "0",
+      "hubSigner": "0x661c2a253ff995d04fd8a602663ab829d4afb2a9",
+      "limits": {
+        "amount": "1000000",
+        "calls": {
+          "approval": {
+            "gasLimit": "90000",
+            "maxFeePerGasWei": "100000000",
+            "maxPriorityFeePerGasWei": "0"
+          },
+          "deposit": {
+            "gasLimit": "600000",
+            "maxFeePerGasWei": "100000000",
+            "maxPriorityFeePerGasWei": "0"
+          },
+          "native-topup": {
+            "gasLimit": "300000",
+            "maxFeePerGasWei": "100000000",
+            "maxPriorityFeePerGasWei": "0"
+          }
+        },
+        "chainId": 421614,
+        "hubTopupWei": "100000000000000",
+        "totalFeeLimitWei": "129000000000000",
+        "totalNativeOutflowLimitWei": "329000000000000",
+        "userFunding": {
+          "nativeTopup": {
+            "gasLimit": "300000",
+            "maxFeePerGasWei": "100000000",
+            "maxPriorityFeePerGasWei": "0"
+          },
+          "nativeTopupWei": "100000000000000",
+          "principalTransfer": null,
+          "signer": "0xc610e84b42230a7294852f8f5d6cf2f6a181778a",
+          "usdcAtoms": "0"
+        }
+      },
+      "token": "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d"
+    }
+  ],
+  "expiresAt": 1795116323860,
+  "operation": "operator-funding",
+  "version": 2
+}

@@ -1,0 +1,473 @@
+{
+  "ticket": 12,
+  "disposition": "stopped-by-owner-request",
+  "startedAt": "2026-11-18T17:54:50.622Z",
+  "stoppedAt": "2026-11-18T18:09:56.315+00:00",
+  "sessionElapsedSeconds": 905.693,
+  "candidateHead": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26",
+  "dirty": true,
+  "jobDirectory": ".logs/ts-usdc-cross-j-poc/public/sessions/ticket-12-continuous-Ve43cB",
+  "sessionDirectory": ".logs/ts-usdc-cross-j-poc/public/sessions/restore-U8zPAf",
+  "launcherExitCode": 1,
+  "launcherShutdownCode": "USDC_SESSION_CHILD_EXIT:gateway:0:null",
+  "startupTimeoutMsPerOperator": 21600000,
+  "standTimeoutMs": 43500000,
+  "standReleased": true,
+  "gateway": "managed-read-only",
+  "sessionReady": false,
+  "mmStarted": false,
+  "userStarted": false,
+  "financialBroadcasts": 0,
+  "profile": {
+    "gateway": "managed-read-only",
+    "ethHeaderBatchLimit": 32,
+    "ethPageLimit": 31,
+    "arbPageLimit": 2047,
+    "ethReceipts": "HyperRPC",
+    "ethReceiptBatchLimit": 32,
+    "ethReceiptIntervalMs": 12500,
+    "arbHeaders": "HyperSync JSON",
+    "arbReceipts": "archive",
+    "arbReceiptIntervalMs": 1000
+  },
+  "chains": {
+    "11155111": {
+      "firstAuthenticatedBlock": 12149977,
+      "authenticatedThrough": 12151407,
+      "authenticatedRanges": 57,
+      "scanFrontierAdvance": 1431,
+      "scanFrontierBlocksPerSecond": 1.58,
+      "certifiedCursorBeforeFirstRange": 12149976,
+      "lastReportedCertifiedCursor": 12149976,
+      "certifiedCursorWrites": 0,
+      "walScanThroughBefore": 12150100,
+      "walScanThroughAfter": 12151302,
+      "newWalScanBlocks": 1202,
+      "walObservationWrites": 10,
+      "walEventBlocks": 0,
+      "depositBlock": 12156195,
+      "blocksFromWalScanToDeposit": 4893
+    },
+    "421614": {
+      "firstAuthenticatedBlock": 329895133,
+      "authenticatedThrough": 329929917,
+      "authenticatedRanges": 30,
+      "scanFrontierAdvance": 34785,
+      "scanFrontierBlocksPerSecond": 38.41,
+      "certifiedCursorBeforeFirstRange": 329895132,
+      "lastReportedCertifiedCursor": 329895132,
+      "certifiedCursorWrites": 0,
+      "walScanThroughBefore": 329903317,
+      "walScanThroughAfter": 329929917,
+      "newWalScanBlocks": 26600,
+      "walObservationWrites": 22,
+      "walEventBlocks": 0,
+      "depositBlock": 330178730,
+      "blocksFromWalScanToDeposit": 248813
+    }
+  },
+  "gatewayResults": {
+    "arbHyperSyncPages": {
+      "200": 81
+    },
+    "ethHyperRpcReceipts": {
+      "reply": 57,
+      "error": 1
+    },
+    "arbArchiveReceipts": {
+      "reply": 513
+    }
+  },
+  "wal": [
+    {
+      "role": "hub",
+      "replayedHeight": 70,
+      "finalHeight": 96,
+      "frames": [
+        {
+          "height": 71,
+          "runtimeTxs": [
+            {
+              "type": "importJ"
+            }
+          ],
+          "entityTxs": [],
+          "runtimeOutputCount": 0
+        },
+        {
+          "height": 72,
+          "runtimeTxs": [
+            {
+              "type": "observeJRange",
+              "jurisdictionRef": "stack:11155111:0x32a4a72992ad142e36fa1c5989b95fed60987818",
+              "scannedThroughHeight": 12150224,
+              "eventBlocks": 0
+            }
+          ],
+          "entityTxs": [],
+          "runtimeOutputCount": 0
+        },
+        {
+          "height": 73,
+          "runtimeTxs": [
+            {
+              "type": "observeJRange",
+              "jurisdictionRef": "stack:11155111:0x32a4a72992ad142e36fa1c5989b95fed60987818",
+              "scannedThroughHeight": 12150348,
+              "eventBlocks": 0
+            }
+          ],
+          "entityTxs": [],
+          "runtimeOutputCount": 0
+        },
+        {
+          "height": 74,
+          "runtimeTxs": [
+            {
+              "type": "observeJRange",
+              "jurisdictionRef": "stack:421614:0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+              "scannedThroughHeight": 329904339,
+              "eventBlocks": 0
+            }
+          ],
+          "entityTxs": [],
+          "runtimeOutputCount": 0
+        },
+        {
+          "height": 75,
+          "runtimeTxs": [
+            {
+              "type": "observeJRange",
+              "jurisdictionRef": "stack:421614:0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+              "scannedThroughHeight": 329905362,
+              "eventBlocks": 0
+            }
+          ],
+          "entityTxs": [],
+          "runtimeOutputCount": 0
+        },
+        {
+          "height": 76,
+          "runtimeTxs": [
+            {
+              "type": "observeJRange",
+              "jurisdictionRef": "stack:11155111:0x32a4a72992ad142e36fa1c5989b95fed60987818",
+              "scannedThroughHeight": 12150472,
+              "eventBlocks": 0
+            },
+            {
+              "type": "observeJRange",
+              "jurisdictionRef": "stack:421614:0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+              "scannedThroughHeight": 329906385,
+              "eventBlocks": 0
+            }
+          ],
+          "entityTxs": [],
+          "runtimeOutputCount": 0
+        },
+        {
+          "height": 77,
+          "runtimeTxs": [
+            {
+              "type": "observeJRange",
+              "jurisdictionRef": "stack:421614:0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+              "scannedThroughHeight": 329907408,
+              "eventBlocks": 0
+            }
+          ],
+          "entityTxs": [],
+          "runtimeOutputCount": 0
+        },
+        {
+          "height": 78,
+          "runtimeTxs": [
+            {
+              "type": "observeJRange",
+              "jurisdictionRef": "stack:11155111:0x32a4a72992ad142e36fa1c5989b95fed60987818",
+              "scannedThroughHeight": 12150596,
+              "eventBlocks": 0
+            },
+            {
+              "type": "observeJRange",
+              "jurisdictionRef": "stack:421614:0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+              "scannedThroughHeight": 329908431,
+              "eventBlocks": 0
+            }
+          ],
+          "entityTxs": [],
+          "runtimeOutputCount": 0
+        },
+        {
+          "height": 79,
+          "runtimeTxs": [
+            {
+              "type": "observeJRange",
+              "jurisdictionRef": "stack:421614:0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+              "scannedThroughHeight": 329909454,
+              "eventBlocks": 0
+            }
+          ],
+          "entityTxs": [],
+          "runtimeOutputCount": 0
+        },
+        {
+          "height": 80,
+          "runtimeTxs": [
+            {
+              "type": "observeJRange",
+              "jurisdictionRef": "stack:421614:0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+              "scannedThroughHeight": 329910477,
+              "eventBlocks": 0
+            }
+          ],
+          "entityTxs": [],
+          "runtimeOutputCount": 0
+        },
+        {
+          "height": 81,
+          "runtimeTxs": [
+            {
+              "type": "observeJRange",
+              "jurisdictionRef": "stack:11155111:0x32a4a72992ad142e36fa1c5989b95fed60987818",
+              "scannedThroughHeight": 12150720,
+              "eventBlocks": 0
+            },
+            {
+              "type": "observeJRange",
+              "jurisdictionRef": "stack:421614:0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+              "scannedThroughHeight": 329911500,
+              "eventBlocks": 0
+            }
+          ],
+          "entityTxs": [],
+          "runtimeOutputCount": 0
+        },
+        {
+          "height": 82,
+          "runtimeTxs": [
+            {
+              "type": "observeJRange",
+              "jurisdictionRef": "stack:11155111:0x32a4a72992ad142e36fa1c5989b95fed60987818",
+              "scannedThroughHeight": 12150844,
+              "eventBlocks": 0
+            },
+            {
+              "type": "observeJRange",
+              "jurisdictionRef": "stack:421614:0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+              "scannedThroughHeight": 329912523,
+              "eventBlocks": 0
+            }
+          ],
+          "entityTxs": [],
+          "runtimeOutputCount": 0
+        },
+        {
+          "height": 83,
+          "runtimeTxs": [
+            {
+              "type": "observeJRange",
+              "jurisdictionRef": "stack:421614:0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+              "scannedThroughHeight": 329913546,
+              "eventBlocks": 0
+            }
+          ],
+          "entityTxs": [],
+          "runtimeOutputCount": 0
+        },
+        {
+          "height": 84,
+          "runtimeTxs": [
+            {
+              "type": "observeJRange",
+              "jurisdictionRef": "stack:11155111:0x32a4a72992ad142e36fa1c5989b95fed60987818",
+              "scannedThroughHeight": 12150968,
+              "eventBlocks": 0
+            },
+            {
+              "type": "observeJRange",
+              "jurisdictionRef": "stack:421614:0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+              "scannedThroughHeight": 329914569,
+              "eventBlocks": 0
+            }
+          ],
+          "entityTxs": [],
+          "runtimeOutputCount": 0
+        },
+        {
+          "height": 85,
+          "runtimeTxs": [
+            {
+              "type": "observeJRange",
+              "jurisdictionRef": "stack:421614:0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+              "scannedThroughHeight": 329915592,
+              "eventBlocks": 0
+            }
+          ],
+          "entityTxs": [],
+          "runtimeOutputCount": 0
+        },
+        {
+          "height": 86,
+          "runtimeTxs": [
+            {
+              "type": "observeJRange",
+              "jurisdictionRef": "stack:421614:0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+              "scannedThroughHeight": 329916615,
+              "eventBlocks": 0
+            }
+          ],
+          "entityTxs": [],
+          "runtimeOutputCount": 0
+        },
+        {
+          "height": 87,
+          "runtimeTxs": [
+            {
+              "type": "observeJRange",
+              "jurisdictionRef": "stack:11155111:0x32a4a72992ad142e36fa1c5989b95fed60987818",
+              "scannedThroughHeight": 12151092,
+              "eventBlocks": 0
+            },
+            {
+              "type": "observeJRange",
+              "jurisdictionRef": "stack:421614:0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+              "scannedThroughHeight": 329917638,
+              "eventBlocks": 0
+            }
+          ],
+          "entityTxs": [],
+          "runtimeOutputCount": 0
+        },
+        {
+          "height": 88,
+          "runtimeTxs": [
+            {
+              "type": "observeJRange",
+              "jurisdictionRef": "stack:421614:0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+              "scannedThroughHeight": 329918661,
+              "eventBlocks": 0
+            }
+          ],
+          "entityTxs": [],
+          "runtimeOutputCount": 0
+        },
+        {
+          "height": 89,
+          "runtimeTxs": [
+            {
+              "type": "observeJRange",
+              "jurisdictionRef": "stack:421614:0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+              "scannedThroughHeight": 329920707,
+              "eventBlocks": 0
+            }
+          ],
+          "entityTxs": [],
+          "runtimeOutputCount": 0
+        },
+        {
+          "height": 90,
+          "runtimeTxs": [
+            {
+              "type": "observeJRange",
+              "jurisdictionRef": "stack:421614:0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+              "scannedThroughHeight": 329922754,
+              "eventBlocks": 0
+            }
+          ],
+          "entityTxs": [],
+          "runtimeOutputCount": 0
+        },
+        {
+          "height": 91,
+          "runtimeTxs": [
+            {
+              "type": "observeJRange",
+              "jurisdictionRef": "stack:11155111:0x32a4a72992ad142e36fa1c5989b95fed60987818",
+              "scannedThroughHeight": 12151197,
+              "eventBlocks": 0
+            },
+            {
+              "type": "observeJRange",
+              "jurisdictionRef": "stack:421614:0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+              "scannedThroughHeight": 329924801,
+              "eventBlocks": 0
+            }
+          ],
+          "entityTxs": [],
+          "runtimeOutputCount": 0
+        },
+        {
+          "height": 92,
+          "runtimeTxs": [
+            {
+              "type": "observeJRange",
+              "jurisdictionRef": "stack:421614:0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+              "scannedThroughHeight": 329926848,
+              "eventBlocks": 0
+            }
+          ],
+          "entityTxs": [],
+          "runtimeOutputCount": 0
+        },
+        {
+          "height": 93,
+          "runtimeTxs": [
+            {
+              "type": "observeJRange",
+              "jurisdictionRef": "stack:11155111:0x32a4a72992ad142e36fa1c5989b95fed60987818",
+              "scannedThroughHeight": 12151302,
+              "eventBlocks": 0
+            }
+          ],
+          "entityTxs": [],
+          "runtimeOutputCount": 0
+        },
+        {
+          "height": 94,
+          "runtimeTxs": [
+            {
+              "type": "observeJRange",
+              "jurisdictionRef": "stack:421614:0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+              "scannedThroughHeight": 329927871,
+              "eventBlocks": 0
+            }
+          ],
+          "entityTxs": [],
+          "runtimeOutputCount": 0
+        },
+        {
+          "height": 95,
+          "runtimeTxs": [
+            {
+              "type": "observeJRange",
+              "jurisdictionRef": "stack:421614:0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+              "scannedThroughHeight": 329928894,
+              "eventBlocks": 0
+            }
+          ],
+          "entityTxs": [],
+          "runtimeOutputCount": 0
+        },
+        {
+          "height": 96,
+          "runtimeTxs": [
+            {
+              "type": "observeJRange",
+              "jurisdictionRef": "stack:421614:0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+              "scannedThroughHeight": 329929917,
+              "eventBlocks": 0
+            }
+          ],
+          "entityTxs": [],
+          "runtimeOutputCount": 0
+        }
+      ]
+    },
+    {
+      "role": "mm",
+      "replayedHeight": 29,
+      "finalHeight": 29,
+      "frames": []
+    }
+  ]
+}

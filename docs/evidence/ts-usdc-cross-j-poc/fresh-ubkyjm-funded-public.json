@@ -1,0 +1,472 @@
+{
+  "status": "funded-on-chain",
+  "ownerDeadline": "2026-11-19T19:25:00.000Z",
+  "recordedAt": "2026-11-19T17:47:25.251Z",
+  "ownerApprovedDraftSha256": "f7c4cedce67e0636da18055dbddf21ac3b11573427a73002339f8fc7ec40bcc5",
+  "candidateHead": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26",
+  "candidateDigest": "7c1dc0e7b67b7e79389845459ff95c673128c348320ac669dbd229cb19295fc4",
+  "executionScope": "fresh-UbkYJm demo funding only",
+  "prebroadcastRecord": ".logs/ts-usdc-cross-j-poc/demo/fresh-UbkYJm/funding-execution.i82FlAC8/prebroadcast.json",
+  "authorizationRecord": ".logs/ts-usdc-cross-j-poc/demo/fresh-UbkYJm/funding-execution.i82FlAC8/authorization.json",
+  "receiptFile": ".logs/ts-usdc-cross-j-poc/demo/fresh-UbkYJm/funding-execution.i82FlAC8/funded-public.json",
+  "receiptFileSha256": "f52d8ebd53f74b0b11f0d21ec2e5cb7ea729da6e46828b9f5d70d531ed56ad41",
+  "eventsFile": ".logs/ts-usdc-cross-j-poc/demo/fresh-UbkYJm/funding-execution.i82FlAC8/events.jsonl",
+  "confirmationsRequired": 12,
+  "publicBroadcasts": 9,
+  "chains": [
+    {
+      "chainId": 11155111,
+      "hubEntity": "0x088c57a2803f70d7ee168cf5067e45a3c9a77bc8879e6b5f072e3ecc0d2245e7",
+      "hubSigner": "0x02e42216729d4db2981b1b0d2780d97c7582a9f6",
+      "userSigner": "0xa45408c58813bbd64b4fccbb2d45a479e05d3d05",
+      "hubReserveUsdcAtoms": "1",
+      "userUsdcAtoms": "1000000",
+      "hubNativeWei": "1000000000000000",
+      "userNativeWei": "2000000000000000",
+      "funderNonceAfter": 119,
+      "feesWei": "95495414680689",
+      "totalNativeOutflowWei": "3095495414680689",
+      "allowedFeeWei": "1600000000000000",
+      "allowedNativeOutflowWei": "4600000000000000",
+      "before": {
+        "backing": "2000001",
+        "entityNonce": "4",
+        "funderNativeWei": "41198834504570788475",
+        "funderNonce": 114,
+        "funderUsdc": "6999999",
+        "hubDebt": "0",
+        "hubNativeWei": "0",
+        "hubReserve": "0",
+        "point": {
+          "hash": "0xf144dad2cb4bd581667f852c9a629fd33689b836c703b6adf0dde8db1e6eb677",
+          "number": 12169844
+        },
+        "user": {
+          "nativeWei": "0",
+          "usdc": "0"
+        }
+      },
+      "after": {
+        "backing": "2000002",
+        "entityNonce": "5",
+        "funderNativeWei": "41195739009156107786",
+        "funderNonce": 119,
+        "funderUsdc": "5999998",
+        "hubDebt": "0",
+        "hubNativeWei": "1000000000000000",
+        "hubReserve": "1",
+        "point": {
+          "hash": "0xc4f1c8f926c36621e03520db47ff77112cf99b5ef9f95bcf1b3f5bc153e07759",
+          "number": 12169924
+        },
+        "user": {
+          "nativeWei": "2000000000000000",
+          "usdc": "1000000"
+        }
+      },
+      "receipts": [
+        {
+          "stage": "approval",
+          "nonce": 114,
+          "hash": "0x20e56babfd2864d4793f15a21c684f4be047fdeba34b8fda6f2697a3b1872044",
+          "blockNumber": 12169872,
+          "blockHash": "0xe3ff9639b2ba08d18155087ad862561525198932d23d8246344e2a4339140126",
+          "gasUsed": "137733",
+          "gasPriceWei": "100000015",
+          "status": 1
+        },
+        {
+          "stage": "deposit",
+          "nonce": 115,
+          "hash": "0x51db040a9ed93f864820b79d5a3ab83a5497344a844f89f358d6787bdbed86b5",
+          "blockNumber": 12169885,
+          "blockHash": "0x120373c5879538097c041ea23376455157eb111e49eb0eca100950cf11d6af05",
+          "gasUsed": "256242",
+          "gasPriceWei": "100000015",
+          "status": 1
+        },
+        {
+          "stage": "native-topup",
+          "nonce": 116,
+          "hash": "0x1e953a3b72aa4ca7c7398027f92199b9a4fea282d9b36e5b3f14918eade5ba10",
+          "blockNumber": 12169898,
+          "blockHash": "0x5d7d720145d8b328fc5ab15c0ab98809c8fc70c76dd831ba80e4625dec1b64c7",
+          "gasUsed": "204600",
+          "gasPriceWei": "100000015",
+          "status": 1
+        },
+        {
+          "stage": "user-principal-transfer",
+          "nonce": 117,
+          "hash": "0x839c251df123815dcbede4365931bb10088763cd20242117929bb4789ec94ae1",
+          "blockNumber": 12169911,
+          "blockHash": "0xa570dc7da87c08d10603a1b355c88823eab35fc07825814aac97763d446e9ecb",
+          "gasUsed": "151779",
+          "gasPriceWei": "100000016",
+          "status": 1
+        },
+        {
+          "stage": "user-native-topup",
+          "nonce": 118,
+          "hash": "0x6d0e069fefa5f45a85987d15259218a743b1b4b5052899cc001cefe597775caf",
+          "blockNumber": 12169924,
+          "blockHash": "0xc4f1c8f926c36621e03520db47ff77112cf99b5ef9f95bcf1b3f5bc153e07759",
+          "gasUsed": "204600",
+          "gasPriceWei": "100000016",
+          "status": 1
+        }
+      ]
+    },
+    {
+      "chainId": 421614,
+      "hubEntity": "0xccf32e2712576c8684040614a5073fb1b26e6e6e705730037dddbf2a8b9c86d8",
+      "hubSigner": "0x661c2a253ff995d04fd8a602663ab829d4afb2a9",
+      "userSigner": "0xc610e84b42230a7294852f8f5d6cf2f6a181778a",
+      "hubReserveUsdcAtoms": "1000000",
+      "userUsdcAtoms": "0",
+      "hubNativeWei": "100000000000000",
+      "userNativeWei": "100000000000000",
+      "funderNonceAfter": 41,
+      "feesWei": "4959901574000",
+      "totalNativeOutflowWei": "204959901574000",
+      "allowedFeeWei": "129000000000000",
+      "allowedNativeOutflowWei": "329000000000000",
+      "before": {
+        "backing": "5100199",
+        "entityNonce": "4",
+        "funderNativeWei": "528259525552181600",
+        "funderNonce": 37,
+        "funderUsdc": "14000000",
+        "hubDebt": "0",
+        "hubNativeWei": "0",
+        "hubReserve": "0",
+        "point": {
+          "hash": "0x6532dafb634a1ee7c8fbb5846e43580ad9677dcacbc101ac8c13176340f3ca2b",
+          "number": 330800173
+        },
+        "user": {
+          "nativeWei": "0",
+          "usdc": "0"
+        }
+      },
+      "after": {
+        "backing": "6100199",
+        "entityNonce": "5",
+        "funderNativeWei": "528054565650607600",
+        "funderNonce": 41,
+        "funderUsdc": "13000000",
+        "hubDebt": "0",
+        "hubNativeWei": "100000000000000",
+        "hubReserve": "1000000",
+        "point": {
+          "hash": "0x9ee9d74a85a51bb95e5366f3256fcffe90f80a29a1fad001201069f8d20d0b06",
+          "number": 330804869
+        },
+        "user": {
+          "nativeWei": "100000000000000",
+          "usdc": "0"
+        }
+      },
+      "receipts": [
+        {
+          "stage": "approval",
+          "nonce": 37,
+          "hash": "0xfffd237f26871be512459781c1bff9bbbdc313291cd2feebdf0a8b68a3ea132d",
+          "blockNumber": 330804629,
+          "blockHash": "0xcbf6765bf5a870b7ed236e7f4b590e9da3fe1f783408ed6f9ee5ef433e5ab6e8",
+          "gasUsed": "55437",
+          "gasPriceWei": "20102000",
+          "status": 1
+        },
+        {
+          "stage": "deposit",
+          "nonce": 38,
+          "hash": "0x7381d25d1229a0c38daef5b3f4e1d07ce47261704b66dff3fd6d2d1c33f7316b",
+          "blockNumber": 330804692,
+          "blockHash": "0xd169bee6d17fb3d6cdc62649123db5e7b7588743ac86a2d6716161b8a50ce058",
+          "gasUsed": "149650",
+          "gasPriceWei": "20060000",
+          "status": 1
+        },
+        {
+          "stage": "native-topup",
+          "nonce": 39,
+          "hash": "0x9c95923de35c9c7acb498503835abc91fd7cbe322baf9a04d75950b2d11699f8",
+          "blockNumber": 330804775,
+          "blockHash": "0x534dfd1f3e477a3c07648ee5bcb7ae700901e34d81fa4973620e518119e9da36",
+          "gasUsed": "21000",
+          "gasPriceWei": "20034000",
+          "status": 1
+        },
+        {
+          "stage": "user-native-topup",
+          "nonce": 40,
+          "hash": "0x74c4301c4168727a2e2ecd71c558b5d1af6717a2fab2fe2649d6bb1faf912a83",
+          "blockNumber": 330804869,
+          "blockHash": "0x9ee9d74a85a51bb95e5366f3256fcffe90f80a29a1fad001201069f8d20d0b06",
+          "gasUsed": "21000",
+          "gasPriceWei": "20134000",
+          "status": 1
+        }
+      ]
+    }
+  ],
+  "runtimeObservation": "pending",
+  "userJourneyExecuted": false,
+  "independentReceiptReconciliation": {
+    "observations": [
+      {
+        "chainId": 11155111,
+        "head": 12169946,
+        "latest": 119,
+        "pending": 119,
+        "receipts": [
+          {
+            "at": "2026-11-19T17:31:13.552Z",
+            "chainId": 11155111,
+            "hash": "0x20e56babfd2864d4793f15a21c684f4be047fdeba34b8fda6f2697a3b1872044",
+            "phase": "broadcast-attempt",
+            "receipt": {
+              "blockHash": "0xe3ff9639b2ba08d18155087ad862561525198932d23d8246344e2a4339140126",
+              "blockNumber": 12169872,
+              "confirmations": 75,
+              "feeWei": {
+                "__xlnType": "BigInt",
+                "value": "13773302065995"
+              },
+              "gasPriceWei": {
+                "__xlnType": "BigInt",
+                "value": "100000015"
+              },
+              "gasUsed": {
+                "__xlnType": "BigInt",
+                "value": "137733"
+              },
+              "status": 1
+            },
+            "stage": "approval",
+            "transactionFound": true
+          },
+          {
+            "at": "2026-11-19T17:34:11.221Z",
+            "chainId": 11155111,
+            "hash": "0x51db040a9ed93f864820b79d5a3ab83a5497344a844f89f358d6787bdbed86b5",
+            "phase": "broadcast-attempt",
+            "receipt": {
+              "blockHash": "0x120373c5879538097c041ea23376455157eb111e49eb0eca100950cf11d6af05",
+              "blockNumber": 12169885,
+              "confirmations": 62,
+              "feeWei": {
+                "__xlnType": "BigInt",
+                "value": "25624203843630"
+              },
+              "gasPriceWei": {
+                "__xlnType": "BigInt",
+                "value": "100000015"
+              },
+              "gasUsed": {
+                "__xlnType": "BigInt",
+                "value": "256242"
+              },
+              "status": 1
+            },
+            "stage": "deposit",
+            "transactionFound": true
+          },
+          {
+            "at": "2026-11-19T17:37:24.356Z",
+            "chainId": 11155111,
+            "hash": "0x1e953a3b72aa4ca7c7398027f92199b9a4fea282d9b36e5b3f14918eade5ba10",
+            "phase": "broadcast-attempt",
+            "receipt": {
+              "blockHash": "0x5d7d720145d8b328fc5ab15c0ab98809c8fc70c76dd831ba80e4625dec1b64c7",
+              "blockNumber": 12169898,
+              "confirmations": 49,
+              "feeWei": {
+                "__xlnType": "BigInt",
+                "value": "20460003069000"
+              },
+              "gasPriceWei": {
+                "__xlnType": "BigInt",
+                "value": "100000015"
+              },
+              "gasUsed": {
+                "__xlnType": "BigInt",
+                "value": "204600"
+              },
+              "status": 1
+            },
+            "stage": "native-topup",
+            "transactionFound": true
+          },
+          {
+            "at": "2026-11-19T17:40:04.459Z",
+            "chainId": 11155111,
+            "hash": "0x839c251df123815dcbede4365931bb10088763cd20242117929bb4789ec94ae1",
+            "phase": "broadcast-attempt",
+            "receipt": {
+              "blockHash": "0xa570dc7da87c08d10603a1b355c88823eab35fc07825814aac97763d446e9ecb",
+              "blockNumber": 12169911,
+              "confirmations": 36,
+              "feeWei": {
+                "__xlnType": "BigInt",
+                "value": "15177902428464"
+              },
+              "gasPriceWei": {
+                "__xlnType": "BigInt",
+                "value": "100000016"
+              },
+              "gasUsed": {
+                "__xlnType": "BigInt",
+                "value": "151779"
+              },
+              "status": 1
+            },
+            "stage": "user-principal-transfer",
+            "transactionFound": true
+          },
+          {
+            "at": "2026-11-19T17:42:43.750Z",
+            "chainId": 11155111,
+            "hash": "0x6d0e069fefa5f45a85987d15259218a743b1b4b5052899cc001cefe597775caf",
+            "phase": "broadcast-attempt",
+            "receipt": {
+              "blockHash": "0xc4f1c8f926c36621e03520db47ff77112cf99b5ef9f95bcf1b3f5bc153e07759",
+              "blockNumber": 12169924,
+              "confirmations": 23,
+              "feeWei": {
+                "__xlnType": "BigInt",
+                "value": "20460003273600"
+              },
+              "gasPriceWei": {
+                "__xlnType": "BigInt",
+                "value": "100000016"
+              },
+              "gasUsed": {
+                "__xlnType": "BigInt",
+                "value": "204600"
+              },
+              "status": 1
+            },
+            "stage": "user-native-topup",
+            "transactionFound": true
+          }
+        ]
+      },
+      {
+        "chainId": 421614,
+        "head": 330805039,
+        "latest": 41,
+        "pending": 41,
+        "receipts": [
+          {
+            "at": "2026-11-19T17:45:42.025Z",
+            "chainId": 421614,
+            "hash": "0xfffd237f26871be512459781c1bff9bbbdc313291cd2feebdf0a8b68a3ea132d",
+            "phase": "broadcast-attempt",
+            "receipt": {
+              "blockHash": "0xcbf6765bf5a870b7ed236e7f4b590e9da3fe1f783408ed6f9ee5ef433e5ab6e8",
+              "blockNumber": 330804629,
+              "confirmations": 411,
+              "feeWei": {
+                "__xlnType": "BigInt",
+                "value": "1114394574000"
+              },
+              "gasPriceWei": {
+                "__xlnType": "BigInt",
+                "value": "20102000"
+              },
+              "gasUsed": {
+                "__xlnType": "BigInt",
+                "value": "55437"
+              },
+              "status": 1
+            },
+            "stage": "approval",
+            "transactionFound": true
+          },
+          {
+            "at": "2026-11-19T17:45:59.763Z",
+            "chainId": 421614,
+            "hash": "0x7381d25d1229a0c38daef5b3f4e1d07ce47261704b66dff3fd6d2d1c33f7316b",
+            "phase": "broadcast-attempt",
+            "receipt": {
+              "blockHash": "0xd169bee6d17fb3d6cdc62649123db5e7b7588743ac86a2d6716161b8a50ce058",
+              "blockNumber": 330804692,
+              "confirmations": 348,
+              "feeWei": {
+                "__xlnType": "BigInt",
+                "value": "3001979000000"
+              },
+              "gasPriceWei": {
+                "__xlnType": "BigInt",
+                "value": "20060000"
+              },
+              "gasUsed": {
+                "__xlnType": "BigInt",
+                "value": "149650"
+              },
+              "status": 1
+            },
+            "stage": "deposit",
+            "transactionFound": true
+          },
+          {
+            "at": "2026-11-19T17:46:21.474Z",
+            "chainId": 421614,
+            "hash": "0x9c95923de35c9c7acb498503835abc91fd7cbe322baf9a04d75950b2d11699f8",
+            "phase": "broadcast-attempt",
+            "receipt": {
+              "blockHash": "0x534dfd1f3e477a3c07648ee5bcb7ae700901e34d81fa4973620e518119e9da36",
+              "blockNumber": 330804775,
+              "confirmations": 265,
+              "feeWei": {
+                "__xlnType": "BigInt",
+                "value": "420714000000"
+              },
+              "gasPriceWei": {
+                "__xlnType": "BigInt",
+                "value": "20034000"
+              },
+              "gasUsed": {
+                "__xlnType": "BigInt",
+                "value": "21000"
+              },
+              "status": 1
+            },
+            "stage": "native-topup",
+            "transactionFound": true
+          },
+          {
+            "at": "2026-11-19T17:46:46.865Z",
+            "chainId": 421614,
+            "hash": "0x74c4301c4168727a2e2ecd71c558b5d1af6717a2fab2fe2649d6bb1faf912a83",
+            "phase": "broadcast-attempt",
+            "receipt": {
+              "blockHash": "0x9ee9d74a85a51bb95e5366f3256fcffe90f80a29a1fad001201069f8d20d0b06",
+              "blockNumber": 330804869,
+              "confirmations": 171,
+              "feeWei": {
+                "__xlnType": "BigInt",
+                "value": "422814000000"
+              },
+              "gasPriceWei": {
+                "__xlnType": "BigInt",
+                "value": "20134000"
+              },
+              "gasUsed": {
+                "__xlnType": "BigInt",
+                "value": "21000"
+              },
+              "status": 1
+            },
+            "stage": "user-native-topup",
+            "transactionFound": true
+          }
+        ]
+      }
+    ],
+    "observedAt": "2026-11-19T17:47:34.199Z"
+  },
+  "standReleased": true
+}

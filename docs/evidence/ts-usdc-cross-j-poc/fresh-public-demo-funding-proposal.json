@@ -1,0 +1,339 @@
+{
+  "operation": "fresh-public-demo-funding-proposal",
+  "approved": false,
+  "executionReady": false,
+  "revision": {
+    "head": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26",
+    "digest": "16b247e8d0aa20caaf38afa141e3b0f66de3830554847634d033c72ec1f92b78",
+    "catalogDigest": "a46f46e495c3085057c3eeed7d0d17b8ac595b9338d96440b4f124461852dbf1"
+  },
+  "demoDirectory": ".logs/ts-usdc-cross-j-poc/demo/fresh-FVVLsm",
+  "startedAt": "2026-11-17T22:36:20.748Z",
+  "observedAt": "2026-11-17T22:36:27.246Z",
+  "scope": "Fresh Hub reserves and first native allocations plus the existing user source principal and native allocations for one demo.",
+  "assumptions": {
+    "ethereumHubReserve": "One USDC atomic unit for the positive-reserve predicate. Funded route readiness still needs verification.",
+    "arbitrumHubReserve": "One USDC as a draft buffer using the retained 0.899801 USDC local payout, subject to free backing and a new executable quote.",
+    "ethereumHubNative": "Repeat the previous Hub initial allocation as a draft.",
+    "arbitrumHubNative": "Repeat the previous Hub initial allocation as a draft.",
+    "ethereumUserNative": "0.002 ETH initial allocation. Three 600,000 gas slots at 1 gwei would reserve 0.0018 ETH for the normal path under that draft assumption.",
+    "arbitrumUserNative": "0.0001 ETH initial allocation. A 600,000 gas slot at 0.1 gwei would reserve 0.00006 ETH under that draft assumption.",
+    "journeyNativeStatus": "Actual cover, payout and recovery estimates require the funded route. These transfers are initial allocations only."
+  },
+  "signingPrerequisites": [
+    "Validate support for the exact one-run amounts and user calls in an authorized execution path. The existing operator funding CLI is bound to the earlier 1/5-USDC packet.",
+    "Obtain separate explicit owner authority for these exact recipients, amounts, nonce slots and fee ceilings. Refresh all balances, allowances, code, fee data and both nonce domains first.",
+    "Estimate E2R with the authorized Hanko after each confirmed allowance and before deposit broadcast. Stop if any estimate exceeds the ceiling.",
+    "The public journey needs its separate executable quote, backing, gas/recovery and signing authority."
+  ],
+  "chains": [
+    {
+      "chainId": 11155111,
+      "point": {
+        "number": 12157396,
+        "hash": "0xa7fd925c113b5acee3b49122ea388cb4a4da250ca00ee910761d99321e1051be"
+      },
+      "headerFingerprint": "ea37f436779dc1fa5fb56704e8ea35da30c159d85b333faa3e5bfcb758afd2f1",
+      "historyFingerprint": "92eca84d3029d9e3b8330990d4463178eb8ac68b2dd77f1e9989b22c8c80f5e3",
+      "token": "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
+      "depository": "0x32a4a72992ad142e36fa1c5989b95fed60987818",
+      "entityProvider": "0x9c4173eed1dc7c24c5207a705382488c859588e3",
+      "expectedCodeHashes": {
+        "0x175343fc9d198b31f493cafe2639fe6dcda59c77": "0x64ebb5db40c6deb7a16b733a30481752a3e64a51323fd51c41fa1c4b4b24eac5",
+        "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238": "0xcd3f29e2ea9c61dadd48bfeaf8b2884b6de9dfee7bf45329452c4c33d0868ceb",
+        "0x32a4a72992ad142e36fa1c5989b95fed60987818": "0xd56dbdedd8973d72780dd49bbe5b25d9cc6a2cf00d5182651b448d9782005a51",
+        "0x9c4173eed1dc7c24c5207a705382488c859588e3": "0xc0333495db29b94d20a25de1df465e4e4b95cd1981dacd9627dc83f03da84334",
+        "0xa2950f711292216419d0691b2aa17dd3ac947e35": "0x02413ad800e58e168089146dd8b10a7e36316bfbe35a201f1e6f02c12a2ed717",
+        "0xa8674d878bce007812beea6b131a80dde43ef4cf": "0x2b53ca548ebd0cb7cd1eca973f6857deea6203c12ea29e1f14f06fae5e117a9c"
+      },
+      "funder": {
+        "address": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+        "nativeWei": "41201929995985112185",
+        "usdcAtoms": "8000000",
+        "observedEoaNonce": 109,
+        "pendingEoaNonce": 109
+      },
+      "funderEntity": "0xaaa77fe2366ac1c1bc54cdcee97e0e95afb7bd999720ea9858257c75fad9d88b",
+      "currentFundingEntityNonce": "3",
+      "allowanceAtoms": "0",
+      "newHub": {
+        "entityId": "0xf857e2e4c49b2abbeae3ec0ad7d8af4d8802264786db49c4070e07291dffed7d",
+        "address": "0xa4ae905df369d7556a87a930a8f046be7bcf1bcf",
+        "nativeWei": "0",
+        "usdcAtoms": "0",
+        "observedEoaNonce": 0,
+        "pendingEoaNonce": 0,
+        "reserveAtoms": "0",
+        "debtAtoms": "0"
+      },
+      "originalHub": {
+        "entityId": "0xd3a0d7b3939571af73af38d3cfb0f914f065e23e50daaf60fc80cd6fd52e70a8",
+        "reserveAtoms": "1000000"
+      },
+      "user": {
+        "address": "0x61ff4c022bcc7d342d0d68a7b85f18e0fd7d9446",
+        "nativeWei": "0",
+        "usdcAtoms": "0",
+        "observedEoaNonce": 0,
+        "pendingEoaNonce": 0
+      },
+      "proposedReserveUsdcAtoms": "1",
+      "proposedUserPrincipalUsdcAtoms": "1000000",
+      "proposedTotalUsdcAtoms": "1000001",
+      "fees": {
+        "baseFeePerGasWei": "17",
+        "gasPriceWei": "19",
+        "maxFeePerGasWei": "1000000000",
+        "maxPriorityFeePerGasWei": "100000000",
+        "feeCeilingWei": "1600000000000000",
+        "nativeValueWei": "3000000000000000",
+        "totalNativeOutflowCeilingWei": "4600000000000000"
+      },
+      "orderedOperations": [
+        {
+          "name": "operator-approve",
+          "to": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+          "data": "0x095ea7b300000000000000000000000032a4a72992ad142e36fa1c5989b95fed609878180000000000000000000000000000000000000000000000000000000000000001",
+          "valueWei": "0",
+          "gasLimit": "200000",
+          "estimate": {
+            "status": "measured",
+            "gasUnits": "139993"
+          },
+          "from": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+          "eoaNonce": 109,
+          "chainId": 11155111
+        },
+        {
+          "name": "operator-deposit",
+          "to": "0x32A4A72992aD142E36fA1C5989b95FeD60987818",
+          "data": null,
+          "valueWei": "0",
+          "gasLimit": "600000",
+          "batch": {
+            "fundingEntity": "0xaaa77fe2366ac1c1bc54cdcee97e0e95afb7bd999720ea9858257c75fad9d88b",
+            "reserveRecipient": "0xf857e2e4c49b2abbeae3ec0ad7d8af4d8802264786db49c4070e07291dffed7d",
+            "tokenId": 1,
+            "usdcAtoms": "1",
+            "encodedBatch": "0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000160000000000000000000000000000000000000000000000000000000000000018000000000000000000000000000000000000000000000000000000000000001a000000000000000000000000000000000000000000000000000000000000001c000000000000000000000000000000000000000000000000000000000000001e000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000220000000000000000000000000000000000000000000000000000000000000024000000000000000000000000000000000000000000000000000000000000003200000000000000000000000000000000000000000000000000000000000000340000000000000000000000000000000000000000000000000000000000000036000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001f857e2e4c49b2abbeae3ec0ad7d8af4d8802264786db49c4070e07291dffed7d0000000000000000000000001c7d4b196cb0c7b01d743fbc6116a902379c72380000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+            "nextEntityNonce": "4",
+            "hankoHash": "0x0532e34ecadae9e9cf0a7b83360fe4a147ec96df5a917f46bab90d313c7e984c",
+            "hankoData": null
+          },
+          "estimate": {
+            "status": "conditional-cap",
+            "reason": "Complete E2R gas estimation requires the authorized Hanko and confirmed allowance.",
+            "historicalReference": {
+              "hash": "0x5f7752162dbbf7b166d491a76c84897db3d49f21c01effd0fc2a2118fd5d69ff",
+              "gasUsed": "354186"
+            }
+          },
+          "from": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+          "eoaNonce": 110,
+          "chainId": 11155111
+        },
+        {
+          "name": "hub-native-topup",
+          "to": "0xa4ae905df369d7556a87a930a8f046be7bcf1bcf",
+          "data": "0x",
+          "valueWei": "1000000000000000",
+          "gasLimit": "300000",
+          "estimate": {
+            "status": "measured",
+            "gasUnits": "207391"
+          },
+          "from": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+          "eoaNonce": 111,
+          "chainId": 11155111
+        },
+        {
+          "name": "user-principal-transfer",
+          "to": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+          "data": "0xa9059cbb00000000000000000000000061ff4c022bcc7d342d0d68a7b85f18e0fd7d944600000000000000000000000000000000000000000000000000000000000f4240",
+          "valueWei": "0",
+          "gasLimit": "200000",
+          "estimate": {
+            "status": "measured",
+            "gasUnits": "154151"
+          },
+          "from": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+          "eoaNonce": 112,
+          "chainId": 11155111
+        },
+        {
+          "name": "user-native-topup",
+          "to": "0x61ff4c022bcc7d342d0d68a7b85f18e0fd7d9446",
+          "data": "0x",
+          "valueWei": "2000000000000000",
+          "gasLimit": "300000",
+          "estimate": {
+            "status": "measured",
+            "gasUnits": "207391"
+          },
+          "from": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+          "eoaNonce": 113,
+          "chainId": 11155111
+        }
+      ]
+    },
+    {
+      "chainId": 421614,
+      "point": {
+        "number": 330230464,
+        "hash": "0xc33049d6c67ae21e2b1ccc31e86593ae1227d1ab5c776cbf1a93493fd27033a3"
+      },
+      "headerFingerprint": "b290f0154fffbfcf92b01e44993e5a79d9bfecf955f77a79566ee001e4e172c0",
+      "historyFingerprint": "17d81ad60c2be3ff9ce4bec3563dd1104a82df8c7883ebd70ffd0b4e30515a4b",
+      "token": "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d",
+      "depository": "0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+      "entityProvider": "0x3dae23be54dab4e88b92d4e4c3db42f7d9ce0df9",
+      "expectedCodeHashes": {
+        "0x2b65518871ea15d5a1bc43218e3c95621b54ccec": "0xeffc7111141a0b22ada7a83fc538d312951a0538610aff119f7bb0376d938e7d",
+        "0x37a9bdc2f8736bb31ffefb778a70ba7d544ff103": "0x02413ad800e58e168089146dd8b10a7e36316bfbe35a201f1e6f02c12a2ed717",
+        "0x3dae23be54dab4e88b92d4e4c3db42f7d9ce0df9": "0x22fb345563a7b06d7dfb6ff95e8f56a6f678f6b59da6c926dd67e32c06c38b87",
+        "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d": "0x9a736af6aac290d9196883e8686fc1d127ff657ca534fe4b88d6d40dc0bc6750",
+        "0x8223aa4c60adb851f53a120c3d3841de9e77c188": "0x8474e986e82636c385f7ca9ef92c97e3d400ba862fa065eb51807b774ad9a72c",
+        "0xcb7053c91ea02890b3ca702caaaea69656dc3ccf": "0x64ebb5db40c6deb7a16b733a30481752a3e64a51323fd51c41fa1c4b4b24eac5"
+      },
+      "funder": {
+        "address": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+        "nativeWei": "528464472972889600",
+        "usdcAtoms": "15000000",
+        "observedEoaNonce": 33,
+        "pendingEoaNonce": 33
+      },
+      "funderEntity": "0xaaa77fe2366ac1c1bc54cdcee97e0e95afb7bd999720ea9858257c75fad9d88b",
+      "currentFundingEntityNonce": "3",
+      "allowanceAtoms": "0",
+      "newHub": {
+        "entityId": "0x609c2a0c8c178a050d7a09ef9ad27650ffa423a7052387bc95de6bb1726a966e",
+        "address": "0x995a9dfc465c13eac44bd09e0666a17139759131",
+        "nativeWei": "0",
+        "usdcAtoms": "0",
+        "observedEoaNonce": 0,
+        "pendingEoaNonce": 0,
+        "reserveAtoms": "0",
+        "debtAtoms": "0"
+      },
+      "originalHub": {
+        "entityId": "0x0b669a275953ec4f68ebbf1ec6a0aedd7f2ae671ba527fcf745bde4df44c5447",
+        "reserveAtoms": "5000000"
+      },
+      "user": {
+        "address": "0xb77348f8f01e060934024fefc319c66653df6fa2",
+        "nativeWei": "0",
+        "usdcAtoms": "0",
+        "observedEoaNonce": 0,
+        "pendingEoaNonce": 0
+      },
+      "proposedReserveUsdcAtoms": "1000000",
+      "proposedUserPrincipalUsdcAtoms": "0",
+      "proposedTotalUsdcAtoms": "1000000",
+      "fees": {
+        "baseFeePerGasWei": "20000000",
+        "gasPriceWei": "20042000",
+        "maxFeePerGasWei": "100000000",
+        "maxPriorityFeePerGasWei": "0",
+        "feeCeilingWei": "129000000000000",
+        "nativeValueWei": "200000000000000",
+        "totalNativeOutflowCeilingWei": "329000000000000"
+      },
+      "orderedOperations": [
+        {
+          "name": "operator-approve",
+          "to": "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d",
+          "data": "0x095ea7b30000000000000000000000008223aa4c60adb851f53a120c3d3841de9e77c18800000000000000000000000000000000000000000000000000000000000f4240",
+          "valueWei": "0",
+          "gasLimit": "90000",
+          "estimate": {
+            "status": "measured",
+            "gasUnits": "56240",
+            "nitro": {
+              "totalGas": "56240",
+              "l1Gas": "0",
+              "baseFee": "20010000",
+              "l1BaseFeeEstimate": "0",
+              "l1IncludedInTotal": true
+            }
+          },
+          "from": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+          "eoaNonce": 33,
+          "chainId": 421614
+        },
+        {
+          "name": "operator-deposit",
+          "to": "0x8223AA4c60Adb851f53a120c3D3841De9e77c188",
+          "data": null,
+          "valueWei": "0",
+          "gasLimit": "600000",
+          "batch": {
+            "fundingEntity": "0xaaa77fe2366ac1c1bc54cdcee97e0e95afb7bd999720ea9858257c75fad9d88b",
+            "reserveRecipient": "0x609c2a0c8c178a050d7a09ef9ad27650ffa423a7052387bc95de6bb1726a966e",
+            "tokenId": 1,
+            "usdcAtoms": "1000000",
+            "encodedBatch": "0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000160000000000000000000000000000000000000000000000000000000000000018000000000000000000000000000000000000000000000000000000000000001a000000000000000000000000000000000000000000000000000000000000001c000000000000000000000000000000000000000000000000000000000000001e000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000220000000000000000000000000000000000000000000000000000000000000024000000000000000000000000000000000000000000000000000000000000003200000000000000000000000000000000000000000000000000000000000000340000000000000000000000000000000000000000000000000000000000000036000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001609c2a0c8c178a050d7a09ef9ad27650ffa423a7052387bc95de6bb1726a966e00000000000000000000000075faf114eafb1bdbe2f0316df893fd58ce46aa4d00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+            "nextEntityNonce": "4",
+            "hankoHash": "0x86c25a297bd464b61760184948c918fc2f28970e0dad52c488d152098a853554",
+            "hankoData": null
+          },
+          "estimate": {
+            "status": "conditional-cap",
+            "reason": "Complete E2R gas estimation requires the authorized Hanko and confirmed allowance.",
+            "historicalReference": {
+              "hash": "0x462aace55c2024fc218ab5ae4346fb49168201b132a92649f4f3721206dab9a6",
+              "gasUsed": "166762"
+            }
+          },
+          "from": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+          "eoaNonce": 34,
+          "chainId": 421614
+        },
+        {
+          "name": "hub-native-topup",
+          "to": "0x995a9dfc465c13eac44bd09e0666a17139759131",
+          "data": "0x",
+          "valueWei": "100000000000000",
+          "gasLimit": "300000",
+          "estimate": {
+            "status": "measured",
+            "gasUnits": "21000",
+            "nitro": {
+              "totalGas": "21000",
+              "l1Gas": "0",
+              "baseFee": "20010000",
+              "l1BaseFeeEstimate": "0",
+              "l1IncludedInTotal": true
+            }
+          },
+          "from": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+          "eoaNonce": 35,
+          "chainId": 421614
+        },
+        {
+          "name": "user-native-topup",
+          "to": "0xb77348f8f01e060934024fefc319c66653df6fa2",
+          "data": "0x",
+          "valueWei": "100000000000000",
+          "gasLimit": "300000",
+          "estimate": {
+            "status": "measured",
+            "gasUnits": "21000",
+            "nitro": {
+              "totalGas": "21000",
+              "l1Gas": "0",
+              "baseFee": "20010000",
+              "l1BaseFeeEstimate": "0",
+              "l1IncludedInTotal": true
+            }
+          },
+          "from": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+          "eoaNonce": 36,
+          "chainId": 421614
+        }
+      ]
+    }
+  ],
+  "ethereumTransactionsSigned": 0,
+  "hankosCreated": 0,
+  "publicFinancialBroadcasts": 0
+}

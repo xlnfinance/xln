@@ -1,0 +1,65 @@
+{
+  "ticket": "12",
+  "status": "stale-header-batch-dispatch-confirmed",
+  "startedAt": "2026-11-17T20:50:48.512Z",
+  "observedAt": "2026-11-17T20:52:14.967Z",
+  "candidateHead": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26",
+  "candidateDigest": "786f852fa3a5d6234f97c46aa15842be8281cfa8c061dae09402393b1ee1f663",
+  "dirty": true,
+  "sessionDirectory": ".logs/ts-usdc-cross-j-poc/public/sessions/restore-ifTLlm",
+  "originalHubStore": ".logs/ts-usdc-cross-j-poc/public/hub/attempt-1794864456845",
+  "rpcBindings": "Same current and historical endpoint fingerprints as hub-only-public-diagnostic.json",
+  "mode": "hub-only with POC_HEADER_BATCH_TIMING=1",
+  "gateway": "managed read-only",
+  "sessionElapsedMs": 86145,
+  "watcher": {
+    "error": "J_WATCHER_DRAIN_STALLED",
+    "idleMsAtDetection": 80366.655083,
+    "stallTimeoutMs": 60000,
+    "committedBeforeAndAtStall": { "11155111": 12149976, "421614": 329895132 },
+    "newAuthenticatedRanges": 0
+  },
+  "trace": {
+    "source": "gateway.log, USDC_PREFLIGHT_HEADER_TIMING records",
+    "scope": "Header requests with position-indexed IDs and more than one item, as used by the authenticated receipt range reader",
+    "totalHeaderBatchIds": 95,
+    "rangeBatchesReceived": 83,
+    "admitted": 75,
+    "sent": 74,
+    "finished": 73,
+    "clientAbortsObserved": 54,
+    "sentAfterObservedClientAbort": 39,
+    "upstreamHttp429": 32,
+    "upstreamHttp429OnSendsAfterAbort": 22,
+    "upstreamHttp429OnSendsWithoutPriorObservedAbort": 10,
+    "maxWaitersSeenAtArrival": 13,
+    "byChain": {
+      "11155111": { "sent": 38, "sentAfterAbort": 20, "upstreamHttp429": 16 },
+      "421614": { "sent": 36, "sentAfterAbort": 19, "upstreamHttp429": 16 }
+    },
+    "durationsMs": {
+      "queueUntilSlot": { "p50": 6253, "p95": 19668, "max": 21297 },
+      "cooldownWhenApplied": { "p50": 1000, "p95": 1001, "max": 1001 },
+      "upstreamReply": { "p50": 288, "p95": 1351, "max": 1625 },
+      "upstreamHttp429": { "p50": 3097, "p95": 3197, "max": 3198 },
+      "arrivalToFinish": { "p50": 9619, "p95": 22119, "max": 24058 }
+    },
+    "example": {
+      "batchId": 27,
+      "chainId": 421614,
+      "items": 128,
+      "elapsedMs": { "queued": 0, "clientAbort": 5001, "admitted": 6253, "sent": 7253, "http429": 10450 }
+    }
+  },
+  "hubWal": {
+    "restoredRuntimeHeight": 43,
+    "latestRuntimeHeightAfterStop": 44,
+    "newFrames": [{ "height": 44, "runtimeTxs": ["importJ"], "entityTxs": [], "runtimeOutputCount": 0 }]
+  },
+  "mmLaunched": false,
+  "userLaunched": false,
+  "additionalFinancialBroadcasts": 0,
+  "standReleased": true,
+  "validation": { "preflightTests": 7, "preflightAssertions": 61, "deploymentTypecheck": "pass", "aggregateCheck": "pass" },
+  "limitsOfInference": "Percentiles use nearest rank for each observed interval. Pending batches at shutdown do not contribute to a duration without an end marker. Upstream reply time covers the gateway fetch and response read, not isolated provider compute. This run establishes dispatch after observed client cancellation. It does not establish how much an abort-aware queue would improve catch-up or eliminate upstream throttling."
+}

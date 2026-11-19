@@ -1,0 +1,182 @@
+{
+  "candidateDigest": "7c1dc0e7b67b7e79389845459ff95c673128c348320ac669dbd229cb19295fc4",
+  "candidateHead": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26",
+  "confirmedRuntimeFramesWritten": 0,
+  "opening": {
+    "candidateHash": "0x40d4b57ad8675d886561eb4a1299f635390de51a4e7cbeb635a8e76e1b2a3922",
+    "observedAt": "2026-11-18T23:53:16.981Z",
+    "preparedHashLookup": [
+      {
+        "receipt": null,
+        "transaction": null
+      },
+      {
+        "receipt": null,
+        "transaction": null
+      }
+    ],
+    "rpcs": ["https://ethereum-sepolia-rpc.publicnode.com", "https://rpc.sepolia.ethpandaops.io"],
+    "state": {
+      "accountKey": "0x64abda6ea9caaae7ecc550e8d4531200893574572d253a8c7e3495d725995260cfcdd2d155d6ee85d446d49045cb444a78df66b89a18c84959665a040671dae2",
+      "accountNonce": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "chainId": 11155111,
+      "codeHashesMatched": 6,
+      "collateralAtoms": {
+        "__xlnType": "BigInt",
+        "value": "1000000"
+      },
+      "depositoryBackingAtoms": {
+        "__xlnType": "BigInt",
+        "value": "2000001"
+      },
+      "disputeHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "hub": {
+        "board": {
+          "current": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "exists": false,
+          "proposed": "0x0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "debtAtoms": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "entityNonce": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "eoaNonce": 0,
+        "nativeWei": {
+          "__xlnType": "BigInt",
+          "value": "1000000000000000"
+        },
+        "reserveAtoms": {
+          "__xlnType": "BigInt",
+          "value": "1"
+        }
+      },
+      "ondelta": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "point": {
+        "baseFeePerGasWei": {
+          "__xlnType": "BigInt",
+          "value": "16"
+        },
+        "hash": "0xba3f3f9b1f3d179bbf84dbfd4ac1cf37939e01bbaab5765c78189d4b07d49ece",
+        "number": 12164792,
+        "timestamp": "2026-11-18T23:53:00.000Z"
+      },
+      "user": {
+        "board": {
+          "current": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "exists": false,
+          "proposed": "0x0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "debtAtoms": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "entityNonce": {
+          "__xlnType": "BigInt",
+          "value": "2"
+        },
+        "eoaNonce": 3,
+        "nativeWei": {
+          "__xlnType": "BigInt",
+          "value": "1999999986561179"
+        },
+        "reserveAtoms": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        }
+      }
+    },
+    "tip": [
+      {
+        "fee": {
+          "gasPriceWei": {
+            "__xlnType": "BigInt",
+            "value": "18"
+          },
+          "maxPriorityFeePerGasWei": {
+            "__xlnType": "BigInt",
+            "value": "2"
+          }
+        },
+        "hubEOA": {
+          "latest": 0,
+          "pending": 0
+        }
+      },
+      {
+        "fee": {
+          "gasPriceWei": {
+            "__xlnType": "BigInt",
+            "value": "18"
+          },
+          "maxPriorityFeePerGasWei": {
+            "__xlnType": "BigInt",
+            "value": "2"
+          }
+        },
+        "hubEOA": {
+          "latest": 0,
+          "pending": 0
+        }
+      }
+    ]
+  },
+  "proposedSavedWireManifestSha256": "dc8ff63efeb4c981f314b7da235dcf327cb7a201a86fae497cb54de1d462ee8c",
+  "publicBroadcasts": 0,
+  "recovery": {
+    "abortAndRequeue": {
+      "accountNonce": 8,
+      "entityBatchNonce": 1,
+      "existingEvmWireOnDraft": false,
+      "hubBatchHashToSign": "0x36f0151551f22448e02925705e49a69cba2cd06089524e3aa19ebf80fc1a9d14",
+      "identicalBatchHash": true,
+      "identicalCounterpartyHanko": true,
+      "identicalEncodedBatch": true,
+      "newGeneration": 2,
+      "oldGeneration": 1,
+      "operations": 1
+    },
+    "externalPreparedRecordRejected": true,
+    "manualRebroadcastBlocked": true,
+    "originalOutboxEntries": 0,
+    "plainBroadcastBlocked": true,
+    "savedEvmTransactionHash": "0x40d4b57ad8675d886561eb4a1299f635390de51a4e7cbeb635a8e76e1b2a3922",
+    "savedHubWalFrame": 236,
+    "scheduledRetryBlocked": true,
+    "sealedHubBatchHash": "0x36f0151551f22448e02925705e49a69cba2cd06089524e3aa19ebf80fc1a9d14"
+  },
+  "scope": {
+    "evaluated": "Existing abort and broadcast reducers on detached restored state",
+    "execution": "The requeued draft must go through normal Hub certification and EVM preparation after authorization",
+    "originals": "read-only copy source",
+    "stateRetained": "The original Account workspace and counterparty Hanko are preserved in the recovery draft",
+    "wireRecovery": "No canonical command restores the historical prepared wire after the terminal result"
+  },
+  "signaturesProduced": 0,
+  "status": "transition-only-recovery-review",
+  "views": [
+    {
+      "accountFrame": 10,
+      "accountRoot": "0xacf3ab83ac3b82cc0dc78529ae6ea062a24c10dcefa5fd308c60a8694253e6d5",
+      "frame": 237,
+      "role": "hub",
+      "workspaceHash": "0xb5454df9709e5dcc638583cc1744d2c67f0b517bf4f700f27df595cd40eee137"
+    },
+    {
+      "accountFrame": 10,
+      "accountRoot": "0xacf3ab83ac3b82cc0dc78529ae6ea062a24c10dcefa5fd308c60a8694253e6d5",
+      "frame": 77,
+      "role": "user",
+      "workspaceHash": "0xb5454df9709e5dcc638583cc1744d2c67f0b517bf4f700f27df595cd40eee137"
+    }
+  ]
+}

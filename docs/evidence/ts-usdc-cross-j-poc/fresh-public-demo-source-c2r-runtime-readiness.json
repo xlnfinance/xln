@@ -1,0 +1,327 @@
+{
+  "authentication": {
+    "hub": {
+      "after": {
+        "accountFrame": 6,
+        "accountRoot": "0x4fd6751a3c46dc3ba25869c423e147f3fdc2dcd5e00f3a7db3bbe424560035d4",
+        "accountStateHash": "0x84544417d2d5e3100a57223c5b3ccf4fc357639b623014407572782f96957917",
+        "allocatedToRoleAtoms": {
+          "__xlnType": "BigInt",
+          "value": "1000000"
+        },
+        "collateralAtoms": {
+          "__xlnType": "BigInt",
+          "value": "1000000"
+        },
+        "jNonce": 0,
+        "nextSettlementNonce": 8,
+        "offdelta": {
+          "__xlnType": "BigInt",
+          "value": "1000000"
+        },
+        "ondelta": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "peerHankoDigest": "371220a3a038ccdb64b401f28d14c5a2b2a4c8f7b45ab8b12f7ba331e9111174",
+        "reserveAtoms": {
+          "__xlnType": "BigInt",
+          "value": "1"
+        },
+        "selfHankoDigest": "b902ebd15204eb010cdcbdb2fd816b057292d2dd0b8eff4e0550c6d1d0521ea0"
+      },
+      "before": {
+        "accountFrame": 6,
+        "accountRoot": "0x4fd6751a3c46dc3ba25869c423e147f3fdc2dcd5e00f3a7db3bbe424560035d4",
+        "accountStateHash": "0x84544417d2d5e3100a57223c5b3ccf4fc357639b623014407572782f96957917",
+        "allocatedToRoleAtoms": {
+          "__xlnType": "BigInt",
+          "value": "1000000"
+        },
+        "collateralAtoms": {
+          "__xlnType": "BigInt",
+          "value": "1000000"
+        },
+        "jNonce": 0,
+        "nextSettlementNonce": 8,
+        "offdelta": {
+          "__xlnType": "BigInt",
+          "value": "1000000"
+        },
+        "ondelta": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "peerHankoDigest": "371220a3a038ccdb64b401f28d14c5a2b2a4c8f7b45ab8b12f7ba331e9111174",
+        "reserveAtoms": {
+          "__xlnType": "BigInt",
+          "value": "1"
+        },
+        "selfHankoDigest": "b902ebd15204eb010cdcbdb2fd816b057292d2dd0b8eff4e0550c6d1d0521ea0"
+      },
+      "deliveryReady": false,
+      "p2pStarted": false,
+      "role": "hub",
+      "runtimeFrameAfter": 224,
+      "runtimeFrameBefore": 221,
+      "scan": {
+        "authenticatedBlocks": 465,
+        "firstBlock": 12163884,
+        "ranges": 15,
+        "through": 12164348
+      },
+      "status": {
+        "authenticatedThrough": 12164348,
+        "chainId": 11155111,
+        "committedCursor": 12163883,
+        "depositoryAddress": "0x32a4a72992ad142e36fa1c5989b95fed60987818",
+        "replicas": [
+          {
+            "authenticatedThrough": 12164348,
+            "entityFinalizedThrough": 12163883,
+            "key": "0x64abda6ea9caaae7ecc550e8d4531200893574572d253a8c7e3495d725995260:0x944d742ada37d5416774d6303a649326eb1e9478",
+            "localScannedThrough": 12164255,
+            "pendingDueFinality": false
+          }
+        ],
+        "targetBlock": 12164344
+      },
+      "verifiedPersistedHead": true
+    },
+    "matchingBilateralHankos": true,
+    "user": {
+      "after": {
+        "accountFrame": 6,
+        "accountRoot": "0x4fd6751a3c46dc3ba25869c423e147f3fdc2dcd5e00f3a7db3bbe424560035d4",
+        "accountStateHash": "0x84544417d2d5e3100a57223c5b3ccf4fc357639b623014407572782f96957917",
+        "allocatedToRoleAtoms": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "collateralAtoms": {
+          "__xlnType": "BigInt",
+          "value": "1000000"
+        },
+        "jNonce": 0,
+        "nextSettlementNonce": 8,
+        "offdelta": {
+          "__xlnType": "BigInt",
+          "value": "1000000"
+        },
+        "ondelta": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "peerHankoDigest": "b902ebd15204eb010cdcbdb2fd816b057292d2dd0b8eff4e0550c6d1d0521ea0",
+        "reserveAtoms": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "selfHankoDigest": "371220a3a038ccdb64b401f28d14c5a2b2a4c8f7b45ab8b12f7ba331e9111174"
+      },
+      "before": {
+        "accountFrame": 6,
+        "accountRoot": "0x4fd6751a3c46dc3ba25869c423e147f3fdc2dcd5e00f3a7db3bbe424560035d4",
+        "accountStateHash": "0x84544417d2d5e3100a57223c5b3ccf4fc357639b623014407572782f96957917",
+        "allocatedToRoleAtoms": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "collateralAtoms": {
+          "__xlnType": "BigInt",
+          "value": "1000000"
+        },
+        "jNonce": 0,
+        "nextSettlementNonce": 8,
+        "offdelta": {
+          "__xlnType": "BigInt",
+          "value": "1000000"
+        },
+        "ondelta": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "peerHankoDigest": "b902ebd15204eb010cdcbdb2fd816b057292d2dd0b8eff4e0550c6d1d0521ea0",
+        "reserveAtoms": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "selfHankoDigest": "371220a3a038ccdb64b401f28d14c5a2b2a4c8f7b45ab8b12f7ba331e9111174"
+      },
+      "deliveryReady": false,
+      "p2pStarted": false,
+      "role": "user",
+      "runtimeFrameAfter": 71,
+      "runtimeFrameBefore": 67,
+      "scan": {
+        "authenticatedBlocks": 491,
+        "firstBlock": 12163884,
+        "ranges": 16,
+        "through": 12164374
+      },
+      "status": {
+        "authenticatedThrough": 12164374,
+        "chainId": 11155111,
+        "committedCursor": 12163883,
+        "depositoryAddress": "0x32a4a72992ad142e36fa1c5989b95fed60987818",
+        "replicas": [
+          {
+            "authenticatedThrough": 12164374,
+            "entityFinalizedThrough": 12163883,
+            "key": "0xcfcdd2d155d6ee85d446d49045cb444a78df66b89a18c84959665a040671dae2:0x61ff4c022bcc7d342d0d68a7b85f18e0fd7d9446",
+            "localScannedThrough": 12164374,
+            "pendingDueFinality": false
+          }
+        ],
+        "targetBlock": 12164359
+      },
+      "verifiedPersistedHead": true
+    }
+  },
+  "candidateDigest": "7c1dc0e7b67b7e79389845459ff95c673128c348320ac669dbd229cb19295fc4",
+  "candidateHead": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26",
+  "gateway": {
+    "http429Mentions": 0,
+    "receiptBatches": 31
+  },
+  "manifestAnchor": {
+    "hash": "0xe9778ac484b0af23011347cb6f1dccab3f4d0a737591cffc408712c8a9878d0b",
+    "number": 12164312
+  },
+  "manifestExpiresAtUtc": "2026-11-18T23:14:00.000Z",
+  "manifestSha256": "2aeba7c0bd247091a9836b5552cfe89257475e0893e6ad50f456b6111a1eb697",
+  "method": {
+    "additionalFinancialCommands": 0,
+    "deliveryReady": false,
+    "gateway": "loopback read-only",
+    "operatorRuntimesLaunched": 0,
+    "originalRuntimeStoreFilesModified": 0,
+    "p2pStarted": false,
+    "publicBroadcasts": 0,
+    "restore": "copies of original Hub and user stores",
+    "scope": "Ethereum Sepolia watcher"
+  },
+  "signedC2R": {
+    "exactGasEstimate": null,
+    "settlementSignaturesProduced": 0,
+    "signedWires": 0
+  },
+  "status": "isolated-observation-complete",
+  "subsequentRpcCheck": {
+    "observedAt": "2026-11-18T22:28:11.482Z",
+    "rpcs": ["https://ethereum-sepolia-rpc.publicnode.com", "https://rpc.sepolia.ethpandaops.io"],
+    "state": {
+      "accountKey": "0x64abda6ea9caaae7ecc550e8d4531200893574572d253a8c7e3495d725995260cfcdd2d155d6ee85d446d49045cb444a78df66b89a18c84959665a040671dae2",
+      "accountNonce": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "chainId": 11155111,
+      "codeHashesMatched": 6,
+      "collateralAtoms": {
+        "__xlnType": "BigInt",
+        "value": "1000000"
+      },
+      "depositoryBackingAtoms": {
+        "__xlnType": "BigInt",
+        "value": "2000001"
+      },
+      "disputeHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "hub": {
+        "board": {
+          "current": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "exists": false,
+          "proposed": "0x0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "debtAtoms": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "entityNonce": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "eoaNonce": 0,
+        "nativeWei": {
+          "__xlnType": "BigInt",
+          "value": "1000000000000000"
+        },
+        "reserveAtoms": {
+          "__xlnType": "BigInt",
+          "value": "1"
+        }
+      },
+      "ondelta": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "point": {
+        "baseFeePerGasWei": {
+          "__xlnType": "BigInt",
+          "value": "16"
+        },
+        "hash": "0x4b0e78503a7f6d7416a2c8e7976ea47551d1565affea8c8c38c8b1dd4f6a9682",
+        "number": 12164378,
+        "timestamp": "2026-11-18T22:28:00.000Z"
+      },
+      "user": {
+        "board": {
+          "current": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "exists": false,
+          "proposed": "0x0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "debtAtoms": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "entityNonce": {
+          "__xlnType": "BigInt",
+          "value": "2"
+        },
+        "eoaNonce": 3,
+        "nativeWei": {
+          "__xlnType": "BigInt",
+          "value": "1999999986561179"
+        },
+        "reserveAtoms": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        }
+      }
+    },
+    "tip": [
+      {
+        "fee": {
+          "gasPriceWei": {
+            "__xlnType": "BigInt",
+            "value": "18"
+          },
+          "maxPriorityFeePerGasWei": {
+            "__xlnType": "BigInt",
+            "value": "2"
+          }
+        },
+        "hubEOA": {
+          "latest": 0,
+          "pending": 0
+        }
+      },
+      {
+        "fee": {
+          "gasPriceWei": {
+            "__xlnType": "BigInt",
+            "value": "18"
+          },
+          "maxPriorityFeePerGasWei": {
+            "__xlnType": "BigInt",
+            "value": "2"
+          }
+        },
+        "hubEOA": {
+          "latest": 0,
+          "pending": 0
+        }
+      }
+    ]
+  }
+}

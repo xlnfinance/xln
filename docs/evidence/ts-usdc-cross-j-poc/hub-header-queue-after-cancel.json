@@ -1,0 +1,67 @@
+{
+  "ticket": "12",
+  "status": "cancelled-dispatch-eliminated-catchup-still-blocked",
+  "startedAt": "2026-11-17T20:58:08.148Z",
+  "observedAt": "2026-11-17T20:59:33.328Z",
+  "candidateHead": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26",
+  "candidateDigest": "75d8f9d2bba8786bff583bc1fc2b078e3f64b78023b025ed3514e17154848703",
+  "dirty": true,
+  "comparison": "hub-header-queue-timing.json",
+  "sessionDirectory": ".logs/ts-usdc-cross-j-poc/public/sessions/restore-nX3ak1",
+  "originalHubStore": ".logs/ts-usdc-cross-j-poc/public/hub/attempt-1794864456845",
+  "rpcBindings": "Same header and history endpoint fingerprints as the comparison run",
+  "mode": "hub-only with POC_HEADER_BATCH_TIMING=1",
+  "gateway": "managed read-only",
+  "startupTimeoutMs": 120000,
+  "sessionElapsedMs": 84893,
+  "watcher": {
+    "error": "J_WATCHER_DRAIN_STALLED",
+    "idleMsAtDetection": 79317.587875,
+    "committedBeforeAndAtStall": { "11155111": 12149976, "421614": 329895132 },
+    "newAuthenticatedRanges": 0
+  },
+  "trace": {
+    "source": "gateway.log, position-indexed header batches with more than one item, as in the comparison run",
+    "totalHeaderBatchIds": 114,
+    "rangeBatchesReceived": 98,
+    "admitted": 68,
+    "sent": 62,
+    "finishedLocally": 98,
+    "clientAbortsObserved": 50,
+    "cancelledBeforeSend": 36,
+    "cancelledBeforeSlot": 30,
+    "cancelledWithSlotBeforeSend": 6,
+    "sentAfterObservedClientAbort": 0,
+    "upstreamHttp429": 23,
+    "byChain": {
+      "11155111": { "sent": 27, "cancelledBeforeSend": 20, "upstreamHttp429": 8 },
+      "421614": { "sent": 35, "cancelledBeforeSend": 16, "upstreamHttp429": 15 }
+    },
+    "durationsMs": {
+      "queueUntilSlot": { "p50": 611, "p95": 4888, "max": 4941 },
+      "upstreamReply": { "p50": 154, "p95": 983, "max": 1495 },
+      "upstreamHttp429": { "p50": 3087, "p95": 3197, "max": 3199 }
+    },
+    "queueCancelExample": { "batchId": 26, "clientAbortMs": 5001, "cancelledMs": 5001, "finishedMs": 5002, "sent": false }
+  },
+  "receiptRateLimit": {
+    "chainId": 11155111,
+    "rpcRole": "history",
+    "method": "eth_getBlockReceipts",
+    "blockNumber": 12149995,
+    "jsonRpcCode": 429,
+    "gatewayLogLine": 594,
+    "watcherLogLine": 61
+  },
+  "hubWal": {
+    "restoredRuntimeHeight": 44,
+    "latestRuntimeHeightAfterStop": 45,
+    "newFrames": [{ "height": 45, "runtimeTxs": ["importJ"], "entityTxs": [], "runtimeOutputCount": 0 }]
+  },
+  "mmLaunched": false,
+  "userLaunched": false,
+  "additionalFinancialBroadcasts": 0,
+  "standReleased": true,
+  "validation": { "preflightTests": 9, "preflightAssertions": 71, "deploymentTypecheck": "pass", "aggregateCheck": "pass" },
+  "limitsOfInference": "Queue percentiles include batches that obtained a slot and exclude cancelled waiters that never obtained one. The fix eliminated observed dispatch after cancellation in this attempt. Header 429s still occurred on live sends, and at least one historical receipt read encountered a separate upstream 429. The run establishes neither sustained catch-up nor the effect of a future pacing change."
+}

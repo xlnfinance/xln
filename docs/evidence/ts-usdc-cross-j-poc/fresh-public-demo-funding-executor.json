@@ -1,0 +1,100 @@
+{
+  "status": "locally-verified-public-unsigned",
+  "candidateHead": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26",
+  "candidateDigest": "72861a2f40fcc12c7dc5b95e34d991990cef48f13016ae75ef9dccb2a5d99e34",
+  "dirty": true,
+  "local": [
+    {
+      "scope": "one-run-demo",
+      "localAnvilChainIds": [
+        11155111,
+        421614
+      ],
+      "slots": [
+        5,
+        4
+      ],
+      "crashCutsAfterBroadcast": [
+        "11155111:user-principal-transfer",
+        "421614:user-native-topup"
+      ],
+      "rerunKeptSameReceipts": true,
+      "restoredHubWalMatched": true,
+      "restoredHubHeight": 54,
+      "sourceHubReserveAtoms": "1",
+      "targetHubReserveAtoms": "1000000",
+      "assertions": 43,
+      "elapsedSeconds": 158.69
+    },
+    {
+      "scope": "operator-only",
+      "localAnvilChainIds": [
+        11155111,
+        421614
+      ],
+      "slots": [
+        3,
+        3
+      ],
+      "crashCutsAfterBroadcast": [
+        "11155111:approval",
+        "421614:deposit"
+      ],
+      "rerunKeptSameReceipts": true,
+      "restoredHubWalMatched": true,
+      "restoredHubHeight": 54,
+      "sourceHubReserveAtoms": "1000000",
+      "targetHubReserveAtoms": "5000000",
+      "assertions": 41,
+      "elapsedSeconds": 101.91
+    }
+  ],
+  "validation": {
+    "fundingAuthorityTests": 20,
+    "fundingAuthorityAssertions": 44,
+    "localFinancialTests": 2,
+    "deploymentTypecheck": "pass",
+    "aggregateCheck": "pass",
+    "shortGates": 3,
+    "sourceGates": 38,
+    "soundcheckGates": 10,
+    "frozenCore": "unchanged"
+  },
+  "publicPreparation": {
+    "status": "prepared-unapproved",
+    "authorityPath": ".logs/ts-usdc-cross-j-poc/demo/fresh-FVVLsm/one-run-funding-9wfq8x4r/authority.json",
+    "authoritySha256": "2c5f28cfd7485e1197f7d9966fb44cf79bf522b701d999b426065b33d769dc3d",
+    "expiresAt": "2026-11-18T22:45:51.245Z",
+    "approved": false,
+    "reviewedProposal": "fresh-public-demo-funding-proposal.json",
+    "chainAnchorsAndDigests": [
+      {
+        "chainId": 11155111,
+        "anchorNumber": 12157465,
+        "anchorHash": "0x9e701fe778f6cc3edfcd09dbe28959bbf8ceabea1bc30af59c24ab92e6a6b026",
+        "slots": 5,
+        "funderNonce": 109,
+        "previousFunderNonce": 109,
+        "entityNonce": "4",
+        "previousEntityNonce": "4",
+        "hankoHash": "0x0532e34ecadae9e9cf0a7b83360fe4a147ec96df5a917f46bab90d313c7e984c"
+      },
+      {
+        "chainId": 421614,
+        "anchorNumber": 330233599,
+        "anchorHash": "0x8e4f123caf81969f2b517b2b8eb6f2b80b500edf1c91753aff8f79b0cbae82d6",
+        "slots": 4,
+        "funderNonce": 33,
+        "previousFunderNonce": 33,
+        "entityNonce": "4",
+        "previousEntityNonce": "4",
+        "hankoHash": "0x86c25a297bd464b61760184948c918fc2f28970e0dad52c488d152098a853554"
+      }
+    ],
+    "matchingCallAmountsRecipientsAndCaps": true,
+    "estimatedSimpleCalls": 7,
+    "conditionalDeposits": 2,
+    "publicSignatures": 0,
+    "publicBroadcasts": 0
+  }
+}

@@ -1,0 +1,265 @@
+{
+  "status": "operators-ready-and-live-quote-observed",
+  "runId": "fresh-w4vgds-1usdc-20261118-guarded",
+  "authorityFile": "fresh-public-demo-one-run-guarded-authority.json",
+  "authorityFileSha256": "4e896b982ec9423ed804424ea5bac684d33c225fa8dd1336bc210c2638a221f0",
+  "candidateHead": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26",
+  "candidateDigest": "03f29fbccc5c14f8db59935cd003fe68a0191dd9fa2f4640025106cf108a4535",
+  "fundingEvidence": "fresh-public-demo-funded.json",
+  "readiness": {
+    "session": "restore-h7Z23g",
+    "readyAtQuote": true,
+    "startedAt": "2026-11-18T19:42:55.010Z",
+    "secondsFromStartToQuote": 570.455,
+    "hub": [
+      {
+        "chainId": 11155111,
+        "certifiedCursorAtReadiness": 12163264,
+        "startupTarget": 12163567,
+        "lastAuthenticatedBlock": 12163611
+      },
+      {
+        "chainId": 421614,
+        "certifiedCursorAtReadiness": 330502493,
+        "startupTarget": 330514309,
+        "lastAuthenticatedBlock": 330516314
+      }
+    ],
+    "mm": [
+      {
+        "chainId": 11155111,
+        "certifiedCursorAtReadiness": 12163171,
+        "startupTarget": 12163584,
+        "lastAuthenticatedBlock": 12163605
+      },
+      {
+        "chainId": 421614,
+        "certifiedCursorAtReadiness": 330496293,
+        "startupTarget": 330515045,
+        "lastAuthenticatedBlock": 330516263
+      }
+    ],
+    "gateway": "read-only",
+    "arbitrumHeaderProfile": "hypersync-for-over-32-arbitrum-blocks-publicnode-up-to-32",
+    "hyperSyncResponsesByStatus": {
+      "200": 64
+    },
+    "firstAttempt": {
+      "session": "restore-rrwVCX",
+      "disposition": "stopped after PublicNode limited large header batches"
+    }
+  },
+  "quote": {
+    "committedOrders": 18,
+    "detail": {
+      "existingTargetCredit": "0",
+      "expectedExternalPayout": "899801",
+      "fee": "100099",
+      "gross": "999900",
+      "requiredTargetCredit": "999900",
+      "requiresExactTargetCredit": true,
+      "reserveSupportsEstimatedCover": true,
+      "snapshot": {
+        "account": {
+          "height": 2,
+          "stateHash": "0x56e5a4f5897749508dc68fe0f315c8c2b6d6b7f6e536a2a8e2268c2007afc221",
+          "view": {
+            "ascii": "[|--------------------------------------------------]",
+            "collateral": "0",
+            "delta": "0",
+            "inAllowance": "0",
+            "inCapacity": "0",
+            "inCollateral": "0",
+            "inOwnCredit": "0",
+            "inPeerCredit": "0",
+            "inTotalHold": "0",
+            "outAllowance": "0",
+            "outCapacity": "0",
+            "outCollateral": "0",
+            "outOwnCredit": "0",
+            "outPeerCredit": "0",
+            "outTotalHold": "0",
+            "ownCreditLimit": "0",
+            "ownCreditUsed": "0",
+            "peerCreditLimit": "0",
+            "peerCreditUsed": "0",
+            "totalCapacity": "0"
+          }
+        },
+        "activeDebts": "0",
+        "block": {
+          "hash": "0xabfdc02e7de1b3d7c8c3d68cbd49ef40f869e8832ee97d04e807767570d57989",
+          "number": 330516263
+        },
+        "collateral": "0",
+        "depositoryTokens": "6000000",
+        "hubActiveDebts": "0",
+        "hubReserve": "1000000",
+        "reserve": "0",
+        "token": "0"
+      },
+      "sourceAccountOutCapacity": "0",
+      "sourceAgreement": {
+        "height": 2,
+        "stateHash": "0x56646b7d13b9630a1aa0a31ba5186ea3ef5774a71e01e649d7065fbe0b32ddce",
+        "matchingSignedAccount": true
+      },
+      "sourceDepositStillRequired": true,
+      "targetAgreement": {
+        "height": 2,
+        "stateHash": "0x56e5a4f5897749508dc68fe0f315c8c2b6d6b7f6e536a2a8e2268c2007afc221",
+        "matchingSignedAccount": true
+      },
+      "terms": {
+        "baseFee": "100000",
+        "effectiveAt": 1795026068884,
+        "gasFee": "0",
+        "liquidityFeeBps": "1",
+        "noticePeriodSeconds": 2592000,
+        "policyVersion": 1,
+        "updatedAt": 1795026068884
+      }
+    },
+    "hubHealth": {
+      "ok": true,
+      "ready": true
+    },
+    "liveMatchingOrders": 9,
+    "mmHealth": {
+      "ok": true,
+      "phase": null,
+      "ready": true
+    },
+    "observedAt": "2026-11-18T19:52:25.465Z",
+    "offer": {
+      "expiresAt": 1795046400000,
+      "makerEntityId": "0x203e42f833f0f73f85443e71b0be1b3fff83f322039f8c9270183bb15c0f7391",
+      "orderId": "mmx-e2b4a2-995260-1-1-c556cb4f342284de6634e565fda6035c0e31737f31601eb618e54994094e330f-sell-1",
+      "priceTicks": "9999",
+      "remaining": {
+        "fillRatio": 0,
+        "filledSourceAmount": "0",
+        "filledTargetAmount": "0",
+        "sourceRemaining": "10198980000",
+        "sourceTotal": "10198980000",
+        "targetRemaining": "10200000000",
+        "targetTotal": "10200000000"
+      },
+      "routeHash": "0xe38067c9587844b76cda6eb1b3e31109ca75b43d6d18eda9824aec18b5df05c7",
+      "sourcePull": {
+        "deadline": 1795046400,
+        "pullId": "0x576a790a73e98338be709b0fa6402d8a77fef6c6cf0485de1d87a8fde673c352"
+      },
+      "targetPull": {
+        "deadline": 1795046633,
+        "pullId": "0x83a9a11b8e1c8f3474f04b2a28d9f59e458f0f5d10f0ee82a3b3dded373116c2"
+      }
+    },
+    "payerVerificationExit": 0,
+    "publicBroadcasts": 0,
+    "reserves": [
+      {
+        "amount": "1",
+        "chainId": 11155111,
+        "depositBlock": 12163247,
+        "depositHash": "0x72c2b3d8b1f8c506afe5b75f82fb20a14e4baf66a7d4189a641b9b1fa0c5c88d",
+        "entityHeight": 54,
+        "finalizedThroughHeight": 12163264,
+        "hubEntity": "0x64abda6ea9caaae7ecc550e8d4531200893574572d253a8c7e3495d725995260"
+      },
+      {
+        "amount": "1000000",
+        "chainId": 421614,
+        "depositBlock": 330502193,
+        "depositHash": "0xc2c39450eea1140530fd5b50d8b0b26d05a85f70bd7f547e011396f3869922ae",
+        "entityHeight": 64,
+        "finalizedThroughHeight": 330502493,
+        "hubEntity": "0x529aa3f7dca1cbe2366f781ab55915bc9b0762b26bcc382ef321433d9de2b4a2"
+      }
+    ],
+    "sourcePrincipal": "1000000"
+  },
+  "authorityAndPayerVerification": {
+    "verifiedAt": "2026-11-18T19:52:25.456Z",
+    "signatureAuthorityRejected": true,
+    "authorityDigest": "341d85b43873a8f464202b740bc5dad85b3d3ce9069191ec6ed565fa6d3b54a6",
+    "chains": [
+      {
+        "chainId": 11155111,
+        "verification": "passed",
+        "currentAndHistoryAgree": true,
+        "payers": [
+          {
+            "role": "source-user",
+            "nativeWei": "2000000000000000",
+            "maximumWei": "1800000000000000",
+            "unallocatedWei": "200000000000000"
+          }
+        ]
+      },
+      {
+        "chainId": 421614,
+        "verification": "passed",
+        "currentAndHistoryAgree": true,
+        "payers": [
+          {
+            "role": "target-user",
+            "nativeWei": "100000000000000",
+            "maximumWei": "70000000000000",
+            "unallocatedWei": "30000000000000"
+          },
+          {
+            "role": "target-hub",
+            "nativeWei": "100000000000000",
+            "maximumWei": "50000000000000",
+            "unallocatedWei": "50000000000000"
+          }
+        ]
+      }
+    ]
+  },
+  "shutdown": {
+    "stoppedAt": "2026-11-18T19:52:35.538Z",
+    "supervisorError": "USDC_SESSION_SHUTDOWN_FAILED",
+    "launcherSignal": "SIGKILL",
+    "standSlotReleased": true,
+    "noLiveSessionChildren": true,
+    "walIntegrity": [
+      {
+        "role": "hub",
+        "restoredFrame": 99,
+        "finalFrame": 117,
+        "integrity": {
+          "latestHeight": 117,
+          "checkedFrames": 117
+        },
+        "deposits": [],
+        "cursorWrites": {}
+      },
+      {
+        "role": "mm",
+        "restoredFrame": 53,
+        "finalFrame": 63,
+        "integrity": {
+          "latestHeight": 63,
+          "checkedFrames": 63
+        },
+        "deposits": [],
+        "cursorWrites": {}
+      },
+      {
+        "role": "user",
+        "restoredFrame": 12,
+        "finalFrame": 12,
+        "integrity": {
+          "latestHeight": 12,
+          "checkedFrames": 12
+        },
+        "deposits": [],
+        "cursorWrites": {}
+      }
+    ]
+  },
+  "publicFinancialCommandsSubmitted": 0,
+  "publicBroadcasts": 0
+}

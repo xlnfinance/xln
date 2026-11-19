@@ -1,0 +1,83 @@
+{
+  "apiBase": "http://localhost:8080",
+  "approved": false,
+  "candidateDigest": "7c1dc0e7b67b7e79389845459ff95c673128c348320ac669dbd229cb19295fc4",
+  "candidateHead": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26",
+  "catalogDigest": "a46f46e495c3085057c3eeed7d0d17b8ac595b9338d96440b4f124461852dbf1",
+  "chains": [
+    {
+      "anchorHash": "0x7249ffedbed76bc9a3c6a976c690147530b3042082197ff0c2299fff07633760",
+      "anchorNumber": 12170002,
+      "chainId": 11155111,
+      "codeHashes": {
+        "0x175343fc9d198b31f493cafe2639fe6dcda59c77": "0x64ebb5db40c6deb7a16b733a30481752a3e64a51323fd51c41fa1c4b4b24eac5",
+        "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238": "0xcd3f29e2ea9c61dadd48bfeaf8b2884b6de9dfee7bf45329452c4c33d0868ceb",
+        "0x32a4a72992ad142e36fa1c5989b95fed60987818": "0xd56dbdedd8973d72780dd49bbe5b25d9cc6a2cf00d5182651b448d9782005a51",
+        "0x9c4173eed1dc7c24c5207a705382488c859588e3": "0xc0333495db29b94d20a25de1df465e4e4b95cd1981dacd9627dc83f03da84334",
+        "0xa2950f711292216419d0691b2aa17dd3ac947e35": "0x02413ad800e58e168089146dd8b10a7e36316bfbe35a201f1e6f02c12a2ed717",
+        "0xa8674d878bce007812beea6b131a80dde43ef4cf": "0x2b53ca548ebd0cb7cd1eca973f6857deea6203c12ea29e1f14f06fae5e117a9c"
+      },
+      "depository": "0x32A4A72992aD142E36fA1C5989b95FeD60987818",
+      "entityProvider": "0x9C4173eed1DC7c24c5207A705382488c859588E3",
+      "hubEntity": "0x088c57a2803f70d7ee168cf5067e45a3c9a77bc8879e6b5f072e3ecc0d2245e7",
+      "hubSigner": "0x02e42216729d4db2981b1b0d2780d97c7582a9f6",
+      "payers": [
+        {
+          "address": "0xa45408c58813bbd64b4fccbb2d45a479e05d3d05",
+          "firstNonce": 0,
+          "gasLimit": "600000",
+          "maxFeePerGasWei": "1000000000",
+          "maxPriorityFeePerGasWei": "1000000000",
+          "role": "source-user",
+          "totalFeeLimitWei": "1800000000000000"
+        }
+      ],
+      "token": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+      "userEntity": "0xa61dfde7f0db6d47fe3682f60c62c83262f7137f8af45ab2b0b7124a530d00d0",
+      "userSigner": "0xa45408c58813bbd64b4fccbb2d45a479e05d3d05"
+    },
+    {
+      "anchorHash": "0x22a8da274952c408e4c8d6b32c545c1e3482061d6aeec7213c3fb0dca60b9fd1",
+      "anchorNumber": 330807622,
+      "chainId": 421614,
+      "codeHashes": {
+        "0x2b65518871ea15d5a1bc43218e3c95621b54ccec": "0xeffc7111141a0b22ada7a83fc538d312951a0538610aff119f7bb0376d938e7d",
+        "0x37a9bdc2f8736bb31ffefb778a70ba7d544ff103": "0x02413ad800e58e168089146dd8b10a7e36316bfbe35a201f1e6f02c12a2ed717",
+        "0x3dae23be54dab4e88b92d4e4c3db42f7d9ce0df9": "0x22fb345563a7b06d7dfb6ff95e8f56a6f678f6b59da6c926dd67e32c06c38b87",
+        "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d": "0x9a736af6aac290d9196883e8686fc1d127ff657ca534fe4b88d6d40dc0bc6750",
+        "0x8223aa4c60adb851f53a120c3d3841de9e77c188": "0x8474e986e82636c385f7ca9ef92c97e3d400ba862fa065eb51807b774ad9a72c",
+        "0xcb7053c91ea02890b3ca702caaaea69656dc3ccf": "0x64ebb5db40c6deb7a16b733a30481752a3e64a51323fd51c41fa1c4b4b24eac5"
+      },
+      "depository": "0x8223AA4c60Adb851f53a120c3D3841De9e77c188",
+      "entityProvider": "0x3DaE23be54dAb4e88b92D4e4c3db42f7D9ce0Df9",
+      "hubEntity": "0xccf32e2712576c8684040614a5073fb1b26e6e6e705730037dddbf2a8b9c86d8",
+      "hubSigner": "0x661c2a253ff995d04fd8a602663ab829d4afb2a9",
+      "payers": [
+        {
+          "address": "0xc610e84b42230a7294852f8f5d6cf2f6a181778a",
+          "firstNonce": 0,
+          "gasLimit": "700000",
+          "maxFeePerGasWei": "100000000",
+          "maxPriorityFeePerGasWei": "100000000",
+          "role": "target-user",
+          "totalFeeLimitWei": "70000000000000"
+        },
+        {
+          "address": "0x661c2a253ff995d04fd8a602663ab829d4afb2a9",
+          "firstNonce": 0,
+          "gasLimit": "500000",
+          "maxFeePerGasWei": "100000000",
+          "maxPriorityFeePerGasWei": "100000000",
+          "role": "target-hub",
+          "totalFeeLimitWei": "50000000000000"
+        }
+      ],
+      "token": "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d",
+      "userEntity": "0xa4905e36a64f8d297b6cc3651bfa2e761d362b913d5e9ecf71697d56eea2173f",
+      "userSigner": "0xc610e84b42230a7294852f8f5d6cf2f6a181778a"
+    }
+  ],
+  "expiresAt": 1795118340000,
+  "runIds": ["fresh-ubkyjm-1usdc-20261119"],
+  "version": 1
+}

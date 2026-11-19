@@ -1,0 +1,331 @@
+{
+  "status": "fresh-public-anchor-and-unfunded-restore-verified",
+  "candidateHead": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26",
+  "candidateDigest": "16b247e8d0aa20caaf38afa141e3b0f66de3830554847634d033c72ec1f92b78",
+  "dirty": true,
+  "startedAt": "2026-11-17T22:27:59.724Z",
+  "startupObservationAt": "2026-11-17T22:28:49.949Z",
+  "directory": ".logs/ts-usdc-cross-j-poc/demo/fresh-FVVLsm",
+  "bindings": [
+    {
+      "chainId": 11155111,
+      "headerFingerprint": "ea37f436779dc1fa5fb56704e8ea35da30c159d85b333faa3e5bfcb758afd2f1",
+      "headerHost": "rpc.sepolia.ethpandaops.io",
+      "historyFingerprint": "92eca84d3029d9e3b8330990d4463178eb8ac68b2dd77f1e9989b22c8c80f5e3"
+    },
+    {
+      "chainId": 421614,
+      "headerFingerprint": "b290f0154fffbfcf92b01e44993e5a79d9bfecf955f77a79566ee001e4e172c0",
+      "headerHost": "arbitrum-sepolia-rpc.publicnode.com",
+      "historyFingerprint": "17d81ad60c2be3ff9ce4bec3563dd1104a82df8c7883ebd70ffd0b4e30515a4b"
+    }
+  ],
+  "initialHeads": {
+    "421614": 330228617,
+    "11155111": 12157355
+  },
+  "identities": [
+    {
+      "chains": [
+        {
+          "chainId": 11155111,
+          "entityId": "0xf857e2e4c49b2abbeae3ec0ad7d8af4d8802264786db49c4070e07291dffed7d",
+          "jurisdictionName": "Ethereum Sepolia",
+          "name": "H1",
+          "signerId": "0xa4ae905df369d7556a87a930a8f046be7bcf1bcf",
+          "signerLabel": "1"
+        },
+        {
+          "chainId": 421614,
+          "entityId": "0x609c2a0c8c178a050d7a09ef9ad27650ffa423a7052387bc95de6bb1726a966e",
+          "jurisdictionName": "Arbitrum Sepolia",
+          "name": "H1",
+          "signerId": "0x995a9dfc465c13eac44bd09e0666a17139759131",
+          "signerLabel": "1:Arbitrum Sepolia"
+        }
+      ],
+      "role": "hub"
+    },
+    {
+      "chains": [
+        {
+          "chainId": 11155111,
+          "entityId": "0x6c891196a0a2cf7e7d74f839b4a1add8aa1fe7e14277235fa18506fd0db1789b",
+          "jurisdictionName": "Ethereum Sepolia",
+          "name": "MM",
+          "signerId": "0xadf14c4b940300283971cc91a1d02e8ad24c111c",
+          "signerLabel": "1"
+        },
+        {
+          "chainId": 421614,
+          "entityId": "0x28a9b87ecca2c4399026e6a006459f54ebf00794fec98bd016446ee3a4dc6484",
+          "jurisdictionName": "Arbitrum Sepolia",
+          "name": "MM",
+          "signerId": "0xd2308b690967bb194219a9c16f79dc792dd32add",
+          "signerLabel": "1:Arbitrum Sepolia"
+        }
+      ],
+      "role": "mm"
+    }
+  ],
+  "unfundedIdentityPrecheck": "pass",
+  "jurisdictionCatchUpReadyElapsedMs": {
+    "hub": 16052,
+    "mm": 35074
+  },
+  "healthBeforeShutdown": {
+    "hub": {
+      "height": 35,
+      "jadapterReady": true,
+      "ok": true,
+      "phase": null,
+      "ready": null,
+      "reservesOk": false,
+      "tokenCatalogCount": 1
+    },
+    "mm": {
+      "height": 26,
+      "jadapterReady": null,
+      "ok": false,
+      "phase": null,
+      "ready": false,
+      "reservesOk": null,
+      "tokenCatalogCount": null
+    }
+  },
+  "startupWal": [
+    {
+      "anchors": [
+        {
+          "batchNonce": "0",
+          "block": 12157354,
+          "blockHash": "0x88f962849979a58187d9434939d2e0c150d582bc6fc3ecfddf7684db3da76590",
+          "chainId": 11155111,
+          "entityId": "0xf857e2e4c49b2abbeae3ec0ad7d8af4d8802264786db49c4070e07291dffed7d",
+          "provenValuesRoot": "0xaf30236bf09cde66c5387b7acc2a4a486e532e375eec20f301a5e97a7ac61660",
+          "runtimeFrame": 13,
+          "stateRoot": "0xf5721357b8b2236b8e83643af20c8c67e7f88ba14f0e55ba394a3b87e4a25fab",
+          "tokenOneReserveAtoms": "0"
+        },
+        {
+          "batchNonce": "0",
+          "block": 330228635,
+          "blockHash": "0x25e0ea2fb73b5bba9ec1a8a9eb42bfe66f4d44f17d9515163c20954031958ff5",
+          "chainId": 421614,
+          "entityId": "0x609c2a0c8c178a050d7a09ef9ad27650ffa423a7052387bc95de6bb1726a966e",
+          "provenValuesRoot": "0x881086a4cd3afc51fb8d6eda368e5fc85c9ae825916db112653519d3e234add7",
+          "runtimeFrame": 13,
+          "stateRoot": "0x4951cea95ae8d72d22d06963e607d1eb3036a84f89d802bd33b9bbc140379d59",
+          "tokenOneReserveAtoms": "0"
+        }
+      ],
+      "role": "hub",
+      "verified": {
+        "checkedFrames": 36,
+        "latestHeight": 36
+      }
+    },
+    {
+      "anchors": [
+        {
+          "batchNonce": "0",
+          "block": 12157355,
+          "blockHash": "0x21bc381db3fc34befd8ab9a249260fb832076ec863b93e7a493b5890ef2a78e1",
+          "chainId": 11155111,
+          "entityId": "0x6c891196a0a2cf7e7d74f839b4a1add8aa1fe7e14277235fa18506fd0db1789b",
+          "provenValuesRoot": "0x594485294122a2bbc9b3b4f80a143a1ead7e6fec2bc2201137920c047f269618",
+          "runtimeFrame": 7,
+          "stateRoot": "0x4a361f62f0bc375a9bac73e2f7d0bccdfa770237f659dc3a1788a02bbe339337",
+          "tokenOneReserveAtoms": "0"
+        },
+        {
+          "batchNonce": "0",
+          "block": 330228690,
+          "blockHash": "0x1c7eef995e2f9e93b57f315bfd0508f3b41771f8037ae97427e1475be2116840",
+          "chainId": 421614,
+          "entityId": "0x28a9b87ecca2c4399026e6a006459f54ebf00794fec98bd016446ee3a4dc6484",
+          "provenValuesRoot": "0x13043b6f6f510d07938fd43634734aaad6773eccd602e3e2e8d54accff00bdd2",
+          "runtimeFrame": 8,
+          "stateRoot": "0x7472e8184ec69ccadd45f5e712ec3e3f4a3d3f0eb2629fa135bbdb8296b28cf2",
+          "tokenOneReserveAtoms": "0"
+        }
+      ],
+      "role": "mm",
+      "verified": {
+        "checkedFrames": 27,
+        "latestHeight": 27
+      }
+    }
+  ],
+  "shutdown": {
+    "forcedHubStopAfterMs": 10000,
+    "children": [
+      {
+        "exitCode": 0,
+        "name": "gateway",
+        "signalCode": null
+      },
+      {
+        "exitCode": null,
+        "name": "hub",
+        "signalCode": "SIGKILL"
+      },
+      {
+        "exitCode": 0,
+        "name": "mm",
+        "signalCode": null
+      }
+    ],
+    "allOriginalProbeChildrenExited": true
+  },
+  "canonicalInspectionReplay": [
+    {
+      "role": "hub",
+      "height": 36,
+      "restoredHeadVerified": true,
+      "runtimeId": "0xa4ae905df369d7556a87a930a8f046be7bcf1bcf",
+      "entities": [
+        {
+          "chainId": 11155111,
+          "entityId": "0xf857e2e4c49b2abbeae3ec0ad7d8af4d8802264786db49c4070e07291dffed7d",
+          "finalizedThroughHeight": 12157356,
+          "reserveAtoms": "0",
+          "accounts": 1
+        },
+        {
+          "chainId": 421614,
+          "entityId": "0x609c2a0c8c178a050d7a09ef9ad27650ffa423a7052387bc95de6bb1726a966e",
+          "finalizedThroughHeight": 330228729,
+          "reserveAtoms": "0",
+          "accounts": 1
+        }
+      ]
+    },
+    {
+      "role": "mm",
+      "height": 27,
+      "restoredHeadVerified": true,
+      "runtimeId": "0xadf14c4b940300283971cc91a1d02e8ad24c111c",
+      "entities": [
+        {
+          "chainId": 11155111,
+          "entityId": "0x6c891196a0a2cf7e7d74f839b4a1add8aa1fe7e14277235fa18506fd0db1789b",
+          "finalizedThroughHeight": 12157356,
+          "reserveAtoms": "0",
+          "accounts": 1
+        },
+        {
+          "chainId": 421614,
+          "entityId": "0x28a9b87ecca2c4399026e6a006459f54ebf00794fec98bd016446ee3a4dc6484",
+          "finalizedThroughHeight": 330228712,
+          "reserveAtoms": "0",
+          "accounts": 1
+        }
+      ]
+    }
+  ],
+  "oneRunFundingDraft": {
+    "sourceUserPrincipalAtoms": "1000000",
+    "sourceHubBufferAtoms": "1",
+    "targetHubReserveAtoms": "1000000",
+    "targetBenchmarkPayoutAtoms": "899801",
+    "benchmarkBasis": "existing local run; executable public quote required",
+    "nativeBudgetStatus": "pending-live-quote-deposit-cover-payout-and-recovery-estimates",
+    "currentBalancesAndPartialGasEstimates": [
+      {
+        "chainId": 11155111,
+        "point": {
+          "number": 12157369,
+          "hash": "0xaa987a6fc55e40394d163f81bd2851c9b0c6426312846358e9ddc4c1854a6698"
+        },
+        "token": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+        "depository": "0x32A4A72992aD142E36fA1C5989b95FeD60987818",
+        "user": {
+          "signerId": "0x61ff4c022bcc7d342d0d68a7b85f18e0fd7d9446",
+          "nativeWei": "0",
+          "usdcAtoms": "0",
+          "principalShortfallAtoms": "1000000"
+        },
+        "funder": {
+          "address": "0x42Da3Ba8c586F6fe9eF6ed1d09423eB73E4fe25b",
+          "nativeWei": "41201929995985112185",
+          "usdcAtoms": "8000000"
+        },
+        "originalHubReserveAtoms": "1000000",
+        "freshHub": {
+          "entityId": "0xf857e2e4c49b2abbeae3ec0ad7d8af4d8802264786db49c4070e07291dffed7d",
+          "signerId": "0xa4ae905df369d7556a87a930a8f046be7bcf1bcf",
+          "reserveAtoms": "0",
+          "debtAtoms": "0"
+        },
+        "provisionalReserveContributionAtoms": "1",
+        "estimates": [
+          {
+            "label": "funder-operator-reserve-approve",
+            "status": "estimated",
+            "units": "139993"
+          },
+          {
+            "label": "funder-user-principal-transfer",
+            "status": "estimated",
+            "units": "154151"
+          },
+          {
+            "label": "source-user-principal-approve",
+            "status": "estimated",
+            "units": "140018"
+          }
+        ]
+      },
+      {
+        "chainId": 421614,
+        "point": {
+          "number": 330229209,
+          "hash": "0x25bb6f2a0cb533533244f8cb5abb365bb0826ebaf1ae6e934e146267c334055f"
+        },
+        "token": "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d",
+        "depository": "0x8223AA4c60Adb851f53a120c3D3841De9e77c188",
+        "user": {
+          "signerId": "0xb77348f8f01e060934024fefc319c66653df6fa2",
+          "nativeWei": "0",
+          "usdcAtoms": "0",
+          "principalShortfallAtoms": "0"
+        },
+        "funder": {
+          "address": "0x42Da3Ba8c586F6fe9eF6ed1d09423eB73E4fe25b",
+          "nativeWei": "528464472972889600",
+          "usdcAtoms": "15000000"
+        },
+        "originalHubReserveAtoms": "5000000",
+        "freshHub": {
+          "entityId": "0x609c2a0c8c178a050d7a09ef9ad27650ffa423a7052387bc95de6bb1726a966e",
+          "signerId": "0x995a9dfc465c13eac44bd09e0666a17139759131",
+          "reserveAtoms": "0",
+          "debtAtoms": "0"
+        },
+        "provisionalReserveContributionAtoms": "1000000",
+        "estimates": [
+          {
+            "label": "funder-operator-reserve-approve",
+            "status": "estimated",
+            "units": "56240"
+          }
+        ]
+      }
+    ]
+  },
+  "sameCandidatePriorValidation": {
+    "focusedTests": 81,
+    "focusedAssertions": 3357,
+    "deploymentTypecheck": "pass",
+    "aggregateCheck": "pass",
+    "shortGates": 3,
+    "sourceGates": 38,
+    "soundcheckGates": 10,
+    "frozenCore": "unchanged"
+  },
+  "financialAuthorityLoaded": false,
+  "publicFinancialBroadcasts": 0,
+  "userRuntimeOpened": false,
+  "standReleased": true
+}

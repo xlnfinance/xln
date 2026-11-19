@@ -1,0 +1,124 @@
+{
+  "status": "stopped-before-public-submission",
+  "runId": "fresh-w4vgds-1usdc-20261118-guarded",
+  "manifest": "fresh-public-demo-one-run-guarded-authority.json",
+  "manifestSha256": "4e896b982ec9423ed804424ea5bac684d33c225fa8dd1336bc210c2638a221f0",
+  "candidateHead": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26",
+  "candidateDigest": "03f29fbccc5c14f8db59935cd003fe68a0191dd9fa2f4640025106cf108a4535",
+  "startedAt": "2026-11-18T20:02:06.119Z",
+  "stoppedAt": "2026-11-18T20:02:06.525Z",
+  "firstFailure": {
+    "process": "managed gateway",
+    "error": "USDC_EXECUTION_AUTHORITY_CANDIDATE_CHANGED",
+    "manifestCatalogDigest": "a46f46e495c3085057c3eeed7d0d17b8ac595b9338d96440b4f124461852dbf1",
+    "sourceCatalogDigest": "a46f46e495c3085057c3eeed7d0d17b8ac595b9338d96440b4f124461852dbf1",
+    "sessionCatalogDigest": "8806dd4f3948be491e06da7fea23ef3e612c63194880be417960853bf032c7b1",
+    "cause": "The managed launcher gave the gateway the Runtime projection of the catalog. Decoding removed deployment metadata before the session copy was written.",
+    "rootMetadataOmitted": [
+      "networkVersion",
+      "deployVersion"
+    ],
+    "perChainMetadataOmitted": [
+      "deployer",
+      "evmContracts",
+      "foundationRecipient",
+      "stackVersion"
+    ]
+  },
+  "shutdown": {
+    "financialCliStarted": false,
+    "operatorsStarted": false,
+    "standSlotReleased": true,
+    "standListenersClosed": true,
+    "attemptAuthorityDisabled": true,
+    "attemptApprovedCopySha256": "c755ea4b544ef9a712eb4d5d64f341b6a2005a6771d272d6304f67e6266651d2",
+    "walIntegrity": [
+      {
+        "role": "hub",
+        "restoredFrame": 99,
+        "finalFrame": 117,
+        "integrity": {
+          "latestHeight": 117,
+          "checkedFrames": 117
+        },
+        "deposits": [],
+        "cursorWrites": {}
+      },
+      {
+        "role": "mm",
+        "restoredFrame": 53,
+        "finalFrame": 63,
+        "integrity": {
+          "latestHeight": 63,
+          "checkedFrames": 63
+        },
+        "deposits": [],
+        "cursorWrites": {}
+      },
+      {
+        "role": "user",
+        "restoredFrame": 12,
+        "finalFrame": 12,
+        "integrity": {
+          "latestHeight": 12,
+          "checkedFrames": 12
+        },
+        "deposits": [],
+        "cursorWrites": {}
+      }
+    ]
+  },
+  "postStopReadOnlyChainState": {
+    "observedAt": "2026-11-18T20:02:59.183Z",
+    "chains": [
+      {
+        "chainId": 11155111,
+        "point": {
+          "number": 12163666,
+          "hash": "0xb76cb78995e77c69ab3c502221aef91a956cd229b9c4c2ce1b1d1b9321033133"
+        },
+        "userExternalUsdcAtoms": "1000000",
+        "payers": [
+          {
+            "role": "source-user",
+            "address": "0x61ff4c022bcc7d342d0d68a7b85f18e0fd7d9446",
+            "latest": 0,
+            "pending": 0,
+            "historical": 0,
+            "nativeWei": "2000000000000000"
+          }
+        ]
+      },
+      {
+        "chainId": 421614,
+        "point": {
+          "number": 330518556,
+          "hash": "0xa4c8b48a1ec29948cce7c531870736b9354b0e1fa9fc1f4ffacb7951f08d62ed"
+        },
+        "userExternalUsdcAtoms": "0",
+        "payers": [
+          {
+            "role": "target-user",
+            "address": "0xb77348f8f01e060934024fefc319c66653df6fa2",
+            "latest": 0,
+            "pending": 0,
+            "historical": 0,
+            "nativeWei": "100000000000000"
+          },
+          {
+            "role": "target-hub",
+            "address": "0xa73b329dc876173b2a7161cdde716a78209b0cac",
+            "latest": 0,
+            "pending": 0,
+            "historical": 0,
+            "nativeWei": "100000000000000"
+          }
+        ]
+      }
+    ]
+  },
+  "publicTransactionSignatures": 0,
+  "publicBroadcasts": 0,
+  "receipts": [],
+  "documentedRetryPath": "An independently supervised authorized gateway bound to the original approved catalog, with the operator launcher in external-gateway mode. Revalidate live prerequisites before the original run ID is submitted."
+}

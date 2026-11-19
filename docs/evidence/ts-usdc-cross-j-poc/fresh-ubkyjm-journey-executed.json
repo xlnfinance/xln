@@ -1,0 +1,471 @@
+{
+  "status": "public-financial-journey-complete",
+  "stand": "fresh-UbkYJm",
+  "runId": "fresh-ubkyjm-1usdc-20261119",
+  "manifestSha256": "c8c674dcf210dd07ff580fcb0fa2712fab35dd4a6d6a3db4a55c87a4b7407fbe",
+  "candidateHead": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26",
+  "candidateDigest": "7c1dc0e7b67b7e79389845459ff95c673128c348320ac669dbd229cb19295fc4",
+  "startedAt": "2026-11-19T18:08:30.523Z",
+  "stoppedAt": "2026-11-19T18:15:07.769Z",
+  "firstSubmissionPreflight": {
+    "checkedAt": "2026-11-19T18:11:45.139Z",
+    "authorityDigest": "660efcd8459effe63fbc6195b0fe9711a2b90f9bc5a52a532953b0d13a92603e",
+    "quote": {
+      "orderId": "mmx-9c86d8-2245e7-1-1-20fc50aa49549c005d2d9a2fe39afb748c2f361b662cfe93e81281e611bcfe3e-sell-1",
+      "routeHash": "0xbef508b022a761733298dd65318a70c672af1b0659a2a4fdde224d05169a9d73",
+      "expiresAt": 1795132800000,
+      "gross": "999900",
+      "fee": "100099",
+      "payout": "899801",
+      "signedTariffVersion": 1
+    },
+    "chains": [
+      {
+        "chainId": 11155111,
+        "block": {
+          "number": 12170064,
+          "hash": "0xf26696f0ceb287a5eac7df72728a32ada6067a3cb078cfef41815a4df7d3afb3"
+        },
+        "balances": [
+          {
+            "role": "source-user",
+            "balance": "2000000000000000",
+            "nonce": 0,
+            "pending": 0
+          }
+        ],
+        "principal": "1000000",
+        "allowance": "0",
+        "reserve": "1",
+        "backing": "2000002"
+      },
+      {
+        "chainId": 421614,
+        "block": {
+          "number": 330810332,
+          "hash": "0xb0a0f8a6d8eaa8b446164a1575e5037f7e3bb3d6ba8cedf7d87fe759030c62e1"
+        },
+        "balances": [
+          {
+            "role": "target-user",
+            "balance": "100000000000000",
+            "nonce": 0,
+            "pending": 0
+          },
+          {
+            "role": "target-hub",
+            "balance": "100000000000000",
+            "nonce": 0,
+            "pending": 0
+          }
+        ],
+        "principal": "0",
+        "allowance": "0",
+        "reserve": "1000000",
+        "backing": "6100199"
+      }
+    ]
+  },
+  "crossJPreDispatchPayoutCheck": {
+    "checkedAt": "2026-11-19T18:13:56.054Z",
+    "orderId": "usdc-poc-0xa61dfde7f0db6d47fe3682f60c62c83262f7137f8af45ab2b0b7124a530d00d0-fresh-ubkyjm-1usdc-20261119",
+    "routeHash": "0xd1ce04493ee01bf4b62e3a2ea841ebb3f71546e24ba349f636a05960a912d7fe",
+    "runtimeFrame": 32,
+    "targetAccountStateHash": "0xfaa742a9fe42f7ab444ad013518427a47b719d09040bbe168d13169a35e2cbfc",
+    "sourcePrincipal": "1000000",
+    "gross": "999900",
+    "fee": "100099",
+    "payout": "899801"
+  },
+  "receiptsInExecutionOrder": [
+    {
+      "role": "source-user",
+      "nonce": 0,
+      "hash": "0x33347d9421c57527acbf0f6022a652fc3f699db5d545bf40bc0ee671c685a9c6",
+      "from": "0xa45408c58813bbd64b4fccbb2d45a479e05d3d05",
+      "to": "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
+      "blockNumber": 12170066,
+      "blockHash": "0x56c6bf71abb9e22ac6d677a6ddccc46424988114d00c9f5f08841b5b8c5a1ec8",
+      "status": 1,
+      "gasLimit": "600000",
+      "gasUsed": "137757",
+      "gasPriceWei": "17",
+      "feeWei": "2341869",
+      "maxFeePerGasWei": "32",
+      "maxPriorityFeePerGasWei": "2",
+      "transfers": [],
+      "chainId": 11155111,
+      "prebroadcastGasEstimate": "140018"
+    },
+    {
+      "role": "source-user",
+      "nonce": 1,
+      "hash": "0xe254e5f6ff8bcdaaa3ddf1cda4c1667bf1d96794a50a7329d5235e320644db1d",
+      "from": "0xa45408c58813bbd64b4fccbb2d45a479e05d3d05",
+      "to": "0x32a4a72992ad142e36fa1c5989b95fed60987818",
+      "blockNumber": 12170068,
+      "blockHash": "0xbbe3d9f9d5fb477c044431961ff5cdfa67758436da2ec84951b0f473bffed9bf",
+      "status": 1,
+      "gasLimit": "588287",
+      "gasUsed": "347118",
+      "gasPriceWei": "17",
+      "feeWei": "5901006",
+      "maxFeePerGasWei": "32",
+      "maxPriorityFeePerGasWei": "2",
+      "transfers": [
+        {
+          "from": "0xa45408c58813bbd64b4fccbb2d45a479e05d3d05",
+          "to": "0x32a4a72992ad142e36fa1c5989b95fed60987818",
+          "atoms": "1000000",
+          "logIndex": 194
+        }
+      ],
+      "chainId": 11155111,
+      "prebroadcastGasEstimate": "490239"
+    },
+    {
+      "role": "source-user",
+      "nonce": 2,
+      "hash": "0x8497828f10143fa0247ff6439cc951abf1221ddab900afa1204ea89e932368e4",
+      "from": "0xa45408c58813bbd64b4fccbb2d45a479e05d3d05",
+      "to": "0x32a4a72992ad142e36fa1c5989b95fed60987818",
+      "blockNumber": 12170073,
+      "blockHash": "0x620822f6de9993b29860e4d3a42103e9f3d24943c6f9c9a452d4e57df5096b6d",
+      "status": 1,
+      "gasLimit": "439713",
+      "gasUsed": "234776",
+      "gasPriceWei": "17",
+      "feeWei": "3991192",
+      "maxFeePerGasWei": "32",
+      "maxPriorityFeePerGasWei": "2",
+      "transfers": [],
+      "chainId": 11155111,
+      "prebroadcastGasEstimate": "366427"
+    },
+    {
+      "role": "target-hub",
+      "nonce": 0,
+      "hash": "0xa8dacc296c22e67cc10a04582fda8eb0eae55f167595172907e890a36ea87070",
+      "from": "0x661c2a253ff995d04fd8a602663ab829d4afb2a9",
+      "to": "0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+      "blockNumber": 330810860,
+      "blockHash": "0x411dc6e2733761a6b5c02bf84b6430dea98490835e7a5764982f5eb66808950c",
+      "status": 1,
+      "gasLimit": "230019",
+      "gasUsed": "165412",
+      "gasPriceWei": "20000000",
+      "feeWei": "3308240000000",
+      "maxFeePerGasWei": "40032000",
+      "maxPriorityFeePerGasWei": "0",
+      "transfers": [],
+      "chainId": 421614,
+      "prebroadcastGasEstimate": "191682"
+    },
+    {
+      "role": "target-user",
+      "nonce": 0,
+      "hash": "0x61e361c04a4a67d1fdcd2f2edd55d369c6619a3d5cdfe363d12de25fd467ff9a",
+      "from": "0xc610e84b42230a7294852f8f5d6cf2f6a181778a",
+      "to": "0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+      "blockNumber": 330810954,
+      "blockHash": "0x4213dd1cc08b17b04824ca48c44a6fa7c0917db06a812494108447e86894aac1",
+      "status": 1,
+      "gasLimit": "447892",
+      "gasUsed": "321132",
+      "gasPriceWei": "20096000",
+      "feeWei": "6453468672000",
+      "maxFeePerGasWei": "40164000",
+      "maxPriorityFeePerGasWei": "0",
+      "transfers": [
+        {
+          "from": "0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+          "to": "0xc610e84b42230a7294852f8f5d6cf2f6a181778a",
+          "atoms": "899801",
+          "logIndex": 7
+        }
+      ],
+      "chainId": 421614,
+      "prebroadcastGasEstimate": "373243"
+    }
+  ],
+  "economics": {
+    "sourceDepositAtoms": "1000000",
+    "grossTargetAtoms": "999900",
+    "hubFeeAtoms": "100099",
+    "destinationPayoutAtoms": "899801",
+    "destinationWallet": "0xc610e84b42230a7294852f8f5d6cf2f6a181778a",
+    "destinationHubRemainingReserveAtoms": "100199"
+  },
+  "chainReconciliation": {
+    "observedAt": "2026-11-19T18:15:41.406Z",
+    "completed": true,
+    "successful": 5,
+    "automatedReportAvailable": true,
+    "payout": "899801",
+    "records": [
+      {
+        "chainId": 11155111,
+        "unconfirmed": [],
+        "point": {
+          "number": 12170082,
+          "hash": "0xbc3140ffdff16e2d705fdd51a10060481c720775c99927ba7dee8f2584120d17"
+        },
+        "payerResults": [
+          {
+            "role": "source-user",
+            "address": "0xa45408c58813bbd64b4fccbb2d45a479e05d3d05",
+            "latest": 3,
+            "pending": 3,
+            "anchorNativeWei": "2000000000000000",
+            "nativeWei": "1999999987765933",
+            "fees": "12234067"
+          }
+        ],
+        "receipts": [
+          {
+            "role": "source-user",
+            "nonce": 0,
+            "hash": "0x33347d9421c57527acbf0f6022a652fc3f699db5d545bf40bc0ee671c685a9c6",
+            "from": "0xa45408c58813bbd64b4fccbb2d45a479e05d3d05",
+            "to": "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
+            "blockNumber": 12170066,
+            "blockHash": "0x56c6bf71abb9e22ac6d677a6ddccc46424988114d00c9f5f08841b5b8c5a1ec8",
+            "status": 1,
+            "gasLimit": "600000",
+            "gasUsed": "137757",
+            "gasPriceWei": "17",
+            "feeWei": "2341869",
+            "maxFeePerGasWei": "32",
+            "maxPriorityFeePerGasWei": "2",
+            "transfers": []
+          },
+          {
+            "role": "source-user",
+            "nonce": 1,
+            "hash": "0xe254e5f6ff8bcdaaa3ddf1cda4c1667bf1d96794a50a7329d5235e320644db1d",
+            "from": "0xa45408c58813bbd64b4fccbb2d45a479e05d3d05",
+            "to": "0x32a4a72992ad142e36fa1c5989b95fed60987818",
+            "blockNumber": 12170068,
+            "blockHash": "0xbbe3d9f9d5fb477c044431961ff5cdfa67758436da2ec84951b0f473bffed9bf",
+            "status": 1,
+            "gasLimit": "588287",
+            "gasUsed": "347118",
+            "gasPriceWei": "17",
+            "feeWei": "5901006",
+            "maxFeePerGasWei": "32",
+            "maxPriorityFeePerGasWei": "2",
+            "transfers": [
+              {
+                "from": "0xa45408c58813bbd64b4fccbb2d45a479e05d3d05",
+                "to": "0x32a4a72992ad142e36fa1c5989b95fed60987818",
+                "atoms": "1000000",
+                "logIndex": 194
+              }
+            ]
+          },
+          {
+            "role": "source-user",
+            "nonce": 2,
+            "hash": "0x8497828f10143fa0247ff6439cc951abf1221ddab900afa1204ea89e932368e4",
+            "from": "0xa45408c58813bbd64b4fccbb2d45a479e05d3d05",
+            "to": "0x32a4a72992ad142e36fa1c5989b95fed60987818",
+            "blockNumber": 12170073,
+            "blockHash": "0x620822f6de9993b29860e4d3a42103e9f3d24943c6f9c9a452d4e57df5096b6d",
+            "status": 1,
+            "gasLimit": "439713",
+            "gasUsed": "234776",
+            "gasPriceWei": "17",
+            "feeWei": "3991192",
+            "maxFeePerGasWei": "32",
+            "maxPriorityFeePerGasWei": "2",
+            "transfers": []
+          }
+        ],
+        "walletUsdcAtoms": "0",
+        "allowanceAtoms": "0",
+        "userReserveAtoms": "0",
+        "hubReserveAtoms": "1",
+        "userDebts": "0",
+        "hubDebts": "0"
+      },
+      {
+        "chainId": 421614,
+        "unconfirmed": [],
+        "point": {
+          "number": 330811165,
+          "hash": "0x25df557e687bbbfdb0adee2a945f0d3949b28ae5725074ffcad8f3924b108be7"
+        },
+        "payerResults": [
+          {
+            "role": "target-user",
+            "address": "0xc610e84b42230a7294852f8f5d6cf2f6a181778a",
+            "latest": 1,
+            "pending": 1,
+            "anchorNativeWei": "100000000000000",
+            "nativeWei": "93546531328000",
+            "fees": "6453468672000"
+          },
+          {
+            "role": "target-hub",
+            "address": "0x661c2a253ff995d04fd8a602663ab829d4afb2a9",
+            "latest": 1,
+            "pending": 1,
+            "anchorNativeWei": "100000000000000",
+            "nativeWei": "96691760000000",
+            "fees": "3308240000000"
+          }
+        ],
+        "receipts": [
+          {
+            "role": "target-user",
+            "nonce": 0,
+            "hash": "0x61e361c04a4a67d1fdcd2f2edd55d369c6619a3d5cdfe363d12de25fd467ff9a",
+            "from": "0xc610e84b42230a7294852f8f5d6cf2f6a181778a",
+            "to": "0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+            "blockNumber": 330810954,
+            "blockHash": "0x4213dd1cc08b17b04824ca48c44a6fa7c0917db06a812494108447e86894aac1",
+            "status": 1,
+            "gasLimit": "447892",
+            "gasUsed": "321132",
+            "gasPriceWei": "20096000",
+            "feeWei": "6453468672000",
+            "maxFeePerGasWei": "40164000",
+            "maxPriorityFeePerGasWei": "0",
+            "transfers": [
+              {
+                "from": "0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+                "to": "0xc610e84b42230a7294852f8f5d6cf2f6a181778a",
+                "atoms": "899801",
+                "logIndex": 7
+              }
+            ]
+          },
+          {
+            "role": "target-hub",
+            "nonce": 0,
+            "hash": "0xa8dacc296c22e67cc10a04582fda8eb0eae55f167595172907e890a36ea87070",
+            "from": "0x661c2a253ff995d04fd8a602663ab829d4afb2a9",
+            "to": "0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+            "blockNumber": 330810860,
+            "blockHash": "0x411dc6e2733761a6b5c02bf84b6430dea98490835e7a5764982f5eb66808950c",
+            "status": 1,
+            "gasLimit": "230019",
+            "gasUsed": "165412",
+            "gasPriceWei": "20000000",
+            "feeWei": "3308240000000",
+            "maxFeePerGasWei": "40032000",
+            "maxPriorityFeePerGasWei": "0",
+            "transfers": []
+          }
+        ],
+        "walletUsdcAtoms": "899801",
+        "allowanceAtoms": "0",
+        "userReserveAtoms": "0",
+        "hubReserveAtoms": "100199",
+        "userDebts": "0",
+        "hubDebts": "0"
+      }
+    ]
+  },
+  "restoredUser": {
+    "orderId": "usdc-poc-0xa61dfde7f0db6d47fe3682f60c62c83262f7137f8af45ab2b0b7124a530d00d0-fresh-ubkyjm-1usdc-20261119",
+    "runtimeHeight": 52,
+    "canonicalStateHash": "0x0159f76d38d56d4ebd7b912f6273137fe9b0fb4cafb99c351bf28b31975789bf",
+    "orderedOutboxDigest": "0x632315f5af09a9a7da25ae16c4f8560df2b48d94d524d354b69f35289c56e0ea",
+    "wallets": [
+      {
+        "chainId": 11155111,
+        "routeHash": "0xd1ce04493ee01bf4b62e3a2ea841ebb3f71546e24ba349f636a05960a912d7fe",
+        "status": "settled",
+        "gross": "999900",
+        "amounts": {
+          "sourceTotal": "1000000",
+          "targetTotal": "999900",
+          "filledSourceAmount": "1000000",
+          "filledTargetAmount": "999900",
+          "sourceRemaining": "0",
+          "targetRemaining": "0",
+          "fillRatio": 65535
+        },
+        "collateral": "1000000",
+        "reserve": "0",
+        "outCollateral": "0",
+        "outPeerCredit": "0",
+        "pulls": 0,
+        "pendingAccountFrame": false,
+        "mempool": 0,
+        "sentBatch": false,
+        "settlement": null,
+        "accountFrame": 6,
+        "accountRoot": "0xd14e8c87d259e5882decb7e959d397b4e8f8afd3cfde63d9fe414be91c88142a"
+      },
+      {
+        "chainId": 421614,
+        "routeHash": "0xd1ce04493ee01bf4b62e3a2ea841ebb3f71546e24ba349f636a05960a912d7fe",
+        "status": "settled",
+        "gross": "999900",
+        "amounts": {
+          "sourceTotal": "1000000",
+          "targetTotal": "999900",
+          "filledSourceAmount": "1000000",
+          "filledTargetAmount": "999900",
+          "sourceRemaining": "0",
+          "targetRemaining": "0",
+          "fillRatio": 65535
+        },
+        "collateral": "0",
+        "reserve": "0",
+        "outCollateral": "0",
+        "outPeerCredit": "0",
+        "pulls": 0,
+        "pendingAccountFrame": false,
+        "mempool": 0,
+        "sentBatch": false,
+        "settlement": null,
+        "accountFrame": 14,
+        "accountRoot": "0x687ffe648a77ad64abb80cdad18b6e05960253b2e43be99fef8f0b81f98cd8ae"
+      }
+    ]
+  },
+  "walIntegrity": [
+    {
+      "role": "user",
+      "runtimeId": "0xa45408c58813bbd64b4fccbb2d45a479e05d3d05",
+      "frames": {
+        "latestHeight": 52,
+        "checkedFrames": 52
+      }
+    },
+    {
+      "role": "hub",
+      "runtimeId": "0x02e42216729d4db2981b1b0d2780d97c7582a9f6",
+      "frames": {
+        "latestHeight": 108,
+        "checkedFrames": 108
+      }
+    },
+    {
+      "role": "mm",
+      "runtimeId": "0xea37e92bf43842a5d672b66540c7e48a14dd3004",
+      "frames": {
+        "latestHeight": 55,
+        "checkedFrames": 55
+      }
+    }
+  ],
+  "framesVerified": 215,
+  "rawReceipts": {
+    "path": ".logs/ts-usdc-cross-j-poc/demo/fresh-UbkYJm/sessions/authorized-external-one-usdc-7JgiOd/reconciled-raw-receipts.json",
+    "sha256": "5fbd27f5eb86a9ba50322f346a8ae6372c646c1885033cefbccd792e53995c01"
+  },
+  "automatedReportPath": ".logs/ts-usdc-cross-j-poc/demo/fresh-UbkYJm/sessions/authorized-external-one-usdc-7JgiOd/run-report.json",
+  "publicBroadcasts": 5,
+  "successfulReceipts": 5,
+  "failedReceipts": 0,
+  "shutdown": {
+    "runExit": 0,
+    "forcedStop": false,
+    "allOwnedProcessesExited": true,
+    "standReleased": true
+  }
+}

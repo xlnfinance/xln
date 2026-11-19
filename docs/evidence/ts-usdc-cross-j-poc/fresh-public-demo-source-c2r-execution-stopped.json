@@ -1,0 +1,423 @@
+{
+  "candidateDigest": "7c1dc0e7b67b7e79389845459ff95c673128c348320ac669dbd229cb19295fc4",
+  "candidateHead": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26",
+  "finalAttempt": {
+    "beforeSigning": {
+      "observedAt": "2026-11-18T22:54:58.449Z",
+      "rpcs": ["https://ethereum-sepolia-rpc.publicnode.com", "https://rpc.sepolia.ethpandaops.io"],
+      "state": {
+        "accountKey": "0x64abda6ea9caaae7ecc550e8d4531200893574572d253a8c7e3495d725995260cfcdd2d155d6ee85d446d49045cb444a78df66b89a18c84959665a040671dae2",
+        "accountNonce": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "chainId": 11155111,
+        "codeHashesMatched": 6,
+        "collateralAtoms": {
+          "__xlnType": "BigInt",
+          "value": "1000000"
+        },
+        "depositoryBackingAtoms": {
+          "__xlnType": "BigInt",
+          "value": "2000001"
+        },
+        "disputeHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "hub": {
+          "board": {
+            "current": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "exists": false,
+            "proposed": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "debtAtoms": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "entityNonce": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "eoaNonce": 0,
+          "nativeWei": {
+            "__xlnType": "BigInt",
+            "value": "1000000000000000"
+          },
+          "reserveAtoms": {
+            "__xlnType": "BigInt",
+            "value": "1"
+          }
+        },
+        "ondelta": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "point": {
+          "baseFeePerGasWei": {
+            "__xlnType": "BigInt",
+            "value": "19"
+          },
+          "hash": "0xf521a3497d0c5e5c5dbcad572a630dda0c5aefdcc9e93868ca84618235cd66e6",
+          "number": 12164508,
+          "timestamp": "2026-11-18T22:54:48.000Z"
+        },
+        "user": {
+          "board": {
+            "current": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "exists": false,
+            "proposed": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "debtAtoms": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "entityNonce": {
+            "__xlnType": "BigInt",
+            "value": "2"
+          },
+          "eoaNonce": 3,
+          "nativeWei": {
+            "__xlnType": "BigInt",
+            "value": "1999999986561179"
+          },
+          "reserveAtoms": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          }
+        }
+      },
+      "tip": [
+        {
+          "fee": {
+            "gasPriceWei": {
+              "__xlnType": "BigInt",
+              "value": "21"
+            },
+            "maxPriorityFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "2"
+            }
+          },
+          "hubEOA": {
+            "latest": 0,
+            "pending": 0
+          }
+        },
+        {
+          "fee": {
+            "gasPriceWei": {
+              "__xlnType": "BigInt",
+              "value": "21"
+            },
+            "maxPriorityFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "2"
+            }
+          },
+          "hubEOA": {
+            "latest": 0,
+            "pending": 0
+          }
+        }
+      ]
+    },
+    "gasEstimate": {
+      "estimatedGas": {
+        "__xlnType": "BigInt",
+        "value": "718231"
+      },
+      "exactHankoCalldata": true,
+      "manifestGasLimit": {
+        "__xlnType": "BigInt",
+        "value": "600000"
+      },
+      "manifestMaxFeeCostWei": {
+        "__xlnType": "BigInt",
+        "value": "600000000000000"
+      },
+      "runtimeGasHeadroomBps": 10000
+    },
+    "postStopOpening": {
+      "observedAt": "2026-11-18T22:57:58.186Z",
+      "rpcs": ["https://ethereum-sepolia-rpc.publicnode.com", "https://rpc.sepolia.ethpandaops.io"],
+      "state": {
+        "accountKey": "0x64abda6ea9caaae7ecc550e8d4531200893574572d253a8c7e3495d725995260cfcdd2d155d6ee85d446d49045cb444a78df66b89a18c84959665a040671dae2",
+        "accountNonce": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "chainId": 11155111,
+        "codeHashesMatched": 6,
+        "collateralAtoms": {
+          "__xlnType": "BigInt",
+          "value": "1000000"
+        },
+        "depositoryBackingAtoms": {
+          "__xlnType": "BigInt",
+          "value": "2000001"
+        },
+        "disputeHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "hub": {
+          "board": {
+            "current": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "exists": false,
+            "proposed": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "debtAtoms": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "entityNonce": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "eoaNonce": 0,
+          "nativeWei": {
+            "__xlnType": "BigInt",
+            "value": "1000000000000000"
+          },
+          "reserveAtoms": {
+            "__xlnType": "BigInt",
+            "value": "1"
+          }
+        },
+        "ondelta": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "point": {
+          "baseFeePerGasWei": {
+            "__xlnType": "BigInt",
+            "value": "18"
+          },
+          "hash": "0x358ae3534f9759f93c52e7670f1ad99b6f3f057f486f2f1409a6cc5c35160bd8",
+          "number": 12164522,
+          "timestamp": "2026-11-18T22:57:48.000Z"
+        },
+        "user": {
+          "board": {
+            "current": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "exists": false,
+            "proposed": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "debtAtoms": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "entityNonce": {
+            "__xlnType": "BigInt",
+            "value": "2"
+          },
+          "eoaNonce": 3,
+          "nativeWei": {
+            "__xlnType": "BigInt",
+            "value": "1999999986561179"
+          },
+          "reserveAtoms": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          }
+        }
+      },
+      "tip": [
+        {
+          "fee": {
+            "gasPriceWei": {
+              "__xlnType": "BigInt",
+              "value": "20"
+            },
+            "maxPriorityFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "2"
+            }
+          },
+          "hubEOA": {
+            "latest": 0,
+            "pending": 0
+          }
+        },
+        {
+          "fee": {
+            "gasPriceWei": {
+              "__xlnType": "BigInt",
+              "value": "20"
+            },
+            "maxPriorityFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "2"
+            }
+          },
+          "hubEOA": {
+            "latest": 0,
+            "pending": 0
+          }
+        }
+      ]
+    },
+    "prepared": {
+      "authorizationList": null,
+      "chainId": {
+        "__xlnType": "BigInt",
+        "value": "11155111"
+      },
+      "frame": 236,
+      "from": "0x944d742ada37d5416774d6303a649326eb1e9478",
+      "gasLimit": {
+        "__xlnType": "BigInt",
+        "value": "718231"
+      },
+      "maxFeeCostWei": {
+        "__xlnType": "BigInt",
+        "value": "718231000000000"
+      },
+      "maxFeePerGasWei": {
+        "__xlnType": "BigInt",
+        "value": "1000000000"
+      },
+      "maxPriorityFeePerGasWei": {
+        "__xlnType": "BigInt",
+        "value": "100000000"
+      },
+      "nonce": 0,
+      "recordType": "recordJPreparedTransaction",
+      "scopeErrors": ["gasLimit"],
+      "to": "0x32a4a72992ad142e36fa1c5989b95fed60987818",
+      "txHash": "0x40d4b57ad8675d886561eb4a1299f635390de51a4e7cbeb635a8e76e1b2a3922",
+      "type": 2,
+      "valueWei": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      }
+    },
+    "receiptReconciliation": {
+      "dispatchCommandQueued": true,
+      "manifestSha256": "2aeba7c0bd247091a9836b5552cfe89257475e0893e6ad50f456b6111a1eb697",
+      "nonces": [
+        {
+          "latest": 0,
+          "pending": 0
+        },
+        {
+          "latest": 0,
+          "pending": 0
+        }
+      ],
+      "observedAt": "2026-11-18T22:56:37.411Z",
+      "scope": "no-consumed-or-pending-slot"
+    },
+    "stop": "USDC_SOURCE_C2R_TRANSACTION_NOT_AUTHORIZED",
+    "wal": [
+      {
+        "accountFrame": 10,
+        "accountRoot": "0xacf3ab83ac3b82cc0dc78529ae6ea062a24c10dcefa5fd308c60a8694253e6d5",
+        "collateralAtoms": {
+          "__xlnType": "BigInt",
+          "value": "1000000"
+        },
+        "jNonce": 0,
+        "pendingCommittedJOutbox": [],
+        "reserveAtoms": {
+          "__xlnType": "BigInt",
+          "value": "1"
+        },
+        "role": "hub",
+        "runtimeFrame": 237,
+        "sentBatch": {
+          "entityNonce": 1
+        },
+        "workspace": {
+          "hash": "0xb5454df9709e5dcc638583cc1744d2c67f0b517bf4f700f27df595cd40eee137",
+          "nonce": 8,
+          "status": "submitted"
+        }
+      },
+      {
+        "accountFrame": 10,
+        "accountRoot": "0xacf3ab83ac3b82cc0dc78529ae6ea062a24c10dcefa5fd308c60a8694253e6d5",
+        "collateralAtoms": {
+          "__xlnType": "BigInt",
+          "value": "1000000"
+        },
+        "jNonce": 0,
+        "pendingCommittedJOutbox": [],
+        "reserveAtoms": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "role": "user",
+        "runtimeFrame": 77,
+        "sentBatch": null,
+        "workspace": {
+          "hash": "0xb5454df9709e5dcc638583cc1744d2c67f0b517bf4f700f27df595cd40eee137",
+          "nonce": 8,
+          "status": "submitted"
+        }
+      }
+    ]
+  },
+  "firstAttempt": {
+    "receiptReconciliation": {
+      "dispatchCommandQueued": false,
+      "manifestSha256": "2aeba7c0bd247091a9836b5552cfe89257475e0893e6ad50f456b6111a1eb697",
+      "nonces": [
+        {
+          "latest": 0,
+          "pending": 0
+        },
+        {
+          "latest": 0,
+          "pending": 0
+        }
+      ],
+      "observedAt": "2026-11-18T22:53:26.674Z",
+      "scope": "no-consumed-or-pending-slot"
+    },
+    "stop": "local TypeError converting absent initial Hub Entity batch nonce before j_broadcast",
+    "wal": [
+      {
+        "accountFrame": 10,
+        "accountRoot": "0xacf3ab83ac3b82cc0dc78529ae6ea062a24c10dcefa5fd308c60a8694253e6d5",
+        "batchNonceBefore": "0",
+        "hasSentBatch": false,
+        "jNonce": 0,
+        "pendingAccountFrame": null,
+        "queuedC2R": {
+          "amount": {
+            "__xlnType": "BigInt",
+            "value": "1000000"
+          },
+          "counterparty": "0xcfcdd2d155d6ee85d446d49045cb444a78df66b89a18c84959665a040671dae2",
+          "counterpartyHankoDigest": "105e2d1b6d59e9c414772338b661ab5bb4efddb72bbee696b6f2df6a4a37e4e9",
+          "nonce": 8,
+          "tokenId": 1
+        },
+        "role": "hub",
+        "runtimeFrame": 232,
+        "workspace": {
+          "hash": "0xb5454df9709e5dcc638583cc1744d2c67f0b517bf4f700f27df595cd40eee137",
+          "nonce": 8,
+          "status": "submitted"
+        }
+      },
+      {
+        "accountFrame": 10,
+        "accountRoot": "0xacf3ab83ac3b82cc0dc78529ae6ea062a24c10dcefa5fd308c60a8694253e6d5",
+        "batchNonceBefore": "2",
+        "hasSentBatch": false,
+        "jNonce": 0,
+        "pendingAccountFrame": null,
+        "queuedC2R": null,
+        "role": "user",
+        "runtimeFrame": 77,
+        "workspace": {
+          "hash": "0xb5454df9709e5dcc638583cc1744d2c67f0b517bf4f700f27df595cd40eee137",
+          "nonce": 8,
+          "status": "submitted"
+        }
+      }
+    ]
+  },
+  "manifestSha256": "2aeba7c0bd247091a9836b5552cfe89257475e0893e6ad50f456b6111a1eb697",
+  "publicBroadcasts": 0,
+  "publicReceipts": 0,
+  "standReleased": true,
+  "status": "stopped-before-public-broadcast"
+}

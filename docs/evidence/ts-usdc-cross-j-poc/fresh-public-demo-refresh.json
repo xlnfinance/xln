@@ -1,0 +1,465 @@
+{
+  "status": "unfunded-demo-stand-and-unsigned-funding-verified",
+  "recordedAt": "2026-11-18T18:24:19.550047+00:00",
+  "candidate": {
+    "digest": "bffc956164b4b6f28bc05d9487d628a1d7a268982f4d7f09b882fb612bff2559",
+    "head": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26",
+    "dirty": true
+  },
+  "demoDirectory": ".logs/ts-usdc-cross-j-poc/demo/fresh-w4vGds",
+  "stores": {
+    "hub": ".logs/ts-usdc-cross-j-poc/demo/fresh-w4vGds/hub/runtime",
+    "mm": ".logs/ts-usdc-cross-j-poc/demo/fresh-w4vGds/mm/runtime",
+    "user": ".logs/ts-usdc-cross-j-poc/demo/fresh-w4vGds/user/runtime"
+  },
+  "startup": {
+    "startedAt": "2026-11-18T18:20:14.085Z",
+    "observedAt": "2026-11-18T18:21:16.256Z",
+    "bindings": [
+      {
+        "chainId": 11155111,
+        "headerFingerprint": "ea37f436779dc1fa5fb56704e8ea35da30c159d85b333faa3e5bfcb758afd2f1",
+        "headerHost": "rpc.sepolia.ethpandaops.io",
+        "historyFingerprint": "92eca84d3029d9e3b8330990d4463178eb8ac68b2dd77f1e9989b22c8c80f5e3"
+      },
+      {
+        "chainId": 421614,
+        "headerFingerprint": "b290f0154fffbfcf92b01e44993e5a79d9bfecf955f77a79566ee001e4e172c0",
+        "headerHost": "arbitrum-sepolia-rpc.publicnode.com",
+        "historyFingerprint": "17d81ad60c2be3ff9ce4bec3563dd1104a82df8c7883ebd70ffd0b4e30515a4b"
+      }
+    ],
+    "initialHeads": {
+      "421614": 330496173,
+      "11155111": 12163170
+    },
+    "identities": [
+      {
+        "chains": [
+          {
+            "chainId": 11155111,
+            "entityId": "0x64abda6ea9caaae7ecc550e8d4531200893574572d253a8c7e3495d725995260",
+            "jurisdictionName": "Ethereum Sepolia",
+            "name": "H1",
+            "signerId": "0x944d742ada37d5416774d6303a649326eb1e9478",
+            "signerLabel": "1"
+          },
+          {
+            "chainId": 421614,
+            "entityId": "0x529aa3f7dca1cbe2366f781ab55915bc9b0762b26bcc382ef321433d9de2b4a2",
+            "jurisdictionName": "Arbitrum Sepolia",
+            "name": "H1",
+            "signerId": "0xa73b329dc876173b2a7161cdde716a78209b0cac",
+            "signerLabel": "1:Arbitrum Sepolia"
+          }
+        ],
+        "role": "hub"
+      },
+      {
+        "chains": [
+          {
+            "chainId": 11155111,
+            "entityId": "0x8a588dce8af40bdbf96f411bc9adf669021f44f9a6c91fcece90952c38317f77",
+            "jurisdictionName": "Ethereum Sepolia",
+            "name": "MM",
+            "signerId": "0x6fa90067ce003fc19785d011bac0b2387b9de250",
+            "signerLabel": "1"
+          },
+          {
+            "chainId": 421614,
+            "entityId": "0x203e42f833f0f73f85443e71b0be1b3fff83f322039f8c9270183bb15c0f7391",
+            "jurisdictionName": "Arbitrum Sepolia",
+            "name": "MM",
+            "signerId": "0x82274fc900d4c8451b1212997d1c2524e6eea9c7",
+            "signerLabel": "1:Arbitrum Sepolia"
+          }
+        ],
+        "role": "mm"
+      }
+    ],
+    "readyAtMs": {
+      "hub": 20761,
+      "mm": 42012
+    },
+    "health": {
+      "hub": {
+        "height": 51,
+        "jadapterReady": true,
+        "ok": true,
+        "phase": null,
+        "ready": null,
+        "reservesOk": false,
+        "tokenCatalogCount": 1
+      },
+      "mm": {
+        "height": 36,
+        "jadapterReady": null,
+        "ok": true,
+        "phase": null,
+        "ready": true,
+        "reservesOk": null,
+        "tokenCatalogCount": null
+      }
+    },
+    "unfundedVerified": true,
+    "children": [
+      {
+        "exitCode": 0,
+        "name": "gateway",
+        "signalCode": null
+      },
+      {
+        "exitCode": 0,
+        "name": "hub",
+        "signalCode": null
+      },
+      {
+        "exitCode": 0,
+        "name": "mm",
+        "signalCode": null
+      }
+    ]
+  },
+  "operatorWals": [
+    {
+      "anchors": [
+        {
+          "batchNonce": "0",
+          "block": 12163169,
+          "blockHash": "0x06a33c3f8e0bf1e6070a99557e0c572dcb7b0b75656dc04970e84e155cdbf0a8",
+          "chainId": 11155111,
+          "entityId": "0x64abda6ea9caaae7ecc550e8d4531200893574572d253a8c7e3495d725995260",
+          "provenValuesRoot": "0xc8f674fb6be1f4a7318a2f8ebb865671ae43168fda28e68fd4fa5b03400fb318",
+          "runtimeFrame": 13,
+          "stateRoot": "0xd562554129805bf44388bc823ff3583029b058c6b99c2362840b1c00b19e5c21",
+          "tokenOneReserveAtoms": "0"
+        },
+        {
+          "batchNonce": "0",
+          "block": 330496209,
+          "blockHash": "0xaf9152a2afcd37762ac20d96918a20eff18bc27cf1646147b608ba8e63de7522",
+          "chainId": 421614,
+          "entityId": "0x529aa3f7dca1cbe2366f781ab55915bc9b0762b26bcc382ef321433d9de2b4a2",
+          "provenValuesRoot": "0x916c87de98b0f84957f660ecac977a02afc6514986c93be1adb4cd68b260a2a7",
+          "runtimeFrame": 13,
+          "stateRoot": "0xb1c6cd6323237c53c3d9eb71156dcfdf57227bacfb68bb8c438e4b4ef18fdb21",
+          "tokenOneReserveAtoms": "0"
+        }
+      ],
+      "role": "hub",
+      "verified": {
+        "checkedFrames": 52,
+        "latestHeight": 52
+      }
+    },
+    {
+      "anchors": [
+        {
+          "batchNonce": "0",
+          "block": 12163171,
+          "blockHash": "0x5e1bae6a584564a7781a86ba771793be898fc89bf70cb82ef332856e3fdf9e1e",
+          "chainId": 11155111,
+          "entityId": "0x8a588dce8af40bdbf96f411bc9adf669021f44f9a6c91fcece90952c38317f77",
+          "provenValuesRoot": "0x228143d8fa5bfd94fbbb135d9c7d61537d42eba49a9bd9a5e4a5fa700b420eb6",
+          "runtimeFrame": 7,
+          "stateRoot": "0xfcf790169313792aa6092c870eba52b893a03d28afad9fb7b1978a54925a8570",
+          "tokenOneReserveAtoms": "0"
+        },
+        {
+          "batchNonce": "0",
+          "block": 330496275,
+          "blockHash": "0x92738f378e4463b5a85a4a986b4abd24f41a3bace7e078d395ffbb06536fab4d",
+          "chainId": 421614,
+          "entityId": "0x203e42f833f0f73f85443e71b0be1b3fff83f322039f8c9270183bb15c0f7391",
+          "provenValuesRoot": "0x7df5c7626ce8f8c1ba6270038f80ae7c3275ed9da49ab33309f3aa655bb8f5a2",
+          "runtimeFrame": 8,
+          "stateRoot": "0xf07282a9f7707d974c9b5c2c961b144a28f12fe40a29a15e742526a5a59ba64b",
+          "tokenOneReserveAtoms": "0"
+        }
+      ],
+      "role": "mm",
+      "verified": {
+        "checkedFrames": 36,
+        "latestHeight": 36
+      }
+    }
+  ],
+  "canonicalOperatorReplay": [
+    {
+      "role": "hub",
+      "height": 52,
+      "restoredHeadVerified": true,
+      "runtimeId": "0x944d742ada37d5416774d6303a649326eb1e9478",
+      "entities": [
+        {
+          "chainId": 11155111,
+          "entityId": "0x64abda6ea9caaae7ecc550e8d4531200893574572d253a8c7e3495d725995260",
+          "finalizedThroughHeight": 12163171,
+          "reserveAtoms": "0",
+          "accounts": 2
+        },
+        {
+          "chainId": 421614,
+          "entityId": "0x529aa3f7dca1cbe2366f781ab55915bc9b0762b26bcc382ef321433d9de2b4a2",
+          "finalizedThroughHeight": 330496352,
+          "reserveAtoms": "0",
+          "accounts": 2
+        }
+      ]
+    },
+    {
+      "role": "mm",
+      "height": 36,
+      "restoredHeadVerified": true,
+      "runtimeId": "0x6fa90067ce003fc19785d011bac0b2387b9de250",
+      "entities": [
+        {
+          "chainId": 11155111,
+          "entityId": "0x8a588dce8af40bdbf96f411bc9adf669021f44f9a6c91fcece90952c38317f77",
+          "finalizedThroughHeight": 12163171,
+          "reserveAtoms": "0",
+          "accounts": 1
+        },
+        {
+          "chainId": 421614,
+          "entityId": "0x203e42f833f0f73f85443e71b0be1b3fff83f322039f8c9270183bb15c0f7391",
+          "finalizedThroughHeight": 330496293,
+          "reserveAtoms": "0",
+          "accounts": 1
+        }
+      ]
+    }
+  ],
+  "user": {
+    "accounts": [
+      {
+        "chainId": 11155111,
+        "signerId": "0x61ff4c022bcc7d342d0d68a7b85f18e0fd7d9446",
+        "entityId": "0xcfcdd2d155d6ee85d446d49045cb444a78df66b89a18c84959665a040671dae2",
+        "hubEntityId": "0x64abda6ea9caaae7ecc550e8d4531200893574572d253a8c7e3495d725995260",
+        "height": 2
+      },
+      {
+        "chainId": 421614,
+        "signerId": "0xb77348f8f01e060934024fefc319c66653df6fa2",
+        "entityId": "0x01c743c9d2139446cf0d331676f122a042450522c26d8f09ce2b5a5b35add42a",
+        "hubEntityId": "0x529aa3f7dca1cbe2366f781ab55915bc9b0762b26bcc382ef321433d9de2b4a2",
+        "height": 2
+      }
+    ],
+    "canonicalStateHash": "0x772d15d4add2631d2c96d59f0bc6fb61b46e206e88dd89a35f938beaaceffab4",
+    "matchingBilateralProofs": 2,
+    "replay": {
+      "height": 12,
+      "comparedIdentical": [
+        "runtimeId",
+        "height",
+        "canonicalStateHash",
+        "entityHashes",
+        "accounts"
+      ],
+      "integrity": {
+        "latestHeight": 12,
+        "checkedFrames": 12
+      },
+      "livePendingOutputCount": 0,
+      "committedOutputCount": 1,
+      "restoredOutboxMatchesCommitted": true,
+      "outputs": [
+        {
+          "entityId": "0x529aa3f7dca1cbe2366f781ab55915bc9b0762b26bcc382ef321433d9de2b4a2",
+          "originFrame": 12,
+          "operations": [
+            "accountInput"
+          ]
+        }
+      ]
+    }
+  },
+  "funding": {
+    "approved": false,
+    "authorityPath": ".logs/ts-usdc-cross-j-poc/demo/fresh-w4vGds/one-run-funding.2YBlNpQj/authority.json",
+    "chains": [
+      {
+        "anchorHash": "0x108262ad652db3ca59084fe09a1055bf9feb9258147602f5212d8febbaf5754e",
+        "anchorNumber": 12163178,
+        "calls": [
+          {
+            "cap": {
+              "gasLimit": "200000",
+              "maxFeePerGasWei": "1000000000",
+              "maxPriorityFeePerGasWei": "100000000"
+            },
+            "data": "0x095ea7b300000000000000000000000032a4a72992ad142e36fa1c5989b95fed609878180000000000000000000000000000000000000000000000000000000000000001",
+            "estimate": "139993",
+            "nonce": 109,
+            "stage": "approval",
+            "to": "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
+            "valueWei": "0"
+          },
+          {
+            "cap": {
+              "gasLimit": "600000",
+              "maxFeePerGasWei": "1000000000",
+              "maxPriorityFeePerGasWei": "100000000"
+            },
+            "encodedBatch": "0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000160000000000000000000000000000000000000000000000000000000000000018000000000000000000000000000000000000000000000000000000000000001a000000000000000000000000000000000000000000000000000000000000001c000000000000000000000000000000000000000000000000000000000000001e00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000022000000000000000000000000000000000000000000000000000000000000002400000000000000000000000000000000000000000000000000000000000000320000000000000000000000000000000000000000000000000000000000000034000000000000000000000000000000000000000000000000000000000000003600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000164abda6ea9caaae7ecc550e8d4531200893574572d253a8c7e3495d7259952600000000000000000000000001c7d4b196cb0c7b01d743fbc6116a902379c72380000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+            "estimate": "conditional-on-confirmed-allowance-and-authorized-hanko",
+            "hankoHash": "0x0a20f8e9dff6289734fdd86d198647fdf8aa59c33a28308950a9f4ef3801287f",
+            "nextEntityNonce": "4",
+            "nonce": 110,
+            "stage": "deposit",
+            "to": "0x32a4a72992ad142e36fa1c5989b95fed60987818",
+            "valueWei": "0"
+          },
+          {
+            "cap": {
+              "gasLimit": "300000",
+              "maxFeePerGasWei": "1000000000",
+              "maxPriorityFeePerGasWei": "100000000"
+            },
+            "data": "0x",
+            "estimate": "207391",
+            "nonce": 111,
+            "stage": "native-topup",
+            "to": "0x944d742ada37d5416774d6303a649326eb1e9478",
+            "valueWei": "1000000000000000"
+          },
+          {
+            "cap": {
+              "gasLimit": "200000",
+              "maxFeePerGasWei": "1000000000",
+              "maxPriorityFeePerGasWei": "100000000"
+            },
+            "data": "0xa9059cbb00000000000000000000000061ff4c022bcc7d342d0d68a7b85f18e0fd7d944600000000000000000000000000000000000000000000000000000000000f4240",
+            "estimate": "154151",
+            "nonce": 112,
+            "stage": "user-principal-transfer",
+            "to": "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
+            "valueWei": "0"
+          },
+          {
+            "cap": {
+              "gasLimit": "300000",
+              "maxFeePerGasWei": "1000000000",
+              "maxPriorityFeePerGasWei": "100000000"
+            },
+            "data": "0x",
+            "estimate": "207391",
+            "nonce": 113,
+            "stage": "user-native-topup",
+            "to": "0x61ff4c022bcc7d342d0d68a7b85f18e0fd7d9446",
+            "valueWei": "2000000000000000"
+          }
+        ],
+        "chainId": 11155111,
+        "depository": "0x32a4a72992ad142e36fa1c5989b95fed60987818",
+        "feesWei": "1600000000000000",
+        "funder": {
+          "address": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+          "firstNonce": 109
+        },
+        "funderNativeWei": "41201929995985112185",
+        "funderUsdcAtoms": "8000000",
+        "hubEntity": "0x64abda6ea9caaae7ecc550e8d4531200893574572d253a8c7e3495d725995260",
+        "hubSigner": "0x944d742ada37d5416774d6303a649326eb1e9478",
+        "hubUsdcAtoms": "1",
+        "nativeOutflowCeilingWei": "4600000000000000",
+        "token": "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
+        "userSigner": "0x61ff4c022bcc7d342d0d68a7b85f18e0fd7d9446",
+        "userUsdcAtoms": "1000000"
+      },
+      {
+        "anchorHash": "0x8567560815e69c01d8574b2d1455a04400905f3745573894960f1da3e6e55c90",
+        "anchorNumber": 330496531,
+        "calls": [
+          {
+            "cap": {
+              "gasLimit": "90000",
+              "maxFeePerGasWei": "100000000",
+              "maxPriorityFeePerGasWei": "0"
+            },
+            "data": "0x095ea7b30000000000000000000000008223aa4c60adb851f53a120c3d3841de9e77c18800000000000000000000000000000000000000000000000000000000000f4240",
+            "estimate": "56240",
+            "nonce": 33,
+            "stage": "approval",
+            "to": "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d",
+            "valueWei": "0"
+          },
+          {
+            "cap": {
+              "gasLimit": "600000",
+              "maxFeePerGasWei": "100000000",
+              "maxPriorityFeePerGasWei": "0"
+            },
+            "encodedBatch": "0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000160000000000000000000000000000000000000000000000000000000000000018000000000000000000000000000000000000000000000000000000000000001a000000000000000000000000000000000000000000000000000000000000001c000000000000000000000000000000000000000000000000000000000000001e000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000220000000000000000000000000000000000000000000000000000000000000024000000000000000000000000000000000000000000000000000000000000003200000000000000000000000000000000000000000000000000000000000000340000000000000000000000000000000000000000000000000000000000000036000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001529aa3f7dca1cbe2366f781ab55915bc9b0762b26bcc382ef321433d9de2b4a200000000000000000000000075faf114eafb1bdbe2f0316df893fd58ce46aa4d00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+            "estimate": "conditional-on-confirmed-allowance-and-authorized-hanko",
+            "hankoHash": "0xfbf0a650534bc825e6f1bc4500bfe286c4b33ce325de7c1d6f28209bb5fbc9a7",
+            "nextEntityNonce": "4",
+            "nonce": 34,
+            "stage": "deposit",
+            "to": "0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+            "valueWei": "0"
+          },
+          {
+            "cap": {
+              "gasLimit": "300000",
+              "maxFeePerGasWei": "100000000",
+              "maxPriorityFeePerGasWei": "0"
+            },
+            "data": "0x",
+            "estimate": "21000",
+            "nonce": 35,
+            "stage": "native-topup",
+            "to": "0xa73b329dc876173b2a7161cdde716a78209b0cac",
+            "valueWei": "100000000000000"
+          },
+          {
+            "cap": {
+              "gasLimit": "300000",
+              "maxFeePerGasWei": "100000000",
+              "maxPriorityFeePerGasWei": "0"
+            },
+            "data": "0x",
+            "estimate": "21000",
+            "nonce": 36,
+            "stage": "user-native-topup",
+            "to": "0xb77348f8f01e060934024fefc319c66653df6fa2",
+            "valueWei": "100000000000000"
+          }
+        ],
+        "chainId": 421614,
+        "depository": "0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+        "feesWei": "129000000000000",
+        "funder": {
+          "address": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+          "firstNonce": 33
+        },
+        "funderNativeWei": "528464472972889600",
+        "funderUsdcAtoms": "15000000",
+        "hubEntity": "0x529aa3f7dca1cbe2366f781ab55915bc9b0762b26bcc382ef321433d9de2b4a2",
+        "hubSigner": "0xa73b329dc876173b2a7161cdde716a78209b0cac",
+        "hubUsdcAtoms": "1000000",
+        "nativeOutflowCeilingWei": "329000000000000",
+        "token": "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d",
+        "userSigner": "0xb77348f8f01e060934024fefc319c66653df6fa2",
+        "userUsdcAtoms": "0"
+      }
+    ],
+    "executionAllowed": false,
+    "expiresAt": "2026-11-19T18:21:49.260Z",
+    "publicBroadcasts": 0,
+    "publicSignatures": 0,
+    "sha256": "999ec4043cb8e29f771e13363a8a61a7e78897f99db226e5fc6ec8bf8cb88cf1",
+    "verifiedSameCandidate": true,
+    "estimatedCalls": 7,
+    "conditionalDeposits": 2
+  },
+  "publicFinancialBroadcasts": 0,
+  "remaining": [
+    "Owner approval of the exact funding authority",
+    "On-chain funding and observation in demo WALs",
+    "Executable signed quote, backing, credit and payer-specific journey/recovery gas",
+    "Separate financial authority and public one-USDC external payout"
+  ]
+}

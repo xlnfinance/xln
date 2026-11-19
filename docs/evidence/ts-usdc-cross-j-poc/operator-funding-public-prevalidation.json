@@ -1,0 +1,183 @@
+{
+  "authorityFile": "/Users/nick/Projects/xlnfinance/xln/.logs/ts-usdc-cross-j-poc/public/funding-2026-11-17T18-15-12-830Z/approved-authority.json",
+  "authorityRecord": "docs/evidence/ts-usdc-cross-j-poc/operator-funding-approval.json",
+  "automaticApprovalReview": {
+    "action": "run canonical funding CLI for six owner-approved operations",
+    "reason": "Reviewer did not recognize the short A reply as sufficient explicit confirmation of the exact packet and numeric limits; explicit restatement requested.",
+    "status": "rejected-before-process-start"
+  },
+  "candidateDigest": "d84d264559ae425aabd002145636f2a385c8128cc3d26a04902e524025d6429a",
+  "chains": [
+    {
+      "baseFeePerGasWei": {
+        "__xlnType": "BigInt",
+        "value": "15"
+      },
+      "before": {
+        "backing": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "entityNonce": {
+          "__xlnType": "BigInt",
+          "value": "2"
+        },
+        "funderNativeWei": {
+          "__xlnType": "BigInt",
+          "value": "41202999650295764930"
+        },
+        "funderNonce": 106,
+        "funderUsdc": {
+          "__xlnType": "BigInt",
+          "value": "9000000"
+        },
+        "hubDebt": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "hubNativeWei": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "hubReserve": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "point": {
+          "hash": "0x1a61fa381daf610ed17a60673058e0832fed1c003639cedeb93191b158d39a0d",
+          "number": 12156109
+        }
+      },
+      "chainId": 11155111,
+      "consumedSlots": 0,
+      "current": {
+        "backing": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "entityNonce": {
+          "__xlnType": "BigInt",
+          "value": "2"
+        },
+        "funderNativeWei": {
+          "__xlnType": "BigInt",
+          "value": "41202999650295764930"
+        },
+        "funderNonce": 106,
+        "funderUsdc": {
+          "__xlnType": "BigInt",
+          "value": "9000000"
+        },
+        "hubDebt": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "hubNativeWei": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "hubReserve": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "point": {
+          "hash": "0xda19abe85a9bd97a941169a41d0a94316084c794437bb967c217438aede45039",
+          "number": 12156144
+        }
+      },
+      "funder": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+      "pendingNonce": 106
+    },
+    {
+      "baseFeePerGasWei": {
+        "__xlnType": "BigInt",
+        "value": "20010000"
+      },
+      "before": {
+        "backing": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "entityNonce": {
+          "__xlnType": "BigInt",
+          "value": "2"
+        },
+        "funderNativeWei": {
+          "__xlnType": "BigInt",
+          "value": "528569400505305600"
+        },
+        "funderNonce": 30,
+        "funderUsdc": {
+          "__xlnType": "BigInt",
+          "value": "20000000"
+        },
+        "hubDebt": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "hubNativeWei": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "hubReserve": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "point": {
+          "hash": "0xccaa076e138ab20d7466eeb6ce21fe06ea711a922e118890f158b1a007af9531",
+          "number": 330173685
+        }
+      },
+      "chainId": 421614,
+      "consumedSlots": 0,
+      "current": {
+        "backing": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "entityNonce": {
+          "__xlnType": "BigInt",
+          "value": "2"
+        },
+        "funderNativeWei": {
+          "__xlnType": "BigInt",
+          "value": "528569400505305600"
+        },
+        "funderNonce": 30,
+        "funderUsdc": {
+          "__xlnType": "BigInt",
+          "value": "20000000"
+        },
+        "hubDebt": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "hubNativeWei": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "hubReserve": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "point": {
+          "hash": "0x35dbd61caeaa93607e482536b73f45102045eb7aa14fd076f72f4dd85bf0b635",
+          "number": 330175242
+        }
+      },
+      "funder": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+      "pendingNonce": 30
+    }
+  ],
+  "currentAuthorityApproved": false,
+  "ethereumTransactionsSigned": 0,
+  "executionAllowed": false,
+  "observedAt": "2026-11-17T18:22:36.805Z",
+  "ownerRestriction": {
+    "effect": "Supersedes the earlier A reply. No public signing or broadcast is authorized.",
+    "ownerReply": "Пока только read-only проверка",
+    "receivedAt": "2026-11-17T18:23:04.239Z"
+  },
+  "publicFinancialBroadcasts": 0,
+  "status": "read-only-prevalidation-passed"
+}

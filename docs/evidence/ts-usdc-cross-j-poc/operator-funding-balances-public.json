@@ -1,0 +1,244 @@
+{
+  "additionalFinancialBroadcasts": 0,
+  "chains": [
+    {
+      "balances": [
+        {
+          "chainId": 11155111,
+          "debt": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "entityId": "0xcfcdd2d155d6ee85d446d49045cb444a78df66b89a18c84959665a040671dae2",
+          "entityNonce": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "eoaNonce": 0,
+          "name": "Ethereum Sepolia",
+          "nativeWei": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "reserveUsdc": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "role": "user",
+          "signerId": "0x61ff4c022bcc7d342d0d68a7b85f18e0fd7d9446",
+          "signerIndex": 0,
+          "walletUsdc": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          }
+        },
+        {
+          "chainId": 11155111,
+          "debt": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "entityId": "0xd3a0d7b3939571af73af38d3cfb0f914f065e23e50daaf60fc80cd6fd52e70a8",
+          "entityNonce": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "eoaNonce": 0,
+          "name": "Ethereum Sepolia",
+          "nativeWei": {
+            "__xlnType": "BigInt",
+            "value": "1000000000000000"
+          },
+          "reserveUsdc": {
+            "__xlnType": "BigInt",
+            "value": "1000000"
+          },
+          "role": "hub",
+          "signerId": "0x7fd492c67d1b1bab5ba3487e4246c8044db44598",
+          "signerLabel": "1",
+          "walletUsdc": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          }
+        },
+        {
+          "chainId": 11155111,
+          "debt": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "entityId": "0xb17188fb0c15ab321f651a0d2c0996d480828a9deea24dfc26e87a1435f664ef",
+          "entityNonce": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "eoaNonce": 0,
+          "name": "Ethereum Sepolia",
+          "nativeWei": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "reserveUsdc": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "role": "mm",
+          "signerId": "0xcc26bfec25957d476e4a116fecb206ab9198d196",
+          "signerLabel": "1",
+          "walletUsdc": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          }
+        }
+      ],
+      "chainId": 11155111,
+      "depositoryBackingUsdc": {
+        "__xlnType": "BigInt",
+        "value": "1000000"
+      },
+      "funder": {
+        "address": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+        "entityNonce": {
+          "__xlnType": "BigInt",
+          "value": "3"
+        },
+        "eoaNonce": 109,
+        "nativeWei": {
+          "__xlnType": "BigInt",
+          "value": "41201929995985112185"
+        },
+        "pendingNonce": 109,
+        "walletUsdc": {
+          "__xlnType": "BigInt",
+          "value": "8000000"
+        }
+      },
+      "point": {
+        "hash": "0x9e7c1a71ec59ebe2fafcfbcc3d575a2251b7ceff580ada02aea5137710d136cc",
+        "number": 12156466
+      }
+    },
+    {
+      "balances": [
+        {
+          "chainId": 421614,
+          "debt": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "entityId": "0x01c743c9d2139446cf0d331676f122a042450522c26d8f09ce2b5a5b35add42a",
+          "entityNonce": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "eoaNonce": 0,
+          "name": "Arbitrum Sepolia",
+          "nativeWei": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "reserveUsdc": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "role": "user",
+          "signerId": "0xb77348f8f01e060934024fefc319c66653df6fa2",
+          "signerIndex": 650934,
+          "walletUsdc": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          }
+        },
+        {
+          "chainId": 421614,
+          "debt": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "entityId": "0x0b669a275953ec4f68ebbf1ec6a0aedd7f2ae671ba527fcf745bde4df44c5447",
+          "entityNonce": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "eoaNonce": 0,
+          "name": "Arbitrum Sepolia",
+          "nativeWei": {
+            "__xlnType": "BigInt",
+            "value": "100000000000000"
+          },
+          "reserveUsdc": {
+            "__xlnType": "BigInt",
+            "value": "5000000"
+          },
+          "role": "hub",
+          "signerId": "0x0b2fffb8b3e09bb3ea2d5ec2442cf055bdfdcdd2",
+          "signerLabel": "1:Arbitrum Sepolia",
+          "walletUsdc": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          }
+        },
+        {
+          "chainId": 421614,
+          "debt": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "entityId": "0x81ea586f4c4214a13cd4b081f5c4465db29f22c1b67c6589ad64ee3799ef5583",
+          "entityNonce": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "eoaNonce": 0,
+          "name": "Arbitrum Sepolia",
+          "nativeWei": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "reserveUsdc": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "role": "mm",
+          "signerId": "0x00d44b29953dfa094058eaa31440338c899bef37",
+          "signerLabel": "1:Arbitrum Sepolia",
+          "walletUsdc": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          }
+        }
+      ],
+      "chainId": 421614,
+      "depositoryBackingUsdc": {
+        "__xlnType": "BigInt",
+        "value": "5000000"
+      },
+      "funder": {
+        "address": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+        "entityNonce": {
+          "__xlnType": "BigInt",
+          "value": "3"
+        },
+        "eoaNonce": 33,
+        "nativeWei": {
+          "__xlnType": "BigInt",
+          "value": "528464472972889600"
+        },
+        "pendingNonce": 33,
+        "walletUsdc": {
+          "__xlnType": "BigInt",
+          "value": "15000000"
+        }
+      },
+      "point": {
+        "hash": "0xf19f6264997127098d0f857c384402762c9edcea8c740e22db9f21054dbc3401",
+        "number": 330189580
+      }
+    }
+  ],
+  "mmUsdcFunded": false,
+  "observedAt": "2026-11-17T19:27:28.620Z",
+  "status": "post-funding-balances-reconciled",
+  "ticket": "11",
+  "userFunded": false
+}

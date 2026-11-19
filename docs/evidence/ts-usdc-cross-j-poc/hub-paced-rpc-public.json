@@ -1,0 +1,48 @@
+{
+  "ticket": "12",
+  "status": "receipt-pacing-responded-header-rate-limit-remains",
+  "startedAt": "2026-11-17T21:07:52.452Z",
+  "observedAt": "2026-11-17T21:09:56.816Z",
+  "candidateHead": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26",
+  "candidateDigest": "778128e61e1b82c130b813eaac77a6694ac58be4315dfce035f87c784358c8f0",
+  "dirty": true,
+  "sessionDirectory": ".logs/ts-usdc-cross-j-poc/public/sessions/restore-dqfqIC",
+  "originalHubStore": ".logs/ts-usdc-cross-j-poc/public/hub/attempt-1794864456845",
+  "rpcBindings": "Same header and history endpoint fingerprints as hub-only-public-diagnostic.json",
+  "mode": "hub-only with POC_HEADER_BATCH_TIMING=1 and POC_RPC_READ_PACING=1",
+  "gateway": "managed read-only",
+  "configuredMinDispatchGapMsByEndpoint": { "currentHeaders": 500, "blockReceipts": 1000 },
+  "startupTimeoutMs": 120000,
+  "sessionElapsedMs": 124067,
+  "sessionError": "USDC_SESSION_READINESS_TIMEOUT:hub",
+  "headProbes": { "11155111": 12156960, "421614": 330211604 },
+  "lastRecordedJCursor": { "11155111": 12149976, "421614": 329895132 },
+  "headers": {
+    "comparisonScope": "Position-indexed header batches with more than one item",
+    "rangeBatchesReceived": 105,
+    "sent": 65,
+    "upstreamHttp429": 22,
+    "cancelledBeforeSend": 40,
+    "sentAfterObservedClientAbort": 0,
+    "observedMinDispatchGapMs": { "11155111": 500, "421614": 500 },
+    "byChain": { "11155111": { "sent": 30, "http429": 10 }, "421614": { "sent": 35, "http429": 12 } }
+  },
+  "receipts": {
+    "source": "USDC_PREFLIGHT_PACED_RECEIPT records for eth_getBlockReceipts on existing history bindings",
+    "repliesWithoutRpcError": 39,
+    "observedRateLimits": 0,
+    "observedMinDispatchGapMs": { "11155111": 1000, "421614": 1001 },
+    "byChain": { "11155111": { "replies": 35 }, "421614": { "replies": 4 } }
+  },
+  "hubWal": {
+    "restoredRuntimeHeight": 45,
+    "latestRuntimeHeightAfterStop": 46,
+    "newFrames": [{ "height": 46, "runtimeTxs": ["importJ"], "entityTxs": [], "runtimeOutputCount": 0 }]
+  },
+  "mmLaunched": false,
+  "userLaunched": false,
+  "additionalFinancialBroadcasts": 0,
+  "standReleased": true,
+  "validation": { "preflightTests": 10, "preflightAssertions": 73, "deploymentTypecheck": "pass", "aggregateCheck": "pass" },
+  "limitsOfInference": "Receipt counters are RPC responses, including repeated block requests, and do not establish an authenticated range or committed event. Last recorded cursors come from watcher retry records, and the final WAL contains only the importJ frame. The run timed out at the launcher, which did not capture a final watcher scan fingerprint."
+}

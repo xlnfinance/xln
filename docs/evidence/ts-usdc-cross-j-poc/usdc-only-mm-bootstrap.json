@@ -1,0 +1,261 @@
+{
+  "observedAt": "2026-11-17T12:15:53.795104+00:00",
+  "status": "local-verification-complete",
+  "ticket": "07",
+  "candidate": {
+    "head": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26",
+    "branch": "testnets_deploy",
+    "dirty": true,
+    "sourceSha256": {
+      "core/__tests__/jurisdiction/adapter/state-anchor/cold-import-chain-age.test.ts": "02d0a491c74c89582dc523830c388f6e44a89421b013e5717fa617f9dd7dc2e0",
+      "core/__tests__/jurisdiction/adapter/state-anchor/rpc-header-hash.test.ts": "86308db0f8d382ef7d75999f493f4f58ea3d87cc8cfff370cdf4c1b0cc727562",
+      "core/__tests__/market/invariants/market-maker-account-sharding.test.ts": "78f0b230ade0ee138505937578e55a43945fe4db4f6b30a7e57dde65c22a417c",
+      "core/__tests__/market/invariants/market-maker-health.test.ts": "55f474452fae1ad65eebfc5346c3fbf5b516d278a79afc9802cdf0e2c8cd319a",
+      "core/__tests__/market/startup/usdc-only-bootstrap.test.ts": "34df5da332826db768087242033993862b50a355bf47d755cdbb5fbb7f9f9161",
+      "core/__tests__/network/jurisdiction/usdc/usdc-cross-j-preflight.test.ts": "d83f58c4d4a2565f2633d52e4d792aacc4adc809bb23c44716069f5ba7d8fdf2",
+      "core/__tests__/operations/hlt/evidence/entity-summary-boundary.test.ts": "5b7c7b9a449eb2aafce21383e2a6a80c47b9e38c0151d51a6a359cdca7f59ab7",
+      "core/__tests__/orchestrator/topology/mesh-jurisdictions.test.ts": "a0d366117819e506f27fd3f00e20a36c0af809be88ea5b396e5c926648614dfa",
+      "core/jurisdiction/adapter/kernel/jurisdiction-loader.ts": "27c16e3f3c9e77cbb7f6dcd1c0a4ec717313e0bd3fe38858fb4b9f6cc7e291e2",
+      "core/jurisdiction/adapter/rpc/state-anchor/rpc-header-hash.ts": "c376c55df6f302b73a70920909ab5fb877e1ad55a49970f312bf5f8f30913939",
+      "core/jurisdiction/adapter/rpc/watcher/rpc-watcher-poll.ts": "295f218a051b44c3d5cb80f4727c4cfdfd8ca500e13b90596a644dde189a5eb8",
+      "core/network/relay/standalone-server.ts": "0cb50a9eaafef65fb1fd40ef084a6f744cf5ae513bfce323968a7e3b9e454a6e",
+      "core/orchestrator/hub/node/token-catalog.ts": "d29e9bd3fa28a72e2fc65ac5401e14897edf8251c2a1de2975f5f8c689ce897b",
+      "core/orchestrator/market-maker/identity-resolver.ts": "3b6998309ad9ed12417529a1645f49f5eef90dcfe07ecce041bcd7fe0953b0d3",
+      "core/orchestrator/market-maker/node/mm-node-core.ts": "edb59383054bf5229bfff1178409e953a5bc03972310929702f885a9a614c0ba",
+      "core/orchestrator/market-maker/node/mm-node-health.ts": "7b0679b818a8bfc4de21b473bfa29953fe930663faf9c4c4dd86e1dc4c06a837",
+      "core/orchestrator/mesh/mesh-common.ts": "16a26782029f06a7e21a7112fdc06af1e7d23d0893dda0d7840a9c8ff4073e7d",
+      "core/orchestrator/mesh/mesh-jurisdictions.ts": "be939e7e46a818214fe14cb513caf62eb7f6b8daf4993c448b1f054c8fdfdd6f",
+      "core/orchestrator/orchestrator.ts": "c3862a97a1169dc55211fb5617c0fe45ec2b8b16ea436be809b008a760ee857b",
+      "core/scenarios/usdc-poc/cross-swap.ts": "f5bc091b951a7a369c992ae1d03da51998321f2021299195d80850136b087a61",
+      "core/scenarios/usdc-poc/evidence.ts": "7a06ced801200ccc203d8921b8f8c145fa7b4ed8070668f460453851baac46bd",
+      "core/scenarios/usdc-poc/external-payout.ts": "e636361f1afae3a6dbb5e4a319f344e56ed63b53654abc25aad9e99c380a8986",
+      "core/scenarios/usdc-poc/hub-proof.ts": "a6d52163751414b1d3df172e05afecf2eae79fd2523e712b7018e2ce56cab802",
+      "core/scenarios/usdc-poc/recovery-run.ts": "fef84099dba1cbe92bbcd89c0ccd116b753c465084fb087b199f6d273dc72c9c",
+      "core/scenarios/usdc-poc/recovery/clear.ts": "6d8c666235b99481c7ad08bab3b37a153baef7204c21f7853de7fbcc0ef6c031",
+      "core/scenarios/usdc-poc/recovery/duplicate.ts": "d2214f1e29b6a1d71043ae71f2d2dbecfb390e26c5d53cea2f899e15b2585852",
+      "core/scenarios/usdc-poc/recovery/evidence.ts": "12cc5e6c6ea50112a325f9f6d7f162dd28c739a39936d25ae4158b9bedcad484",
+      "core/scenarios/usdc-poc/recovery/interrupt.ts": "416359e3af629e28b1690d086124f03d4dd4299f2fe4be9caca8cddeae7bc576",
+      "core/scenarios/usdc-poc/recovery/ledger.ts": "984beef10bfcb3c837c74c73fb187e880e5055c5b5a48f89d4fc764fe223f614",
+      "core/scenarios/usdc-poc/recovery/liquidity.ts": "1c765023e3601bd9db8f12b1f369427590c57d3cb7ec14095bbaedf11313cca8",
+      "core/scenarios/usdc-poc/recovery/partial-run.ts": "2d89eef6836ee523cebbbf53952c40b550eafc97b5eca4f6fcbb4ace651d1cfb",
+      "core/scenarios/usdc-poc/recovery/payout.ts": "4a5bcf8dfbd95b7d73a7820bd240914f5de0ad7735fe8aef507f6fb14423dfb3",
+      "core/scenarios/usdc-poc/recovery/resume.ts": "f8ab20b5a518e8227098c9d20bd28161211593ddde691a2e4dbd26461703b3bc",
+      "core/scenarios/usdc-poc/recovery/run.ts": "afba0ab39923ca8a491bfe5df5fecdceedfafbabb59c4420a7e8746c45f33798",
+      "core/scenarios/usdc-poc/source-funding.ts": "b7a163bdc8d2dcf312ddbb3c98a270e09ce579542c2fb02eb3ffe062ebf6b15b",
+      "core/scenarios/usdc-poc/source-journey.ts": "3d7bc85cf662cea2c5babdf3de1f07ebb29164e03b7ecbf6ceef82ed98ced776",
+      "core/scenarios/usdc-poc/target-evidence.ts": "581a89d065ce857fdff1ea376ba0f393e1e31d1b52669e8155b87962dfd67cfd",
+      "core/scenarios/usdc-poc/user.ts": "2aac5ebcbcf45b2bf768aa52a094cca64c9d1a9de77544b7e824d9b2e5b9f49a",
+      "core/scripts/operations/hlt/boundary/worker-boundary.ts": "1a5c7377eb11e62aa9704a3a66cceab56443c354cf3f085cdfa8eb2a7f691435",
+      "core/scripts/operations/production/local-prod-smoke.ts": "15063f228edc06c4d9d3af6ce81067bae63aea9dcb03921d9c38170fabd91512",
+      "jurisdictions/scripts/usdc-cross-j-preflight/budget.ts": "1ee758e590d985f321443ecfae1b913406c31265a2ac2ccf467b322e9a13b366",
+      "jurisdictions/scripts/usdc-cross-j-preflight/catalog.ts": "e7e2bac69c98351b7c246d9d543588836810cd11aa1da6980d16c71e8a9f75a6",
+      "jurisdictions/scripts/usdc-cross-j-preflight/chain.ts": "531ece6e17064c477b84e819f87b5edb65d6747e23e4df48c1887b146c44740f",
+      "jurisdictions/scripts/usdc-cross-j-preflight/gas.ts": "41ec8e2596f822f41975c44c7026d9721b680b3b442448c283e873313027adaf",
+      "jurisdictions/scripts/usdc-cross-j-preflight/identities.ts": "b5ec38126ccb460ac2e3f76e0154fa6f2f2302061085f568cf9de9efa9b3b1df",
+      "jurisdictions/scripts/usdc-cross-j-preflight/index.ts": "691bae56799aa50746abaa086e61d11db8ee2cb90784aacddfaefd083a09c54f",
+      "jurisdictions/scripts/usdc-cross-j-preflight/operators/gateway.ts": "a425201a0e0beb13dec58a9ef2fe3f2de513d253fd12d699dd2545653ba9b7d0",
+      "jurisdictions/scripts/usdc-cross-j-preflight/operators/local-operators.ts": "a539200ca1d2439c435c57a6580575350e8f21208218e8433ca8ea701206ebac",
+      "jurisdictions/scripts/usdc-cross-j-preflight/operators/observations.ts": "861cfdf8877a15e45b815679211120ffa714df62990a19477eb24f333fd64698",
+      "jurisdictions/scripts/usdc-cross-j-preflight/operators/transport.ts": "44f9da18541b93e4949cfa4683baaf5fd7cd8c4ea221f24550bdc1148c856ded",
+      "jurisdictions/scripts/usdc-cross-j-preflight/provider.ts": "a69fa38410ce382e8b60047104f89ce2da4b7a65f9051f143e7cfd73d3fb8c48",
+      "tsconfig.deployment.json": "8a44b5bad1cd66859f6911ac38d03fc685634e141bb66f690bffebd46130e7c7"
+    }
+  },
+  "scope": {
+    "engine": "ts",
+    "networkKind": "local-anvil",
+    "chainIds": [11155111, 421614],
+    "registeredAssetsPerChain": ["USDC"],
+    "publicFinancialBroadcasts": 0,
+    "publicReadinessEstablished": false
+  },
+  "marketSuite": {
+    "command": "bun run stand:run --reason usdc-mm-market-regressions --timeout-ms 240000 -- bun test core/__tests__/market",
+    "passed": 66,
+    "failed": 0,
+    "files": 13,
+    "assertions": 944,
+    "standLockHeld": true
+  },
+  "usdcOnlyStartup": {
+    "test": "core/__tests__/market/startup/usdc-only-bootstrap.test.ts",
+    "actualHealth": {
+      "apiUrl": "http://127.0.0.1:61922",
+      "bootstrap": {
+        "entityStateHash": "9b553655c269fd9a2970d460d7d588be695c9a2659e178b2cf903bacaa11c493",
+        "readyAt": 1794917652815,
+        "readyHash": "7afdd60ee22c3e0af580e6f98612e5bbdd822667c39432fd78cfb8f40f4b47c1",
+        "restoredEntityStateHash": null,
+        "runtimeStateHash": "0x2282db242c8a280376b781f0b8a2d11b880c9679d8ac3dafe025289cbfe19c40"
+      },
+      "directWsUrl": "ws://127.0.0.1:61922/ws",
+      "entityId": "0x5430b74dce7ca8f8a85130577efc4a44034156b1ecc46014b7c286e0bd63141f",
+      "gossip": {
+        "ready": true,
+        "visibleHubIds": ["0xeec50a7551e6eb6f6d196605d0f36d6d6b3b9768e3446cd932b4cb2b359f5e94"],
+        "visibleHubNames": ["H1"]
+      },
+      "height": 37,
+      "live": true,
+      "marketMaker": {
+        "connectivity": [
+          {
+            "accountReady": true,
+            "currentHeight": 21,
+            "hubEntityId": "0xeec50a7551e6eb6f6d196605d0f36d6d6b3b9768e3446cd932b4cb2b359f5e94",
+            "mempoolLength": 0,
+            "pendingFrame": false,
+            "status": "active",
+            "swapOffers": 9,
+            "tokens": [
+              {
+                "hubGranted": "2000000000000",
+                "hubOutCapacity": "1791750000000",
+                "mmGranted": "2000000000000",
+                "mmOutCapacity": "1791750000000",
+                "mutualReady": true,
+                "tokenId": 1
+              }
+            ]
+          }
+        ],
+        "cross": {
+          "applicable": true,
+          "expectedOffersPerPair": 9,
+          "expectedOffersPerRoute": 9,
+          "expectedRoutes": 2,
+          "ok": true,
+          "routeCount": 2,
+          "routes": [
+            {
+              "blockers": [],
+              "depthReady": true,
+              "offers": 9,
+              "pairs": [
+                {
+                  "bookOwnerEntityId": "0x1a9e1cddb48f07ddab8431b29ea1d3d80a94d1a34dfac1586a81bc09eee9eab6",
+                  "depthReady": true,
+                  "expectedAskOffers": 0,
+                  "expectedBidOffers": 9,
+                  "expectedOffers": 9,
+                  "offers": 9,
+                  "pairId": "cross:stack:11155111:0xa513e6e4b8f2a923d98304ec87f64353c4d5c853:1/stack:421614:0xa513e6e4b8f2a923d98304ec87f64353c4d5c853:1",
+                  "ready": true,
+                  "sourceTokenIds": [1],
+                  "targetTokenIds": [1]
+                }
+              ],
+              "ready": true,
+              "sourceHubEntityId": "0x1a9e1cddb48f07ddab8431b29ea1d3d80a94d1a34dfac1586a81bc09eee9eab6",
+              "sourceJurisdiction": "Arbitrum Sepolia",
+              "sourceMmEntityId": "0x0f642e8e6124e06144f56a76492e6631b27421c7c7962a08b00770fa9703f3f3",
+              "targetHubEntityId": "0xeec50a7551e6eb6f6d196605d0f36d6d6b3b9768e3446cd932b4cb2b359f5e94",
+              "targetJurisdiction": "Ethereum Sepolia",
+              "targetMmEntityId": "0x5430b74dce7ca8f8a85130577efc4a44034156b1ecc46014b7c286e0bd63141f"
+            },
+            {
+              "blockers": [],
+              "depthReady": true,
+              "offers": 9,
+              "pairs": [
+                {
+                  "bookOwnerEntityId": "0x1a9e1cddb48f07ddab8431b29ea1d3d80a94d1a34dfac1586a81bc09eee9eab6",
+                  "depthReady": true,
+                  "expectedAskOffers": 9,
+                  "expectedBidOffers": 0,
+                  "expectedOffers": 9,
+                  "offers": 9,
+                  "pairId": "cross:stack:11155111:0xa513e6e4b8f2a923d98304ec87f64353c4d5c853:1/stack:421614:0xa513e6e4b8f2a923d98304ec87f64353c4d5c853:1",
+                  "ready": true,
+                  "sourceTokenIds": [1],
+                  "targetTokenIds": [1]
+                }
+              ],
+              "ready": true,
+              "sourceHubEntityId": "0xeec50a7551e6eb6f6d196605d0f36d6d6b3b9768e3446cd932b4cb2b359f5e94",
+              "sourceJurisdiction": "Ethereum Sepolia",
+              "sourceMmEntityId": "0x5430b74dce7ca8f8a85130577efc4a44034156b1ecc46014b7c286e0bd63141f",
+              "targetHubEntityId": "0x1a9e1cddb48f07ddab8431b29ea1d3d80a94d1a34dfac1586a81bc09eee9eab6",
+              "targetJurisdiction": "Arbitrum Sepolia",
+              "targetMmEntityId": "0x0f642e8e6124e06144f56a76492e6631b27421c7c7962a08b00770fa9703f3f3"
+            }
+          ]
+        },
+        "enabled": true,
+        "entityId": "0x5430b74dce7ca8f8a85130577efc4a44034156b1ecc46014b7c286e0bd63141f",
+        "expectedOffersPerHub": 0,
+        "expectedOffersPerPair": 0,
+        "hubs": [
+          {
+            "blockers": [],
+            "depthReady": true,
+            "hubEntityId": "0xeec50a7551e6eb6f6d196605d0f36d6d6b3b9768e3446cd932b4cb2b359f5e94",
+            "offers": 0,
+            "pairs": [],
+            "ready": true
+          }
+        ],
+        "ok": true,
+        "quiescence": {
+          "accountMempoolTxs": 0,
+          "pendingAccountFrames": 0,
+          "pendingRuntimeWork": 0
+        }
+      },
+      "name": "MM",
+      "ok": true,
+      "p2p": {
+        "directInput": {
+          "lastError": null,
+          "lastSeen": null
+        },
+        "directPeers": [
+          {
+            "endpoint": "ws://127.0.0.1:61921/ws",
+            "open": true,
+            "runtimeId": "0x60c19109832aa0b7db53528d7be203654f4759a8"
+          }
+        ]
+      },
+      "ready": true,
+      "relayUrl": "ws://127.0.0.1:61923/relay",
+      "runtime": {
+        "fatalDebugPayload": null,
+        "halted": false,
+        "lifecyclePhase": "running",
+        "operatorStatus": null,
+        "securityIncidents": []
+      },
+      "runtimeId": "0x38a70c3037a164a67d6fb4ffeca90c8ddc609e79",
+      "startupPhase": "offers-ready"
+    },
+    "fixturePath": "/private/var/folders/z0/tl1lmzfs49df8y9b6k411m0c0000gq/T/xln-usdc-only-bootstrap-EcmXQn"
+  },
+  "mixedMarketFinancial": {
+    "command": "bun run stand:run --reason usdc-mm-mixed-market-financial --timeout-ms 180000 -- bun core/scripts/operations/production/local-prod-smoke.ts --external-payout",
+    "standLockHeld": true,
+    "status": "complete",
+    "sourceAmount": "1000000",
+    "grossTargetAmount": "999900",
+    "fee": "100099",
+    "externalPayout": true,
+    "sourceToPayoutDifference": "100199",
+    "artifactPath": "/private/var/folders/z0/tl1lmzfs49df8y9b6k411m0c0000gq/T/xln-local-prod-smoke-20000/poc-user/external-payout.json",
+    "netExternalPayout": "899801"
+  },
+  "verification": {
+    "command": "bun run stand:run --reason usdc-mm-readiness-final-check --timeout-ms 180000 -- bun run check",
+    "exitCode": 0,
+    "standLockHeld": true,
+    "shortGates": 3,
+    "sourceGates": 38,
+    "soundcheckGates": 10,
+    "frozenCore": "unchanged",
+    "owningTestTypes": "passed"
+  },
+  "limitations": [
+    "Dirty shared candidate; this is not clean committed release evidence.",
+    "No public MM quote or financial journey was rerun.",
+    "Tickets 08-11 and final preparation 05 remain incomplete."
+  ]
+}

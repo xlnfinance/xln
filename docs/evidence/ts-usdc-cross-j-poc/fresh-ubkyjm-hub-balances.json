@@ -1,0 +1,226 @@
+{
+  "status": "hub-balances-and-bilateral-collateral-reconciled",
+  "stand": "fresh-UbkYJm",
+  "runId": "fresh-ubkyjm-1usdc-20261119",
+  "observedAt": "2026-11-19T18:18:56.857Z",
+  "executionEvidence": "docs/evidence/ts-usdc-cross-j-poc/fresh-ubkyjm-journey-executed.json",
+  "fundingEvidence": "docs/evidence/ts-usdc-cross-j-poc/fresh-ubkyjm-funded-public.json",
+  "balances": [
+    {
+      "chainId": 11155111,
+      "hubReserveAtoms": "1",
+      "accountCollateralAtoms": "1000000",
+      "collateralAttributedToHubAtoms": "1000000",
+      "collateralAttributedToUserAtoms": "0",
+      "hubNativeWei": "1000000000000000",
+      "hubGasPaidWei": "0",
+      "bothAccountStatesMatchWALAndChain": true
+    },
+    {
+      "chainId": 421614,
+      "hubReserveAtoms": "100199",
+      "accountCollateralAtoms": "0",
+      "collateralAttributedToHubAtoms": "0",
+      "collateralAttributedToUserAtoms": "0",
+      "hubNativeWei": "96691760000000",
+      "hubGasPaidWei": "3308240000000",
+      "bothAccountStatesMatchWALAndChain": true
+    }
+  ],
+  "onChain": [
+    {
+      "chainId": 11155111,
+      "readersAgree": true,
+      "latestJourneyReceipt": {
+        "hash": "0x8497828f10143fa0247ff6439cc951abf1221ddab900afa1204ea89e932368e4",
+        "blockNumber": 12170073
+      },
+      "point": {
+        "number": 12170098,
+        "hash": "0x047b434911fbe52e098344aa1d48ff3d4a61fabe25177e642e30ca8ac5b87249"
+      },
+      "hub": {
+        "signer": "0x02e42216729d4db2981b1b0d2780d97c7582a9f6",
+        "entity": "0x088c57a2803f70d7ee168cf5067e45a3c9a77bc8879e6b5f072e3ecc0d2245e7",
+        "reserveAtoms": "1",
+        "debtAtoms": "0",
+        "nativeWei": "1000000000000000",
+        "walletUsdcAtoms": "0",
+        "nonce": 0,
+        "pending": 0,
+        "entityNonce": "0"
+      },
+      "user": {
+        "signer": "0xa45408c58813bbd64b4fccbb2d45a479e05d3d05",
+        "entity": "0xa61dfde7f0db6d47fe3682f60c62c83262f7137f8af45ab2b0b7124a530d00d0",
+        "reserveAtoms": "0",
+        "debtAtoms": "0",
+        "nativeWei": "1999999987765933",
+        "walletUsdcAtoms": "0",
+        "nonce": 3,
+        "pending": 3,
+        "entityNonce": "2"
+      },
+      "account": {
+        "key": "0x088c57a2803f70d7ee168cf5067e45a3c9a77bc8879e6b5f072e3ecc0d2245e7a61dfde7f0db6d47fe3682f60c62c83262f7137f8af45ab2b0b7124a530d00d0",
+        "nonce": "0",
+        "disputeHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "collateralAtoms": "1000000",
+        "ondelta": "0"
+      }
+    },
+    {
+      "chainId": 421614,
+      "readersAgree": true,
+      "latestJourneyReceipt": {
+        "hash": "0x61e361c04a4a67d1fdcd2f2edd55d369c6619a3d5cdfe363d12de25fd467ff9a",
+        "blockNumber": 330810954
+      },
+      "point": {
+        "number": 330811894,
+        "hash": "0xe7cd2aabd624ea1dbac91755292112fdbbef80306c83068c7e8d16dd5bedf27a"
+      },
+      "hub": {
+        "signer": "0x661c2a253ff995d04fd8a602663ab829d4afb2a9",
+        "entity": "0xccf32e2712576c8684040614a5073fb1b26e6e6e705730037dddbf2a8b9c86d8",
+        "reserveAtoms": "100199",
+        "debtAtoms": "0",
+        "nativeWei": "96691760000000",
+        "walletUsdcAtoms": "0",
+        "nonce": 1,
+        "pending": 1,
+        "entityNonce": "1"
+      },
+      "user": {
+        "signer": "0xc610e84b42230a7294852f8f5d6cf2f6a181778a",
+        "entity": "0xa4905e36a64f8d297b6cc3651bfa2e761d362b913d5e9ecf71697d56eea2173f",
+        "reserveAtoms": "0",
+        "debtAtoms": "0",
+        "nativeWei": "93546531328000",
+        "walletUsdcAtoms": "899801",
+        "nonce": 1,
+        "pending": 1,
+        "entityNonce": "1"
+      },
+      "account": {
+        "key": "0xa4905e36a64f8d297b6cc3651bfa2e761d362b913d5e9ecf71697d56eea2173fccf32e2712576c8684040614a5073fb1b26e6e6e705730037dddbf2a8b9c86d8",
+        "nonce": "11",
+        "disputeHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "collateralAtoms": "0",
+        "ondelta": "-899801"
+      }
+    }
+  ],
+  "walReplay": {
+    "snapshots": [
+      {
+        "role": "hub",
+        "runtimeHeight": 108,
+        "verifiedHead": true,
+        "positions": [
+          {
+            "chainId": 11155111,
+            "entity": "0x088c57a2803f70d7ee168cf5067e45a3c9a77bc8879e6b5f072e3ecc0d2245e7",
+            "accountFrame": 6,
+            "accountStateHash": "0x640962ef144327bd238044b3aa84a7462fdf877f8c87150c16c2d6a1a7b07038",
+            "accountStateRoot": "0xd14e8c87d259e5882decb7e959d397b4e8f8afd3cfde63d9fe414be91c88142a",
+            "localFrameHankoDigest": "ceee9c5787ef2f0ae86c640158033f15e0c72ab91d46f454cc95a94fd6050692",
+            "peerFrameHankoDigest": "12e894384e6efa53d9a94f09311e8c3791381a634f725adfad736d11a0bd02a6",
+            "reserveAtoms": "1",
+            "collateralAtoms": "1000000",
+            "ondelta": "0",
+            "offdelta": "1000000",
+            "isLeft": true,
+            "outCollateralAtoms": "1000000",
+            "outPeerCreditAtoms": "0",
+            "jNonce": 0,
+            "pulls": 0,
+            "pendingFrame": false,
+            "settlementWorkspace": null
+          },
+          {
+            "chainId": 421614,
+            "entity": "0xccf32e2712576c8684040614a5073fb1b26e6e6e705730037dddbf2a8b9c86d8",
+            "accountFrame": 14,
+            "accountStateHash": "0x176153f3f1529922e9a6eaf1303988f86a7bd43a08b60cdaf73b7ea5e0be8989",
+            "accountStateRoot": "0x687ffe648a77ad64abb80cdad18b6e05960253b2e43be99fef8f0b81f98cd8ae",
+            "localFrameHankoDigest": "821a77714aca0d555cd6a978c9fe4925a369ea9d9ac708b9cd739f3b2e834335",
+            "peerFrameHankoDigest": "03ce804c8d51f83753993c1159d1d670e86db96dfa4b1357caf507f879bdc9da",
+            "reserveAtoms": "100199",
+            "collateralAtoms": "0",
+            "ondelta": "-899801",
+            "offdelta": "899801",
+            "isLeft": false,
+            "outCollateralAtoms": "0",
+            "outPeerCreditAtoms": "0",
+            "jNonce": 11,
+            "pulls": 0,
+            "pendingFrame": false,
+            "settlementWorkspace": null
+          }
+        ]
+      },
+      {
+        "role": "user",
+        "runtimeHeight": 52,
+        "verifiedHead": true,
+        "positions": [
+          {
+            "chainId": 11155111,
+            "entity": "0xa61dfde7f0db6d47fe3682f60c62c83262f7137f8af45ab2b0b7124a530d00d0",
+            "accountFrame": 6,
+            "accountStateHash": "0x640962ef144327bd238044b3aa84a7462fdf877f8c87150c16c2d6a1a7b07038",
+            "accountStateRoot": "0xd14e8c87d259e5882decb7e959d397b4e8f8afd3cfde63d9fe414be91c88142a",
+            "localFrameHankoDigest": "12e894384e6efa53d9a94f09311e8c3791381a634f725adfad736d11a0bd02a6",
+            "peerFrameHankoDigest": "ceee9c5787ef2f0ae86c640158033f15e0c72ab91d46f454cc95a94fd6050692",
+            "reserveAtoms": "0",
+            "collateralAtoms": "1000000",
+            "ondelta": "0",
+            "offdelta": "1000000",
+            "isLeft": false,
+            "outCollateralAtoms": "0",
+            "outPeerCreditAtoms": "0",
+            "jNonce": 0,
+            "pulls": 0,
+            "pendingFrame": false,
+            "settlementWorkspace": null
+          },
+          {
+            "chainId": 421614,
+            "entity": "0xa4905e36a64f8d297b6cc3651bfa2e761d362b913d5e9ecf71697d56eea2173f",
+            "accountFrame": 14,
+            "accountStateHash": "0x176153f3f1529922e9a6eaf1303988f86a7bd43a08b60cdaf73b7ea5e0be8989",
+            "accountStateRoot": "0x687ffe648a77ad64abb80cdad18b6e05960253b2e43be99fef8f0b81f98cd8ae",
+            "localFrameHankoDigest": "03ce804c8d51f83753993c1159d1d670e86db96dfa4b1357caf507f879bdc9da",
+            "peerFrameHankoDigest": "821a77714aca0d555cd6a978c9fe4925a369ea9d9ac708b9cd739f3b2e834335",
+            "reserveAtoms": "0",
+            "collateralAtoms": "0",
+            "ondelta": "-899801",
+            "offdelta": "899801",
+            "isLeft": true,
+            "outCollateralAtoms": "0",
+            "outPeerCreditAtoms": "0",
+            "jNonce": 11,
+            "pulls": 0,
+            "pendingFrame": false,
+            "settlementWorkspace": null
+          }
+        ]
+      }
+    ],
+    "matches": [
+      {
+        "chainId": 11155111,
+        "matchingAccountFrame": true,
+        "matchingHankos": true
+      },
+      {
+        "chainId": 421614,
+        "matchingAccountFrame": true,
+        "matchingHankos": true
+      }
+    ]
+  },
+  "publicTransactionSignatures": 0,
+  "publicTransactionBroadcasts": 0
+}

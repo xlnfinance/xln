@@ -1,0 +1,383 @@
+{
+  "status": "funded-reserves-restored-and-quote-observed",
+  "stand": ".logs/ts-usdc-cross-j-poc/demo/fresh-UbkYJm",
+  "candidateHead": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26",
+  "candidateDigest": "7c1dc0e7b67b7e79389845459ff95c673128c348320ac669dbd229cb19295fc4",
+  "fundingAuthoritySha256": "f7c4cedce67e0636da18055dbddf21ac3b11573427a73002339f8fc7ec40bcc5",
+  "startup": {
+    "startedAt": "2026-11-19T17:50:54.807Z",
+    "readOnly": true,
+    "readProfile": {
+      "ethereumPageBlocks": 95,
+      "ethereumReceiptBatchCalls": 96,
+      "arbitrumPageBlocks": 2047,
+      "arbitrumShortRangeMaxCalls": 32,
+      "arbitrumLongRanges": "HyperSync",
+      "arbitrumShortRanges": "PublicNode"
+    },
+    "session": ".logs/ts-usdc-cross-j-poc/demo/fresh-UbkYJm/sessions/restore-Kuj3bG",
+    "job": ".logs/ts-usdc-cross-j-poc/demo/fresh-UbkYJm/sessions/guarded-readiness-IkSVl7"
+  },
+  "quote": {
+    "committedOrders": 18,
+    "detail": {
+      "existingTargetCredit": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "expectedExternalPayout": {
+        "__xlnType": "BigInt",
+        "value": "899801"
+      },
+      "fee": {
+        "__xlnType": "BigInt",
+        "value": "100099"
+      },
+      "gross": {
+        "__xlnType": "BigInt",
+        "value": "999900"
+      },
+      "requiredTargetCredit": {
+        "__xlnType": "BigInt",
+        "value": "999900"
+      },
+      "requiresExactTargetCredit": true,
+      "reserveSupportsEstimatedCover": true,
+      "snapshot": {
+        "account": {
+          "height": 2,
+          "stateHash": "0x24d12af4c9e7870da9daa9f0df6df1def8f47d4d294be13b807a3395c45e28f1",
+          "view": {
+            "ascii": "[|--------------------------------------------------]",
+            "collateral": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "delta": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "inAllowance": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "inCapacity": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "inCollateral": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "inOwnCredit": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "inPeerCredit": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "inTotalHold": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "outAllowance": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "outCapacity": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "outCollateral": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "outOwnCredit": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "outPeerCredit": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "outTotalHold": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "ownCreditLimit": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "ownCreditUsed": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "peerCreditLimit": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "peerCreditUsed": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "totalCapacity": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            }
+          }
+        },
+        "activeDebts": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "block": {
+          "hash": "0x630fe579de1d07f56ec07dee60b3ecb48fcd46abc1c841003c4a12f2024d0839",
+          "number": 330806190
+        },
+        "collateral": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "depositoryTokens": {
+          "__xlnType": "BigInt",
+          "value": "6100199"
+        },
+        "hubActiveDebts": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "hubReserve": {
+          "__xlnType": "BigInt",
+          "value": "1000000"
+        },
+        "reserve": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "token": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        }
+      },
+      "sourceAccountOutCapacity": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "sourceAgreement": {
+        "height": 2,
+        "stateHash": "0xe1afbc4067475844787f159e655e41b3e5cb7c9d436e1cdd02449095bdeab40c",
+        "bothFrameHankosMatched": true
+      },
+      "sourceDepositStillRequired": true,
+      "targetAgreement": {
+        "height": 2,
+        "stateHash": "0x24d12af4c9e7870da9daa9f0df6df1def8f47d4d294be13b807a3395c45e28f1",
+        "bothFrameHankosMatched": true
+      },
+      "terms": {
+        "baseFee": {
+          "__xlnType": "BigInt",
+          "value": "100000"
+        },
+        "effectiveAt": 1795109049742,
+        "gasFee": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "liquidityFeeBps": {
+          "__xlnType": "BigInt",
+          "value": "1"
+        },
+        "noticePeriodSeconds": 2592000,
+        "policyVersion": 1,
+        "updatedAt": 1795109049742
+      }
+    },
+    "hubHealth": {
+      "ok": true,
+      "ready": true
+    },
+    "liveMatchingOrders": 9,
+    "mmHealth": {
+      "ok": true,
+      "phase": null,
+      "ready": true
+    },
+    "observedAt": "2026-11-19T17:52:47.835Z",
+    "offer": {
+      "expiresAt": 1795132800000,
+      "makerEntityId": "0x042fc0b44c77a8beb854384d27e8be4b3d1a64d97594f827aa15a9cf1385e990",
+      "orderId": "mmx-9c86d8-2245e7-1-1-20fc50aa49549c005d2d9a2fe39afb748c2f361b662cfe93e81281e611bcfe3e-sell-1",
+      "priceTicks": {
+        "__xlnType": "BigInt",
+        "value": "9999"
+      },
+      "remaining": {
+        "fillRatio": 0,
+        "filledSourceAmount": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "filledTargetAmount": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "sourceRemaining": {
+          "__xlnType": "BigInt",
+          "value": "10198980000"
+        },
+        "sourceTotal": {
+          "__xlnType": "BigInt",
+          "value": "10198980000"
+        },
+        "targetRemaining": {
+          "__xlnType": "BigInt",
+          "value": "10200000000"
+        },
+        "targetTotal": {
+          "__xlnType": "BigInt",
+          "value": "10200000000"
+        }
+      },
+      "routeHash": "0xbef508b022a761733298dd65318a70c672af1b0659a2a4fdde224d05169a9d73",
+      "sourcePull": {
+        "deadline": 1795132800,
+        "pullId": "0x2bd1f17223113a76c095e99fa8b9c19bb9cfa5d94d27c4cf14c28cf77149d566"
+      },
+      "targetPull": {
+        "deadline": 1795133033,
+        "pullId": "0x38eb49d886b731a87c4d7ab58cd7ed601b7b073240f8711721259df8be813d03"
+      }
+    },
+    "publicBroadcasts": 0,
+    "reserves": [
+      {
+        "amount": {
+          "__xlnType": "BigInt",
+          "value": "1"
+        },
+        "chainId": 11155111,
+        "depositBlock": 12169885,
+        "depositHash": "0x51db040a9ed93f864820b79d5a3ab83a5497344a844f89f358d6787bdbed86b5",
+        "entityHeight": 54,
+        "finalizedThroughHeight": 12169931,
+        "hubEntity": "0x088c57a2803f70d7ee168cf5067e45a3c9a77bc8879e6b5f072e3ecc0d2245e7"
+      },
+      {
+        "amount": {
+          "__xlnType": "BigInt",
+          "value": "1000000"
+        },
+        "chainId": 421614,
+        "depositBlock": 330804692,
+        "depositHash": "0x7381d25d1229a0c38daef5b3f4e1d07ce47261704b66dff3fd6d2d1c33f7316b",
+        "entityHeight": 61,
+        "finalizedThroughHeight": 330805896,
+        "hubEntity": "0xccf32e2712576c8684040614a5073fb1b26e6e6e705730037dddbf2a8b9c86d8"
+      }
+    ],
+    "sourcePrincipal": {
+      "__xlnType": "BigInt",
+      "value": "1000000"
+    }
+  },
+  "offerExpiryUtc": "2026-11-20T00:00:00+00:00",
+  "walIntegrity": [
+    {
+      "role": "hub",
+      "restoredFrame": 49,
+      "finalFrame": 56,
+      "integrity": {
+        "latestHeight": 56,
+        "checkedFrames": 56
+      },
+      "deposits": [
+        {
+          "chainId": 11155111,
+          "hubEntity": "0x088c57a2803f70d7ee168cf5067e45a3c9a77bc8879e6b5f072e3ecc0d2245e7",
+          "atoms": "1",
+          "hash": "0x51db040a9ed93f864820b79d5a3ab83a5497344a844f89f358d6787bdbed86b5",
+          "blockNumber": 12169885,
+          "blockHash": "0x120373c5879538097c041ea23376455157eb111e49eb0eca100950cf11d6af05",
+          "observedRuntimeFrame": 51,
+          "eventsHash": "0x4b8cddb9e60ead587000fdf98bf43b3eb55c5adbf20b5aac82ecedd6d8ffc755",
+          "eventLogIndex": 153
+        },
+        {
+          "chainId": 421614,
+          "hubEntity": "0xccf32e2712576c8684040614a5073fb1b26e6e6e705730037dddbf2a8b9c86d8",
+          "atoms": "1000000",
+          "hash": "0x7381d25d1229a0c38daef5b3f4e1d07ce47261704b66dff3fd6d2d1c33f7316b",
+          "blockNumber": 330804692,
+          "blockHash": "0xd169bee6d17fb3d6cdc62649123db5e7b7588743ac86a2d6716161b8a50ce058",
+          "observedRuntimeFrame": 53,
+          "eventsHash": "0x95acbf7055e5179da56dde3ebea88bbb180257894f232d244732f58a489791dd",
+          "eventLogIndex": 20
+        }
+      ],
+      "cursorWrites": {
+        "421614": 330805896,
+        "11155111": 12169931
+      }
+    },
+    {
+      "role": "mm",
+      "restoredFrame": 36,
+      "finalFrame": 42,
+      "integrity": {
+        "latestHeight": 42,
+        "checkedFrames": 42
+      },
+      "deposits": [],
+      "cursorWrites": {}
+    },
+    {
+      "role": "user",
+      "restoredFrame": 12,
+      "finalFrame": 12,
+      "integrity": {
+        "latestHeight": 12,
+        "checkedFrames": 12
+      },
+      "deposits": [],
+      "cursorWrites": {}
+    }
+  ],
+  "framesVerified": 110,
+  "hubReservesVerifiedAfterIndependentReplay": {
+    "bothReservesVerified": true,
+    "headVerified": true,
+    "rows": [
+      {
+        "chainId": 11155111,
+        "depositBlock": 12169885,
+        "depositHash": "0x51db040a9ed93f864820b79d5a3ab83a5497344a844f89f358d6787bdbed86b5",
+        "expectedReserveAtoms": "1",
+        "hubEntity": "0x088c57a2803f70d7ee168cf5067e45a3c9a77bc8879e6b5f072e3ecc0d2245e7",
+        "lastFinalizedJHeight": 12169931,
+        "reserveAtoms": "1"
+      },
+      {
+        "chainId": 421614,
+        "depositBlock": 330804692,
+        "depositHash": "0x7381d25d1229a0c38daef5b3f4e1d07ce47261704b66dff3fd6d2d1c33f7316b",
+        "expectedReserveAtoms": "1000000",
+        "hubEntity": "0xccf32e2712576c8684040614a5073fb1b26e6e6e705730037dddbf2a8b9c86d8",
+        "lastFinalizedJHeight": 330805896,
+        "reserveAtoms": "1000000"
+      }
+    ],
+    "runtimeFrame": 56
+  },
+  "shutdown": {
+    "observedAt": "2026-11-19T17:53:00.507Z",
+    "launcherExit": 1,
+    "firstFailure": "USDC_SESSION_FORCED_STOP:hub",
+    "ownedProcessesExited": true,
+    "listenersClosed": true,
+    "standReleased": true
+  },
+  "publicTransactionSignatures": 0,
+  "publicTransactionBroadcasts": 0
+}

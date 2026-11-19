@@ -1,0 +1,1323 @@
+{
+  "authority": {
+    "approved": false,
+    "candidateDigest": "d84d264559ae425aabd002145636f2a385c8128cc3d26a04902e524025d6429a",
+    "candidateHead": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26",
+    "catalogDigest": "a46f46e495c3085057c3eeed7d0d17b8ac595b9338d96440b4f124461852dbf1",
+    "chains": [
+      {
+        "anchorHash": "0x1a61fa381daf610ed17a60673058e0832fed1c003639cedeb93191b158d39a0d",
+        "anchorNumber": 12156109,
+        "chainId": 11155111,
+        "codeHashes": {
+          "0x175343fc9d198b31f493cafe2639fe6dcda59c77": "0x64ebb5db40c6deb7a16b733a30481752a3e64a51323fd51c41fa1c4b4b24eac5",
+          "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238": "0xcd3f29e2ea9c61dadd48bfeaf8b2884b6de9dfee7bf45329452c4c33d0868ceb",
+          "0x32a4a72992ad142e36fa1c5989b95fed60987818": "0xd56dbdedd8973d72780dd49bbe5b25d9cc6a2cf00d5182651b448d9782005a51",
+          "0x9c4173eed1dc7c24c5207a705382488c859588e3": "0xc0333495db29b94d20a25de1df465e4e4b95cd1981dacd9627dc83f03da84334",
+          "0xa2950f711292216419d0691b2aa17dd3ac947e35": "0x02413ad800e58e168089146dd8b10a7e36316bfbe35a201f1e6f02c12a2ed717",
+          "0xa8674d878bce007812beea6b131a80dde43ef4cf": "0x2b53ca548ebd0cb7cd1eca973f6857deea6203c12ea29e1f14f06fae5e117a9c"
+        },
+        "depository": "0x32A4A72992aD142E36fA1C5989b95FeD60987818",
+        "entityNonce": "2",
+        "entityProvider": "0x9C4173eed1DC7c24c5207A705382488c859588E3",
+        "funder": {
+          "address": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+          "firstNonce": 106
+        },
+        "funderEntity": "0xaaa77fe2366ac1c1bc54cdcee97e0e95afb7bd999720ea9858257c75fad9d88b",
+        "hubEntity": "0xd3a0d7b3939571af73af38d3cfb0f914f065e23e50daaf60fc80cd6fd52e70a8",
+        "hubSigner": "0x7fd492c67d1b1bab5ba3487e4246c8044db44598",
+        "limits": {
+          "amount": "1000000",
+          "calls": {
+            "approval": {
+              "gasLimit": "200000",
+              "maxFeePerGasWei": "1000000000",
+              "maxPriorityFeePerGasWei": "100000000"
+            },
+            "deposit": {
+              "gasLimit": "600000",
+              "maxFeePerGasWei": "1000000000",
+              "maxPriorityFeePerGasWei": "100000000"
+            },
+            "native-topup": {
+              "gasLimit": "300000",
+              "maxFeePerGasWei": "1000000000",
+              "maxPriorityFeePerGasWei": "100000000"
+            }
+          },
+          "chainId": 11155111,
+          "hubTopupWei": "1000000000000000",
+          "totalFeeLimitWei": "2000000000000000",
+          "totalNativeOutflowLimitWei": "3000000000000000"
+        },
+        "token": "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238"
+      },
+      {
+        "anchorHash": "0xccaa076e138ab20d7466eeb6ce21fe06ea711a922e118890f158b1a007af9531",
+        "anchorNumber": 330173685,
+        "chainId": 421614,
+        "codeHashes": {
+          "0x2b65518871ea15d5a1bc43218e3c95621b54ccec": "0xeffc7111141a0b22ada7a83fc538d312951a0538610aff119f7bb0376d938e7d",
+          "0x37a9bdc2f8736bb31ffefb778a70ba7d544ff103": "0x02413ad800e58e168089146dd8b10a7e36316bfbe35a201f1e6f02c12a2ed717",
+          "0x3dae23be54dab4e88b92d4e4c3db42f7d9ce0df9": "0x22fb345563a7b06d7dfb6ff95e8f56a6f678f6b59da6c926dd67e32c06c38b87",
+          "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d": "0x9a736af6aac290d9196883e8686fc1d127ff657ca534fe4b88d6d40dc0bc6750",
+          "0x8223aa4c60adb851f53a120c3d3841de9e77c188": "0x8474e986e82636c385f7ca9ef92c97e3d400ba862fa065eb51807b774ad9a72c",
+          "0xcb7053c91ea02890b3ca702caaaea69656dc3ccf": "0x64ebb5db40c6deb7a16b733a30481752a3e64a51323fd51c41fa1c4b4b24eac5"
+        },
+        "depository": "0x8223AA4c60Adb851f53a120c3D3841De9e77c188",
+        "entityNonce": "2",
+        "entityProvider": "0x3DaE23be54dAb4e88b92D4e4c3db42f7D9ce0Df9",
+        "funder": {
+          "address": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+          "firstNonce": 30
+        },
+        "funderEntity": "0xaaa77fe2366ac1c1bc54cdcee97e0e95afb7bd999720ea9858257c75fad9d88b",
+        "hubEntity": "0x0b669a275953ec4f68ebbf1ec6a0aedd7f2ae671ba527fcf745bde4df44c5447",
+        "hubSigner": "0x0b2fffb8b3e09bb3ea2d5ec2442cf055bdfdcdd2",
+        "limits": {
+          "amount": "5000000",
+          "calls": {
+            "approval": {
+              "gasLimit": "90000",
+              "maxFeePerGasWei": "100000000",
+              "maxPriorityFeePerGasWei": "0"
+            },
+            "deposit": {
+              "gasLimit": "600000",
+              "maxFeePerGasWei": "100000000",
+              "maxPriorityFeePerGasWei": "0"
+            },
+            "native-topup": {
+              "gasLimit": "300000",
+              "maxFeePerGasWei": "100000000",
+              "maxPriorityFeePerGasWei": "0"
+            }
+          },
+          "chainId": 421614,
+          "hubTopupWei": "100000000000000",
+          "totalFeeLimitWei": "200000000000000",
+          "totalNativeOutflowLimitWei": "300000000000000"
+        },
+        "token": "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d"
+      }
+    ],
+    "expiresAt": 1795025712831,
+    "operation": "operator-funding",
+    "version": 1
+  },
+  "authorityFile": "/Users/nick/Projects/xlnfinance/xln/.logs/ts-usdc-cross-j-poc/public/funding-2026-11-17T18-15-12-830Z/authority.json",
+  "authorityFileSha256": "2ecf73614081c6678ec6148d9c036b8a50cdae22e4adb71f84cfa68c753175fd",
+  "candidate": {
+    "branch": "testnets_deploy",
+    "digest": "d84d264559ae425aabd002145636f2a385c8128cc3d26a04902e524025d6429a",
+    "dirty": true,
+    "head": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26",
+    "sourceSha256": {
+      "bun.lock": "441409a6b92e7cae7bc3d9aad1885f20a6528eb7aa1bd0e18c7b34e47518feb9",
+      "core/__tests__/fixtures/usdc-poc/fault-funding.ts": "f1a8b140ae4e9edb1a0512fbf09dc7dbc8d685ce95cba028388f4646850b5f17",
+      "core/__tests__/fixtures/usdc-poc/fault-run.ts": "d47ef0dc2dfc79dba22e818e3b93cd127db610f669856aeab955aa1875c925b4",
+      "core/__tests__/fixtures/usdc-poc/fund-user.ts": "78e128467e7c4c5d5a712c4cb0803b669b64cbdac04bdb0dd3482dad7f2e8757",
+      "core/__tests__/jurisdiction/adapter/state-anchor/cold-import-chain-age.test.ts": "02d0a491c74c89582dc523830c388f6e44a89421b013e5717fa617f9dd7dc2e0",
+      "core/__tests__/jurisdiction/adapter/state-anchor/rpc-header-hash.test.ts": "86308db0f8d382ef7d75999f493f4f58ea3d87cc8cfff370cdf4c1b0cc727562",
+      "core/__tests__/market/invariants/market-maker-account-sharding.test.ts": "78f0b230ade0ee138505937578e55a43945fe4db4f6b30a7e57dde65c22a417c",
+      "core/__tests__/market/invariants/market-maker-health.test.ts": "55f474452fae1ad65eebfc5346c3fbf5b516d278a79afc9802cdf0e2c8cd319a",
+      "core/__tests__/market/startup/usdc-funded-restore.test.ts": "09c9f8c4a3960c785edc30449dc8adcda087c96b30f5401470ad700e8370ec52",
+      "core/__tests__/market/startup/usdc-only-bootstrap.test.ts": "237ec29c2a7f2cc603219fa3c0b537d7f7ba0c4b3cf1d9d59e799d7d32b08cce",
+      "core/__tests__/market/startup/usdc-operator-funding.test.ts": "821c417038e63bf44ca49ec703e4132f07bd7c127b31157ae131cfacdce683d6",
+      "core/__tests__/market/startup/usdc-public-journey.test.ts": "1ddea7ec760c6491e96c9a5ae252be73626c91f883f18e517282daf512ba254c",
+      "core/__tests__/market/startup/usdc-session/chain.ts": "10e03f53f0fe06c32088c5d15d0690433ffbfb8c04bed2c5b33125d71d6bc544",
+      "core/__tests__/market/startup/usdc-session/fixture.ts": "1795608658dbb90030d30f43cd70138c29bad55ed3a19b81b2acfe2e8c34b0d6",
+      "core/__tests__/market/startup/usdc-session/funding-limits.ts": "4aa723b0f101b6046d0e3451ab514efe44ce3216fe82c002962ef96bfd2a6920",
+      "core/__tests__/network/jurisdiction/usdc/execution-authority.test.ts": "660455fc833485d3e2e6c27b80ed18a79fec82616ec0d087b0bcc6e9813551d3",
+      "core/__tests__/network/jurisdiction/usdc/funding-authority.test.ts": "39e93cffaf66e5f9b451a963683ddd9a9c2ddefabe31a51994a955cb0bf2d227",
+      "core/__tests__/network/jurisdiction/usdc/usdc-cross-j-preflight.test.ts": "d83f58c4d4a2565f2633d52e4d792aacc4adc809bb23c44716069f5ba7d8fdf2",
+      "core/__tests__/operations/hlt/evidence/entity-summary-boundary.test.ts": "5b7c7b9a449eb2aafce21383e2a6a80c47b9e38c0151d51a6a359cdca7f59ab7",
+      "core/__tests__/orchestrator/topology/mesh-jurisdictions.test.ts": "a0d366117819e506f27fd3f00e20a36c0af809be88ea5b396e5c926648614dfa",
+      "core/jurisdiction/adapter/kernel/jurisdiction-loader.ts": "27c16e3f3c9e77cbb7f6dcd1c0a4ec717313e0bd3fe38858fb4b9f6cc7e291e2",
+      "core/jurisdiction/adapter/rpc/state-anchor/rpc-header-hash.ts": "c376c55df6f302b73a70920909ab5fb877e1ad55a49970f312bf5f8f30913939",
+      "core/jurisdiction/adapter/rpc/watcher/rpc-watcher-poll.ts": "295f218a051b44c3d5cb80f4727c4cfdfd8ca500e13b90596a644dde189a5eb8",
+      "core/network/relay/standalone-server.ts": "0cb50a9eaafef65fb1fd40ef084a6f744cf5ae513bfce323968a7e3b9e454a6e",
+      "core/orchestrator/hub-node.ts": "e1cc6f1e6c8b27f868eee3e50296618a4f294ec086bb627e0b0cc6e4376c085c",
+      "core/orchestrator/hub/node/token-catalog.ts": "d29e9bd3fa28a72e2fc65ac5401e14897edf8251c2a1de2975f5f8c689ce897b",
+      "core/orchestrator/market-maker/identity-resolver.ts": "3b6998309ad9ed12417529a1645f49f5eef90dcfe07ecce041bcd7fe0953b0d3",
+      "core/orchestrator/market-maker/node/mm-node-core.ts": "6833ab906156ee0831504911b871606b0bf79feb2dd7f197d417efbbebccfd81",
+      "core/orchestrator/market-maker/node/mm-node-health.ts": "7b0679b818a8bfc4de21b473bfa29953fe930663faf9c4c4dd86e1dc4c06a837",
+      "core/orchestrator/market-maker/node/mm-node-run.ts": "09b9657ce40fb87f2ef240c019357496f25a418aad81be61367c94b117693948",
+      "core/orchestrator/mesh/mesh-common.ts": "16a26782029f06a7e21a7112fdc06af1e7d23d0893dda0d7840a9c8ff4073e7d",
+      "core/orchestrator/mesh/mesh-jurisdictions.ts": "be939e7e46a818214fe14cb513caf62eb7f6b8daf4993c448b1f054c8fdfdd6f",
+      "core/orchestrator/orchestrator.ts": "c3862a97a1169dc55211fb5617c0fe45ec2b8b16ea436be809b008a760ee857b",
+      "core/runtime/replica/bootstrap.ts": "aeead0d65601edd0c689513a20994f1e769c5e2ea2674034b4b10b44aa7969c6",
+      "core/scenarios/usdc-poc/cross-swap.ts": "f0b526e2998e325cec49d1e1d53fe4cf9c39204f2aa10ba29a0ff4de6a5271be",
+      "core/scenarios/usdc-poc/evidence.ts": "e034d5af9fea9617c92a2ad0f63a55302d958305a1ef53f641cac6b4d1192548",
+      "core/scenarios/usdc-poc/external-payout.ts": "bd8dfc87a03661a6287c461132c35aa8ac5b54ca021c45c37f555f1ec5ee4969",
+      "core/scenarios/usdc-poc/hub-proof.ts": "4cfbfa6974bbb9f9d94a021398bea34dd5e1e660164305615ba3ba36003041c3",
+      "core/scenarios/usdc-poc/journey/context.ts": "babc3d1b3d8d717c4050f306672dcf85b6accaef6b68cdd36ccbbaec5d069c2c",
+      "core/scenarios/usdc-poc/journey/ingress.ts": "f93125b69d7026fad2c6b16338243282eb2812a4ea397b5202c1897598c75807",
+      "core/scenarios/usdc-poc/journey/local-funding.ts": "54b076b6e1de60d8d4a6b15d50d67d0cac0fcb58755fe265b4e1a795ed681e50",
+      "core/scenarios/usdc-poc/recovery-run.ts": "b0b46694a61d311783b832fa573773f5150439c1c9bad150f7003fb6667e5ad0",
+      "core/scenarios/usdc-poc/recovery/clear.ts": "9b55222aac6486a36e299641df959bb062441c187f76375fd1037c869d01ecc7",
+      "core/scenarios/usdc-poc/recovery/duplicate.ts": "260aef0a31a8a095d6fde956717cbb322d4176fb1650f9c8e12c4c355f88f353",
+      "core/scenarios/usdc-poc/recovery/evidence.ts": "1eb5279b4c4652cd7c5ee690fe7dab24e8a93372f6f52ce47b610b43e1b437c7",
+      "core/scenarios/usdc-poc/recovery/interrupt.ts": "3d99a5edb650b9c1f372a521a9fdd86f9603fec02273d08ffc019cf3177bebde",
+      "core/scenarios/usdc-poc/recovery/ledger.ts": "6be4b06fb14dc872d9a58965e6b952a6d79137ae4b6d8e0178fc7f87156fb434",
+      "core/scenarios/usdc-poc/recovery/liquidity.ts": "d3a4a6668d58903fa3e7b6ea828e745c1fdf898fd80273ff712472a88135cc46",
+      "core/scenarios/usdc-poc/recovery/partial-run.ts": "8b83bde606083cb32a3b5c0585ae801f29976a51f052f1cac326559e717755bf",
+      "core/scenarios/usdc-poc/recovery/payout.ts": "8ca316faf3e67f0379e9134bb93bbfb7f6961d14b92bd473b91c1630b287c4b7",
+      "core/scenarios/usdc-poc/recovery/resume.ts": "787874a5cc624f0c9261ff240f7926cb79a24b13e8c1c8229b9be87b75d8abad",
+      "core/scenarios/usdc-poc/recovery/run.ts": "f5a394ab9fcc57d907949216492e36727648429052c2e50d108da8a01ab9c240",
+      "core/scenarios/usdc-poc/source-funding.ts": "2e22012e17211aa8c14d69b21e949135b7d26299f475221e5d6071b6070dccc9",
+      "core/scenarios/usdc-poc/source-journey.ts": "ab299a6e3545c4597e566a3c993dea3bae64909b9c6fe8c4dfc05051bd7aba3d",
+      "core/scenarios/usdc-poc/target-evidence.ts": "ec4745934bea0fd4d714d9d7c0d8e418643128625ef571d3e58e3d1bf3a9369b",
+      "core/scenarios/usdc-poc/user.ts": "dcbf0bc305a23e47a137a6722245ce9f7fbc860fbd3df44a16ab5973a2debe22",
+      "core/scripts/operations/hlt/boundary/worker-boundary.ts": "1a5c7377eb11e62aa9704a3a66cceab56443c354cf3f085cdfa8eb2a7f691435",
+      "core/scripts/operations/production/local-prod-smoke.ts": "15063f228edc06c4d9d3af6ce81067bae63aea9dcb03921d9c38170fabd91512",
+      "frozen-core.json": "6cb53e910579f69349fed482488bf82fa616fa2546b163a79ae8a452bba00e9e",
+      "jurisdictions/scripts/usdc-cross-j-preflight/budget.ts": "15797228222482ba16bb19a5a3f1b4dec3f53b04dfb3eb9bc101fd8391819184",
+      "jurisdictions/scripts/usdc-cross-j-preflight/catalog.ts": "e7e2bac69c98351b7c246d9d543588836810cd11aa1da6980d16c71e8a9f75a6",
+      "jurisdictions/scripts/usdc-cross-j-preflight/chain.ts": "531ece6e17064c477b84e819f87b5edb65d6747e23e4df48c1887b146c44740f",
+      "jurisdictions/scripts/usdc-cross-j-preflight/execution/authority.ts": "74da30a38c4dc5f1b0da4f325a254dc7ed22860ab3700342313c5e5d5c01ac8a",
+      "jurisdictions/scripts/usdc-cross-j-preflight/execution/boundary.ts": "736231cf50ec702e60f965a8fab4f493bd056ac9f0e1cf27b76d308e526d7c19",
+      "jurisdictions/scripts/usdc-cross-j-preflight/execution/calls.ts": "855ab7aa4859e2dafd7f5370f10ca73b603a4c6464466368ca65c2eb566d7371",
+      "jurisdictions/scripts/usdc-cross-j-preflight/execution/config.ts": "bc9dce2204e68b3a969d6a448a0051af6c906a18b01b7218f0b7442ee88ca65d",
+      "jurisdictions/scripts/usdc-cross-j-preflight/execution/flow/approval.ts": "80a395a60bb5157a74f7e364eb88475c6a9540d544d7b7adb5a4093d218a0cd9",
+      "jurisdictions/scripts/usdc-cross-j-preflight/execution/flow/receipt-report.ts": "e7051f44a647c12b9b62687d4e26a37fa6371071a5ab9fbc7ed1589040d0fdee",
+      "jurisdictions/scripts/usdc-cross-j-preflight/execution/flow/run.ts": "6e56791161b1934566225605740a69ea6a5a05c0bdbac001c6fa295e30c1f751",
+      "jurisdictions/scripts/usdc-cross-j-preflight/execution/index.ts": "25a1c66d6ba089cba401f4f120d67fc8f5fd8ccf75151139363d547ba8ed3c90",
+      "jurisdictions/scripts/usdc-cross-j-preflight/execution/nonce-receipt.ts": "bacefeef3fe9e7f2b94372a77bb80e4b0e92eb657a194c1a33a6ddb010170e0d",
+      "jurisdictions/scripts/usdc-cross-j-preflight/execution/prepare.ts": "18a1555341d241fb5392532aa794fbe86c7b8054fff5ccbe455e97a7c1968ab8",
+      "jurisdictions/scripts/usdc-cross-j-preflight/execution/providers.ts": "ba1e40734415b5340688ed5f102e8a2fd2178521957161135b7f926b956b34d6",
+      "jurisdictions/scripts/usdc-cross-j-preflight/execution/submission.ts": "6ed8f2a109b0e7a45ccdb857bdb6ba66cc882099402529934a44a17b029e221e",
+      "jurisdictions/scripts/usdc-cross-j-preflight/funding/authority.ts": "73245530b587811330993c7a9d3298ea1acd10e3960ab5dda4c5013d921110d4",
+      "jurisdictions/scripts/usdc-cross-j-preflight/funding/config.ts": "167571f9a6a1ea20770198121181e3303ed5fbe67edbbbbb3dd33501256d7517",
+      "jurisdictions/scripts/usdc-cross-j-preflight/funding/index.ts": "42cd44829937ff35b151799f2bb0f60eb28df2e0fb3eb04ddf699ce4b6e67264",
+      "jurisdictions/scripts/usdc-cross-j-preflight/funding/ledger.ts": "a08d76d17a40d9b470a109a467527fc65d21da6ba90bf90750bbb05b36d3ae9c",
+      "jurisdictions/scripts/usdc-cross-j-preflight/funding/prepare.ts": "0d54721613403b6aba777230c1a3b0025e1bf620a871d491c5fbec8b065c04ff",
+      "jurisdictions/scripts/usdc-cross-j-preflight/funding/providers.ts": "a2ede636d0a42f6ca306754518104caffeeef992dc03c4a68ed98e194569cabd",
+      "jurisdictions/scripts/usdc-cross-j-preflight/funding/run.ts": "e54bd77cd2bd2de21a408412c1c5a773b518a242113133164b40f42d91f0672f",
+      "jurisdictions/scripts/usdc-cross-j-preflight/funding/wires.ts": "86f54339b907fafc5e7fdcf02d300ecb24dc5396f4aba88db21f1115984de0ce",
+      "jurisdictions/scripts/usdc-cross-j-preflight/gas.ts": "41ec8e2596f822f41975c44c7026d9721b680b3b442448c283e873313027adaf",
+      "jurisdictions/scripts/usdc-cross-j-preflight/identities.ts": "bb02cb31c8a026c657f8ffd1f4003ccc96dbed15aa68ca5d0e95269beadabf62",
+      "jurisdictions/scripts/usdc-cross-j-preflight/index.ts": "691bae56799aa50746abaa086e61d11db8ee2cb90784aacddfaefd083a09c54f",
+      "jurisdictions/scripts/usdc-cross-j-preflight/operators/gateway.ts": "c43c5b09bee2a21d0aa7c71232240287982be5813090f7b6ab209745a33a3fe9",
+      "jurisdictions/scripts/usdc-cross-j-preflight/operators/local-operators.ts": "f201ce5f3addaf67e4322e40e2d5104c45aaebbbe6a25705591a07d09ff66217",
+      "jurisdictions/scripts/usdc-cross-j-preflight/operators/observations.ts": "861cfdf8877a15e45b815679211120ffa714df62990a19477eb24f333fd64698",
+      "jurisdictions/scripts/usdc-cross-j-preflight/operators/session/config.ts": "f8a5e4da814dd34f458c10f28ea47f2e39196b04318df076fa6f72fcfd341e47",
+      "jurisdictions/scripts/usdc-cross-j-preflight/operators/session/index.ts": "f4db37ed21181eeb245a63c812590508d3d39d11fd678f92ab6ae2b6a412ac06",
+      "jurisdictions/scripts/usdc-cross-j-preflight/operators/session/inspect.ts": "f1b4651de769fff6dac1bfc98ca42bed7168ca4a99ab41b0261ac0bb983a8bc7",
+      "jurisdictions/scripts/usdc-cross-j-preflight/operators/session/processes.ts": "e64dc67fdcf534b0175f1e4112037861a7f4d975be6f34545c3d62a4d0bec26b",
+      "jurisdictions/scripts/usdc-cross-j-preflight/operators/session/stores.ts": "cd1d4b9101ef7d5788e0131f316e27e6aa0f2b44098f2e247ed8c220538e36a7",
+      "jurisdictions/scripts/usdc-cross-j-preflight/operators/session/user.ts": "5697079bd0bb735c15e53df3a9ed74bd6213281b955712169dd1fa1b26a8febd",
+      "jurisdictions/scripts/usdc-cross-j-preflight/operators/transport.ts": "44f9da18541b93e4949cfa4683baaf5fd7cd8c4ea221f24550bdc1148c856ded",
+      "jurisdictions/scripts/usdc-cross-j-preflight/provider.ts": "a69fa38410ce382e8b60047104f89ce2da4b7a65f9051f143e7cfd73d3fb8c48",
+      "package.json": "5ffe3eaedc9473bbf345eb434744ca28b2cc2f3524cf6315347b09ff78f08a00",
+      "tsconfig.deployment.json": "9f134b1b9111d84a00e49492ada584cc86a58890e3bd6473ca08df36ed526ece",
+      "tsconfig.json": "f2508040b4d49ef9d6f1c7c2e20e65ba19d5217c194c4a6357cf38e5892c3f68",
+      "tsconfig.runtime.json": "a1ce13da63c927d0c5d821e76849c123d1d17e6c31aeeeb81fc253f3b5866403"
+    }
+  },
+  "fundingScope": {
+    "automaticNewNonceRetriesOrCancellations": false,
+    "cumulativeFeeLimitWei": {
+      "421614": "200000000000000",
+      "11155111": "2000000000000000"
+    },
+    "funder": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+    "hubNativeTopupWei": {
+      "421614": "100000000000000",
+      "11155111": "1000000000000000"
+    },
+    "maximumNativeOutflowWei": {
+      "421614": "300000000000000",
+      "11155111": "3000000000000000"
+    },
+    "mmUsdcFundingIncluded": false,
+    "operatorCapitalAtomic": {
+      "421614": "5000000",
+      "11155111": "1000000"
+    },
+    "userFundingIncluded": false
+  },
+  "limitsFile": "/Users/nick/Projects/xlnfinance/xln/.logs/ts-usdc-cross-j-poc/public/funding-2026-11-17T18-15-12-830Z/limits.json",
+  "limitsFileSha256": "0866c3fde78c20ac0e89027e1500a9b77a66d4db70cbdc540ed4361fb1cb1f20",
+  "observedAt": "2026-11-17T18:17:07.387Z",
+  "operations": [
+    {
+      "calls": [
+        {
+          "chainId": 11155111,
+          "data": "0x095ea7b300000000000000000000000032a4a72992ad142e36fa1c5989b95fed6098781800000000000000000000000000000000000000000000000000000000000f4240",
+          "from": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+          "gasLimit": "200000",
+          "maxFeePerGasWei": "1000000000",
+          "maxPriorityFeePerGasWei": "100000000",
+          "nonce": 106,
+          "stage": "approval",
+          "to": "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
+          "type": 2,
+          "valueWei": "0"
+        },
+        {
+          "amount": {
+            "__xlnType": "BigInt",
+            "value": "1000000"
+          },
+          "batch": {
+            "collateralToReserve": [],
+            "counterDisputes": [],
+            "disputeFinalizations": [],
+            "disputeStarts": [],
+            "externalTokenToReserve": [
+              {
+                "amount": {
+                  "__xlnType": "BigInt",
+                  "value": "1000000"
+                },
+                "contractAddress": "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
+                "entity": "0xd3a0d7b3939571af73af38d3cfb0f914f065e23e50daaf60fc80cd6fd52e70a8",
+                "externalTokenId": {
+                  "__xlnType": "BigInt",
+                  "value": "0"
+                },
+                "internalTokenId": 1,
+                "tokenType": 0
+              }
+            ],
+            "hashLadderRegistrations": [],
+            "reserveToCollateral": [],
+            "reserveToExternalToken": [],
+            "reserveToReserve": [],
+            "revealSecrets": [],
+            "settlements": []
+          },
+          "chainId": 11155111,
+          "encodedBatch": "0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000160000000000000000000000000000000000000000000000000000000000000018000000000000000000000000000000000000000000000000000000000000001a000000000000000000000000000000000000000000000000000000000000001c000000000000000000000000000000000000000000000000000000000000001e000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000220000000000000000000000000000000000000000000000000000000000000024000000000000000000000000000000000000000000000000000000000000003200000000000000000000000000000000000000000000000000000000000000340000000000000000000000000000000000000000000000000000000000000036000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001d3a0d7b3939571af73af38d3cfb0f914f065e23e50daaf60fc80cd6fd52e70a80000000000000000000000001c7d4b196cb0c7b01d743fbc6116a902379c723800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+          "from": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+          "fullCalldataStatus": "Requires approved Hanko; none created or signed.",
+          "gasLimit": "600000",
+          "hankoDigest": "0x01ec7991f182c1c37516ecccf3bcce249e25fea10b86261f28f64f611b9f11b2",
+          "internalTokenId": 1,
+          "maxFeePerGasWei": "1000000000",
+          "maxPriorityFeePerGasWei": "100000000",
+          "nonce": 107,
+          "recipientEntity": "0xd3a0d7b3939571af73af38d3cfb0f914f065e23e50daaf60fc80cd6fd52e70a8",
+          "stage": "deposit",
+          "to": "0x32a4a72992ad142e36fa1c5989b95fed60987818",
+          "token": "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
+          "type": 2,
+          "valueWei": "0"
+        },
+        {
+          "chainId": 11155111,
+          "data": "0x",
+          "from": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+          "gasLimit": "300000",
+          "maxFeePerGasWei": "1000000000",
+          "maxPriorityFeePerGasWei": "100000000",
+          "nonce": 108,
+          "stage": "native-topup",
+          "to": "0x7fd492c67d1b1bab5ba3487e4246c8044db44598",
+          "type": 2,
+          "valueWei": {
+            "__xlnType": "BigInt",
+            "value": "1000000000000000"
+          }
+        }
+      ],
+      "chainId": 11155111,
+      "funderEntity": "0xaaa77fe2366ac1c1bc54cdcee97e0e95afb7bd999720ea9858257c75fad9d88b",
+      "limits": {
+        "amount": {
+          "__xlnType": "BigInt",
+          "value": "1000000"
+        },
+        "calls": {
+          "approval": {
+            "gasLimit": {
+              "__xlnType": "BigInt",
+              "value": "200000"
+            },
+            "maxFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "1000000000"
+            },
+            "maxPriorityFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "100000000"
+            }
+          },
+          "deposit": {
+            "gasLimit": {
+              "__xlnType": "BigInt",
+              "value": "600000"
+            },
+            "maxFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "1000000000"
+            },
+            "maxPriorityFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "100000000"
+            }
+          },
+          "native-topup": {
+            "gasLimit": {
+              "__xlnType": "BigInt",
+              "value": "300000"
+            },
+            "maxFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "1000000000"
+            },
+            "maxPriorityFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "100000000"
+            }
+          }
+        },
+        "chainId": 11155111,
+        "hubTopupWei": {
+          "__xlnType": "BigInt",
+          "value": "1000000000000000"
+        },
+        "totalFeeLimitWei": {
+          "__xlnType": "BigInt",
+          "value": "2000000000000000"
+        },
+        "totalNativeOutflowLimitWei": {
+          "__xlnType": "BigInt",
+          "value": "3000000000000000"
+        }
+      },
+      "nextFundingEntityNonce": {
+        "__xlnType": "BigInt",
+        "value": "3"
+      },
+      "oldFundingEntityNonce": {
+        "__xlnType": "BigInt",
+        "value": "2"
+      },
+      "worstCaseThreeCallFeesWei": {
+        "__xlnType": "BigInt",
+        "value": "1100000000000000"
+      }
+    },
+    {
+      "calls": [
+        {
+          "chainId": 421614,
+          "data": "0x095ea7b30000000000000000000000008223aa4c60adb851f53a120c3d3841de9e77c18800000000000000000000000000000000000000000000000000000000004c4b40",
+          "from": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+          "gasLimit": "90000",
+          "maxFeePerGasWei": "100000000",
+          "maxPriorityFeePerGasWei": "0",
+          "nonce": 30,
+          "stage": "approval",
+          "to": "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d",
+          "type": 2,
+          "valueWei": "0"
+        },
+        {
+          "amount": {
+            "__xlnType": "BigInt",
+            "value": "5000000"
+          },
+          "batch": {
+            "collateralToReserve": [],
+            "counterDisputes": [],
+            "disputeFinalizations": [],
+            "disputeStarts": [],
+            "externalTokenToReserve": [
+              {
+                "amount": {
+                  "__xlnType": "BigInt",
+                  "value": "5000000"
+                },
+                "contractAddress": "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d",
+                "entity": "0x0b669a275953ec4f68ebbf1ec6a0aedd7f2ae671ba527fcf745bde4df44c5447",
+                "externalTokenId": {
+                  "__xlnType": "BigInt",
+                  "value": "0"
+                },
+                "internalTokenId": 1,
+                "tokenType": 0
+              }
+            ],
+            "hashLadderRegistrations": [],
+            "reserveToCollateral": [],
+            "reserveToExternalToken": [],
+            "reserveToReserve": [],
+            "revealSecrets": [],
+            "settlements": []
+          },
+          "chainId": 421614,
+          "encodedBatch": "0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000160000000000000000000000000000000000000000000000000000000000000018000000000000000000000000000000000000000000000000000000000000001a000000000000000000000000000000000000000000000000000000000000001c000000000000000000000000000000000000000000000000000000000000001e0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000002200000000000000000000000000000000000000000000000000000000000000240000000000000000000000000000000000000000000000000000000000000032000000000000000000000000000000000000000000000000000000000000003400000000000000000000000000000000000000000000000000000000000000360000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010b669a275953ec4f68ebbf1ec6a0aedd7f2ae671ba527fcf745bde4df44c544700000000000000000000000075faf114eafb1bdbe2f0316df893fd58ce46aa4d00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000004c4b40000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+          "from": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+          "fullCalldataStatus": "Requires approved Hanko; none created or signed.",
+          "gasLimit": "600000",
+          "hankoDigest": "0xabe34f908cb8450188423552d3ea802d8e8b9a6623420fccbde09e2ddfab48e0",
+          "internalTokenId": 1,
+          "maxFeePerGasWei": "100000000",
+          "maxPriorityFeePerGasWei": "0",
+          "nonce": 31,
+          "recipientEntity": "0x0b669a275953ec4f68ebbf1ec6a0aedd7f2ae671ba527fcf745bde4df44c5447",
+          "stage": "deposit",
+          "to": "0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+          "token": "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d",
+          "type": 2,
+          "valueWei": "0"
+        },
+        {
+          "chainId": 421614,
+          "data": "0x",
+          "from": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+          "gasLimit": "300000",
+          "maxFeePerGasWei": "100000000",
+          "maxPriorityFeePerGasWei": "0",
+          "nonce": 32,
+          "stage": "native-topup",
+          "to": "0x0b2fffb8b3e09bb3ea2d5ec2442cf055bdfdcdd2",
+          "type": 2,
+          "valueWei": {
+            "__xlnType": "BigInt",
+            "value": "100000000000000"
+          }
+        }
+      ],
+      "chainId": 421614,
+      "funderEntity": "0xaaa77fe2366ac1c1bc54cdcee97e0e95afb7bd999720ea9858257c75fad9d88b",
+      "limits": {
+        "amount": {
+          "__xlnType": "BigInt",
+          "value": "5000000"
+        },
+        "calls": {
+          "approval": {
+            "gasLimit": {
+              "__xlnType": "BigInt",
+              "value": "90000"
+            },
+            "maxFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "100000000"
+            },
+            "maxPriorityFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            }
+          },
+          "deposit": {
+            "gasLimit": {
+              "__xlnType": "BigInt",
+              "value": "600000"
+            },
+            "maxFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "100000000"
+            },
+            "maxPriorityFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            }
+          },
+          "native-topup": {
+            "gasLimit": {
+              "__xlnType": "BigInt",
+              "value": "300000"
+            },
+            "maxFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "100000000"
+            },
+            "maxPriorityFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            }
+          }
+        },
+        "chainId": 421614,
+        "hubTopupWei": {
+          "__xlnType": "BigInt",
+          "value": "100000000000000"
+        },
+        "totalFeeLimitWei": {
+          "__xlnType": "BigInt",
+          "value": "200000000000000"
+        },
+        "totalNativeOutflowLimitWei": {
+          "__xlnType": "BigInt",
+          "value": "300000000000000"
+        }
+      },
+      "nextFundingEntityNonce": {
+        "__xlnType": "BigInt",
+        "value": "3"
+      },
+      "oldFundingEntityNonce": {
+        "__xlnType": "BigInt",
+        "value": "2"
+      },
+      "worstCaseThreeCallFeesWei": {
+        "__xlnType": "BigInt",
+        "value": "99000000000000"
+      }
+    }
+  ],
+  "preparation": {
+    "logSha256": "621fa94b1b83aaa179d58e892d7533e69d48c5f602bb18e1de00654857a4e029",
+    "observations": [
+      {
+        "chainId": 11155111,
+        "funderNativeWei": {
+          "__xlnType": "BigInt",
+          "value": "41202999650295764930"
+        },
+        "funderUsdc": {
+          "__xlnType": "BigInt",
+          "value": "9000000"
+        },
+        "gas": {
+          "approval": {
+            "__xlnType": "BigInt",
+            "value": "140018"
+          },
+          "deposit": {
+            "gasLimit": {
+              "__xlnType": "BigInt",
+              "value": "600000"
+            },
+            "reason": "Exact authorized Hanko and confirmed allowance are required before deposit estimation.",
+            "status": "conditional-cap"
+          },
+          "native-topup": {
+            "__xlnType": "BigInt",
+            "value": "207391"
+          }
+        },
+        "point": {
+          "hash": "0x1a61fa381daf610ed17a60673058e0832fed1c003639cedeb93191b158d39a0d",
+          "number": 12156109
+        }
+      },
+      {
+        "chainId": 421614,
+        "funderNativeWei": {
+          "__xlnType": "BigInt",
+          "value": "528569400505305600"
+        },
+        "funderUsdc": {
+          "__xlnType": "BigInt",
+          "value": "20000000"
+        },
+        "gas": {
+          "approval": {
+            "__xlnType": "BigInt",
+            "value": "56240"
+          },
+          "deposit": {
+            "gasLimit": {
+              "__xlnType": "BigInt",
+              "value": "600000"
+            },
+            "reason": "Exact authorized Hanko and confirmed allowance are required before deposit estimation.",
+            "status": "conditional-cap"
+          },
+          "native-topup": {
+            "__xlnType": "BigInt",
+            "value": "21000"
+          }
+        },
+        "point": {
+          "hash": "0xccaa076e138ab20d7466eeb6ce21fe06ea711a922e118890f158b1a007af9531",
+          "number": 330173685
+        }
+      }
+    ],
+    "status": "prepared-unapproved"
+  },
+  "publicEthereumTransactionsSigned": 0,
+  "publicFinancialBroadcasts": 0,
+  "publicHankosCreated": 0,
+  "publicReadOnlyVerification": {
+    "candidateDigest": "d84d264559ae425aabd002145636f2a385c8128cc3d26a04902e524025d6429a",
+    "candidateHead": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26",
+    "chains": [
+      {
+        "balances": [
+          {
+            "chainId": 11155111,
+            "debt": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "entityId": "0xcfcdd2d155d6ee85d446d49045cb444a78df66b89a18c84959665a040671dae2",
+            "entityNonce": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "eoaNonce": 0,
+            "name": "Ethereum Sepolia",
+            "nativeWei": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "reserve": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "role": "user",
+            "signerId": "0x61ff4c022bcc7d342d0d68a7b85f18e0fd7d9446",
+            "signerIndex": 0,
+            "token": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            }
+          },
+          {
+            "chainId": 11155111,
+            "debt": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "entityId": "0xd3a0d7b3939571af73af38d3cfb0f914f065e23e50daaf60fc80cd6fd52e70a8",
+            "entityNonce": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "eoaNonce": 0,
+            "name": "Ethereum Sepolia",
+            "nativeWei": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "reserve": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "role": "hub",
+            "signerId": "0x7fd492c67d1b1bab5ba3487e4246c8044db44598",
+            "signerLabel": "1",
+            "token": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            }
+          },
+          {
+            "chainId": 11155111,
+            "debt": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "entityId": "0xb17188fb0c15ab321f651a0d2c0996d480828a9deea24dfc26e87a1435f664ef",
+            "entityNonce": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "eoaNonce": 0,
+            "name": "Ethereum Sepolia",
+            "nativeWei": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "reserve": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "role": "mm",
+            "signerId": "0xcc26bfec25957d476e4a116fecb206ab9198d196",
+            "signerLabel": "1",
+            "token": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            }
+          }
+        ],
+        "calls": [
+          {
+            "amount": {
+              "__xlnType": "BigInt",
+              "value": "1000000"
+            },
+            "call": {
+              "data": "0x095ea7b300000000000000000000000032a4a72992ad142e36fa1c5989b95fed6098781800000000000000000000000000000000000000000000000000000000000f4240",
+              "from": "0x42Da3Ba8c586F6fe9eF6ed1d09423eB73E4fe25b",
+              "to": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
+            },
+            "estimate": {
+              "gas": {
+                "__xlnType": "BigInt",
+                "value": "140018"
+              },
+              "status": "estimated"
+            },
+            "payer": "0x42Da3Ba8c586F6fe9eF6ed1d09423eB73E4fe25b",
+            "stage": "operator-hub-reserve-approval"
+          },
+          {
+            "amount": {
+              "__xlnType": "BigInt",
+              "value": "1000000"
+            },
+            "call": {
+              "data": "0xa9059cbb00000000000000000000000061ff4c022bcc7d342d0d68a7b85f18e0fd7d944600000000000000000000000000000000000000000000000000000000000f4240",
+              "from": "0x42Da3Ba8c586F6fe9eF6ed1d09423eB73E4fe25b",
+              "to": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
+            },
+            "estimate": {
+              "gas": {
+                "__xlnType": "BigInt",
+                "value": "154151"
+              },
+              "status": "estimated"
+            },
+            "payer": "0x42Da3Ba8c586F6fe9eF6ed1d09423eB73E4fe25b",
+            "stage": "user-source-token-funding"
+          },
+          {
+            "amount": {
+              "__xlnType": "BigInt",
+              "value": "1000000"
+            },
+            "call": {
+              "data": "0x095ea7b300000000000000000000000032a4a72992ad142e36fa1c5989b95fed6098781800000000000000000000000000000000000000000000000000000000000f4240",
+              "from": "0x61ff4c022bcc7d342d0d68a7b85f18e0fd7d9446",
+              "to": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
+            },
+            "estimate": {
+              "gas": {
+                "__xlnType": "BigInt",
+                "value": "140018"
+              },
+              "status": "estimated"
+            },
+            "payer": "0x61ff4c022bcc7d342d0d68a7b85f18e0fd7d9446",
+            "stage": "user-source-approval"
+          }
+        ],
+        "chainId": 11155111,
+        "code": [
+          {
+            "address": "0xA8674D878Bce007812BEEa6b131a80dDe43Ef4cf",
+            "hash": "0x2b53ca548ebd0cb7cd1eca973f6857deea6203c12ea29e1f14f06fae5e117a9c",
+            "role": "account"
+          },
+          {
+            "address": "0x7606F9b616134D14b7F7F20EdaE2704ee2626fA6",
+            "hash": "0xd732a6cb16babb1956e4991f5c57779665e9d4a99fb84fa16993a72e136e553d",
+            "role": "depositoryBounds"
+          },
+          {
+            "address": "0x6A5443BC89499C89DfE71B10e4D2BEc21f6783E4",
+            "hash": "0xaa99b5181d3b1483b79c29fb2ff42630edaff747122de095198cb41b39676e90",
+            "role": "hashLadderRegistry"
+          },
+          {
+            "address": "0x0e68277dbD3525a1d34289c2E05cF61A0fb9cDA0",
+            "hash": "0xad6aa303d522f834e64ef27d623b4372d79d10cd28e976bf848ae8df85755ecd",
+            "role": "nftCustody"
+          },
+          {
+            "address": "0xa2950f711292216419d0691b2AA17DD3AC947e35",
+            "hash": "0x02413ad800e58e168089146dd8b10a7e36316bfbe35a201f1e6f02c12a2ed717",
+            "role": "hankoVerifier"
+          },
+          {
+            "address": "0x9C4173eed1DC7c24c5207A705382488c859588E3",
+            "hash": "0xc0333495db29b94d20a25de1df465e4e4b95cd1981dacd9627dc83f03da84334",
+            "role": "entityProvider"
+          },
+          {
+            "address": "0x32A4A72992aD142E36fA1C5989b95FeD60987818",
+            "hash": "0xd56dbdedd8973d72780dd49bbe5b25d9cc6a2cf00d5182651b448d9782005a51",
+            "role": "depository"
+          },
+          {
+            "address": "0x175343Fc9d198b31F493cAfe2639FE6dcda59C77",
+            "hash": "0x64ebb5db40c6deb7a16b733a30481752a3e64a51323fd51c41fa1c4b4b24eac5",
+            "role": "deltaTransformer"
+          }
+        ],
+        "deployment": {
+          "chainId": 11155111,
+          "contracts": {
+            "account": "0xA8674D878Bce007812BEEa6b131a80dDe43Ef4cf",
+            "deltaTransformer": "0x175343Fc9d198b31F493cAfe2639FE6dcda59C77",
+            "depository": "0x32A4A72992aD142E36fA1C5989b95FeD60987818",
+            "depositoryBounds": "0x7606F9b616134D14b7F7F20EdaE2704ee2626fA6",
+            "entityProvider": "0x9C4173eed1DC7c24c5207A705382488c859588E3",
+            "hankoVerifier": "0xa2950f711292216419d0691b2AA17DD3AC947e35",
+            "hashLadderRegistry": "0x6A5443BC89499C89DfE71B10e4D2BEc21f6783E4",
+            "nftCustody": "0x0e68277dbD3525a1d34289c2E05cF61A0fb9cDA0"
+          },
+          "deployer": "0x42Da3Ba8c586F6fe9eF6ed1d09423eB73E4fe25b",
+          "deploymentId": "eth-sepolia-ignition-01",
+          "entityProviderDeploymentBlock": 12128807,
+          "evmContracts": {
+            "account": {
+              "address": "0xA8674D878Bce007812BEEa6b131a80dDe43Ef4cf",
+              "deploymentBlock": 12128805,
+              "transactionHash": "0xbc1c6ec656cc5cb3ebc6e8181ca214f9224a98864ed447dfbc730644fb569ebb"
+            },
+            "deltaTransformer": {
+              "address": "0x175343Fc9d198b31F493cAfe2639FE6dcda59C77",
+              "deploymentBlock": 12128808,
+              "transactionHash": "0xec8e7046882923b442524886a4e46ea37ca34f18fd23984a8fddd87599ecded2"
+            },
+            "deltaTransformerBinding": {
+              "blockNumber": 12128814,
+              "transactionHash": "0xda00c49b070e476ee7412b989e9c66376b2fcc9a782166747f6510376ee8d212"
+            },
+            "depository": {
+              "address": "0x32A4A72992aD142E36fA1C5989b95FeD60987818",
+              "deploymentBlock": 12128813,
+              "transactionHash": "0x21ff30b56bd7510ae0e13d438f3029bf7fa9a68afb20549c01f478f281788161"
+            },
+            "depositoryBounds": {
+              "address": "0x7606F9b616134D14b7F7F20EdaE2704ee2626fA6",
+              "deploymentBlock": 12128810,
+              "transactionHash": "0x65cdf343594f4c63f446e6b6569b0fc99cb332d8765262a380bb1c9325e10b80"
+            },
+            "entityProvider": {
+              "address": "0x9C4173eed1DC7c24c5207A705382488c859588E3",
+              "deploymentBlock": 12128807,
+              "transactionHash": "0x95f88c5359bf761e450fd01b80adddd72cf00b0521251e717c8cf51d5817564c"
+            },
+            "hankoVerifier": {
+              "address": "0xa2950f711292216419d0691b2AA17DD3AC947e35",
+              "deploymentBlock": 12128806,
+              "transactionHash": "0xee05ec7de6ed09a2d2d6c2f33b4993445bb2d26343e269e028e6ac6a9bd1c0b5"
+            },
+            "hashLadderRegistry": {
+              "address": "0x6A5443BC89499C89DfE71B10e4D2BEc21f6783E4",
+              "deploymentBlock": 12128811,
+              "transactionHash": "0x95cae3aef0ab3ef77e7cce5bee14a78c42f8f841dfa16427fd6323109644e5c8"
+            },
+            "nftCustody": {
+              "address": "0x0e68277dbD3525a1d34289c2E05cF61A0fb9cDA0",
+              "deploymentBlock": 12128812,
+              "transactionHash": "0x028df178d3d553abf46da0c0df535c52eb111ff9d28cda3a41579cee51e5ee20"
+            },
+            "shareDepositoryBinding": {
+              "blockNumber": 12128815,
+              "transactionHash": "0x4c3eec2fc128fc46d00f69c3ba19aa36a319c8087c6d13f14b3bc596c20dfa7b"
+            },
+            "stablecoinRegistration": {
+              "blockNumber": 12128816,
+              "transactionHash": "0xfcdc65dd188f9b2dd40f10a3d0ec3439b1a3da170919bdada1acca53dcde6491"
+            }
+          },
+          "foundationRecipient": "0x42Da3Ba8c586F6fe9eF6ed1d09423eB73E4fe25b",
+          "network": "ethereum-sepolia",
+          "registeredTokens": {
+            "USDC": {
+              "address": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+              "decimals": 6,
+              "tokenId": 1
+            }
+          },
+          "stackVersion": "V1"
+        },
+        "funding": {
+          "address": "0x42Da3Ba8c586F6fe9eF6ed1d09423eB73E4fe25b",
+          "eoaNonce": 106,
+          "nativeWei": {
+            "__xlnType": "BigInt",
+            "value": "41202999650295764930"
+          },
+          "pendingNonce": 106,
+          "token": {
+            "__xlnType": "BigInt",
+            "value": "9000000"
+          }
+        },
+        "gasPriceWei": {
+          "__xlnType": "BigInt",
+          "value": "17"
+        },
+        "name": "Ethereum Sepolia",
+        "point": {
+          "hash": "0x50576ba0e557cc1bbb19a10295c2e89211c5c5cc58fda9beb5dab49faa70177e",
+          "number": 12156102
+        },
+        "rpc": {
+          "archiveFingerprint": "92eca84d3029d9e3b8330990d4463178eb8ac68b2dd77f1e9989b22c8c80f5e3",
+          "archivePoint": {
+            "hash": "0x64c45ee279b736dfc4a176849d7ff471dcd12112f1c0826e0a0484a5bccb4aa4",
+            "number": 12156100
+          },
+          "runtimeFingerprint": "92eca84d3029d9e3b8330990d4463178eb8ac68b2dd77f1e9989b22c8c80f5e3",
+          "separateExplicitRoles": false
+        },
+        "verified": {
+          "bindings": true,
+          "confirmations": 12,
+          "currentArtifacts": true,
+          "inputDigests": {
+            "journal": "f07e933d2f6d1eb8a295cdee5729288850632607bb2804ccb2d469135dbf13ac",
+            "manifest": "acab7cc6e564c6ccf359729b50e0c46d62f5d636e426b771025f22c39f44c871",
+            "seal": "110e98794abb70e3f0178c1fc9d0f5ff3edd9b66ad76435745e3864b5d91ca9f"
+          },
+          "sealedArtifacts": true
+        }
+      },
+      {
+        "balances": [
+          {
+            "chainId": 421614,
+            "debt": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "entityId": "0x01c743c9d2139446cf0d331676f122a042450522c26d8f09ce2b5a5b35add42a",
+            "entityNonce": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "eoaNonce": 0,
+            "name": "Arbitrum Sepolia",
+            "nativeWei": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "reserve": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "role": "user",
+            "signerId": "0xb77348f8f01e060934024fefc319c66653df6fa2",
+            "signerIndex": 650934,
+            "token": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            }
+          },
+          {
+            "chainId": 421614,
+            "debt": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "entityId": "0x0b669a275953ec4f68ebbf1ec6a0aedd7f2ae671ba527fcf745bde4df44c5447",
+            "entityNonce": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "eoaNonce": 0,
+            "name": "Arbitrum Sepolia",
+            "nativeWei": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "reserve": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "role": "hub",
+            "signerId": "0x0b2fffb8b3e09bb3ea2d5ec2442cf055bdfdcdd2",
+            "signerLabel": "1:Arbitrum Sepolia",
+            "token": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            }
+          },
+          {
+            "chainId": 421614,
+            "debt": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "entityId": "0x81ea586f4c4214a13cd4b081f5c4465db29f22c1b67c6589ad64ee3799ef5583",
+            "entityNonce": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "eoaNonce": 0,
+            "name": "Arbitrum Sepolia",
+            "nativeWei": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "reserve": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "role": "mm",
+            "signerId": "0x00d44b29953dfa094058eaa31440338c899bef37",
+            "signerLabel": "1:Arbitrum Sepolia",
+            "token": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            }
+          }
+        ],
+        "calls": [
+          {
+            "amount": {
+              "__xlnType": "BigInt",
+              "value": "1000000"
+            },
+            "call": {
+              "data": "0x095ea7b30000000000000000000000008223aa4c60adb851f53a120c3d3841de9e77c18800000000000000000000000000000000000000000000000000000000000f4240",
+              "from": "0x42Da3Ba8c586F6fe9eF6ed1d09423eB73E4fe25b",
+              "to": "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d"
+            },
+            "estimate": {
+              "gas": {
+                "__xlnType": "BigInt",
+                "value": "56240"
+              },
+              "nitro": {
+                "baseFeeWei": "20010000",
+                "l1BaseFeeEstimateWei": "0",
+                "l1Gas": "0",
+                "l1IncludedInTotal": true,
+                "totalGas": "56240"
+              },
+              "status": "estimated"
+            },
+            "payer": "0x42Da3Ba8c586F6fe9eF6ed1d09423eB73E4fe25b",
+            "stage": "operator-hub-reserve-approval"
+          }
+        ],
+        "chainId": 421614,
+        "code": [
+          {
+            "address": "0x2b65518871Ea15D5a1Bc43218E3c95621B54CCeC",
+            "hash": "0xeffc7111141a0b22ada7a83fc538d312951a0538610aff119f7bb0376d938e7d",
+            "role": "account"
+          },
+          {
+            "address": "0x211e38be77aB5A8B1E7Da60C0928d5AB8AE496ec",
+            "hash": "0xd732a6cb16babb1956e4991f5c57779665e9d4a99fb84fa16993a72e136e553d",
+            "role": "depositoryBounds"
+          },
+          {
+            "address": "0x689b1eE6A63D986cc6Adca13dD6191505b8C4b4e",
+            "hash": "0x798ab10ff7e0fe721746e18b77a0851137056e099184b9cc56de334641a06f4f",
+            "role": "hashLadderRegistry"
+          },
+          {
+            "address": "0x58Aa6aa5aF5D34BA11116E0C0Fb9b468DE11F0f7",
+            "hash": "0xa6316b08ebab712e45df6060fba251f846dfbe6803f96113d24d2dccbc794b01",
+            "role": "nftCustody"
+          },
+          {
+            "address": "0x37A9bdC2f8736Bb31fFEFB778A70ba7D544Ff103",
+            "hash": "0x02413ad800e58e168089146dd8b10a7e36316bfbe35a201f1e6f02c12a2ed717",
+            "role": "hankoVerifier"
+          },
+          {
+            "address": "0x3DaE23be54dAb4e88b92D4e4c3db42f7D9ce0Df9",
+            "hash": "0x22fb345563a7b06d7dfb6ff95e8f56a6f678f6b59da6c926dd67e32c06c38b87",
+            "role": "entityProvider"
+          },
+          {
+            "address": "0x8223AA4c60Adb851f53a120c3D3841De9e77c188",
+            "hash": "0x8474e986e82636c385f7ca9ef92c97e3d400ba862fa065eb51807b774ad9a72c",
+            "role": "depository"
+          },
+          {
+            "address": "0xcb7053C91eA02890b3CA702CaaaEA69656Dc3CcF",
+            "hash": "0x64ebb5db40c6deb7a16b733a30481752a3e64a51323fd51c41fa1c4b4b24eac5",
+            "role": "deltaTransformer"
+          }
+        ],
+        "deployment": {
+          "chainId": 421614,
+          "contracts": {
+            "account": "0x2b65518871Ea15D5a1Bc43218E3c95621B54CCeC",
+            "deltaTransformer": "0xcb7053C91eA02890b3CA702CaaaEA69656Dc3CcF",
+            "depository": "0x8223AA4c60Adb851f53a120c3D3841De9e77c188",
+            "depositoryBounds": "0x211e38be77aB5A8B1E7Da60C0928d5AB8AE496ec",
+            "entityProvider": "0x3DaE23be54dAb4e88b92D4e4c3db42f7D9ce0Df9",
+            "hankoVerifier": "0x37A9bdC2f8736Bb31fFEFB778A70ba7D544Ff103",
+            "hashLadderRegistry": "0x689b1eE6A63D986cc6Adca13dD6191505b8C4b4e",
+            "nftCustody": "0x58Aa6aa5aF5D34BA11116E0C0Fb9b468DE11F0f7"
+          },
+          "deployer": "0x42Da3Ba8c586F6fe9eF6ed1d09423eB73E4fe25b",
+          "deploymentId": "arb-sepolia-ignition-01",
+          "entityProviderDeploymentBlock": 328950104,
+          "evmContracts": {
+            "account": {
+              "address": "0x2b65518871Ea15D5a1Bc43218E3c95621B54CCeC",
+              "deploymentBlock": 328950088,
+              "transactionHash": "0x44c7dd2682ea43cbbdc7789a18fc934545db384da10c3bc171a09e941d1c3b75"
+            },
+            "deltaTransformer": {
+              "address": "0xcb7053C91eA02890b3CA702CaaaEA69656Dc3CcF",
+              "deploymentBlock": 328950116,
+              "transactionHash": "0x5889754e462064f74259e66915bc4ab36000ec59ae31ed19f865c03286909f6d"
+            },
+            "deltaTransformerBinding": {
+              "blockNumber": 328950156,
+              "transactionHash": "0x6bf0aba5e6d08385300dc2256d543f5fbdc1ed71b53f4c4c094495019968b88b"
+            },
+            "depository": {
+              "address": "0x8223AA4c60Adb851f53a120c3D3841De9e77c188",
+              "deploymentBlock": 328950146,
+              "transactionHash": "0xa95608070232d1dc074222f510c70dd4299510f4f3615f26d880ccf329f93c72"
+            },
+            "depositoryBounds": {
+              "address": "0x211e38be77aB5A8B1E7Da60C0928d5AB8AE496ec",
+              "deploymentBlock": 328950121,
+              "transactionHash": "0x55be114c6f08c7ebe34fff32894cd0058f776a367d55384ea6e22d51a2b7cde4"
+            },
+            "entityProvider": {
+              "address": "0x3DaE23be54dAb4e88b92D4e4c3db42f7D9ce0Df9",
+              "deploymentBlock": 328950104,
+              "transactionHash": "0x4e33e08e7794286b478902a50121a88ac2f1a0a31c4192535bf5ed51881ee28c"
+            },
+            "hankoVerifier": {
+              "address": "0x37A9bdC2f8736Bb31fFEFB778A70ba7D544Ff103",
+              "deploymentBlock": 328950096,
+              "transactionHash": "0xdeecb71cd001c8fc0444590ab194dace6d4bf3450158e3f63840ff8b92cabdd5"
+            },
+            "hashLadderRegistry": {
+              "address": "0x689b1eE6A63D986cc6Adca13dD6191505b8C4b4e",
+              "deploymentBlock": 328950129,
+              "transactionHash": "0x6e3676f84877d43d5928b506236bd3251bcaefe8b7f791fbea4e1ab2b87a9504"
+            },
+            "nftCustody": {
+              "address": "0x58Aa6aa5aF5D34BA11116E0C0Fb9b468DE11F0f7",
+              "deploymentBlock": 328950137,
+              "transactionHash": "0xdab2a81c2a44ac557e8154e57e1895892b7709a657648ff8d975edf5b498c0a9"
+            },
+            "shareDepositoryBinding": {
+              "blockNumber": 328950165,
+              "transactionHash": "0x64ee1c723b14ab0374b42ee6ac4435d0f03f1afbf95b908e496e72f78088ef4a"
+            },
+            "stablecoinRegistration": {
+              "blockNumber": 328950178,
+              "transactionHash": "0x584325e01529d2232a1b0771a27da4dfc60a415d4cad9a096f684cda1d56fe15"
+            }
+          },
+          "foundationRecipient": "0x42Da3Ba8c586F6fe9eF6ed1d09423eB73E4fe25b",
+          "network": "arbitrum-sepolia",
+          "registeredTokens": {
+            "USDC": {
+              "address": "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d",
+              "decimals": 6,
+              "tokenId": 1
+            }
+          },
+          "stackVersion": "V1"
+        },
+        "funding": {
+          "address": "0x42Da3Ba8c586F6fe9eF6ed1d09423eB73E4fe25b",
+          "eoaNonce": 30,
+          "nativeWei": {
+            "__xlnType": "BigInt",
+            "value": "528569400505305600"
+          },
+          "pendingNonce": 30,
+          "token": {
+            "__xlnType": "BigInt",
+            "value": "20000000"
+          }
+        },
+        "gasPriceWei": {
+          "__xlnType": "BigInt",
+          "value": "20000000"
+        },
+        "name": "Arbitrum Sepolia",
+        "point": {
+          "hash": "0xf2600cf7c85a892d44c3fa10d2e84f2f412fb17cf7ed8cf07bd20a11b0393288",
+          "number": 330173506
+        },
+        "rpc": {
+          "archiveFingerprint": "17d81ad60c2be3ff9ce4bec3563dd1104a82df8c7883ebd70ffd0b4e30515a4b",
+          "archivePoint": {
+            "hash": "0x714b637f53bbd63cf1ab48c2340aff6a1e12d7a3cc65e25c734b8250dc4659c0",
+            "number": 330173415
+          },
+          "runtimeFingerprint": "2905786cf5364719a0186fa2573377b737954c925ee9af61c56a07d19771f940",
+          "separateExplicitRoles": true
+        },
+        "verified": {
+          "bindings": true,
+          "confirmations": 12,
+          "currentArtifacts": true,
+          "inputDigests": {
+            "journal": "be2e3fcc0cf65047f5f9ffcd54a7c875e1a4db8958f4721dfba60a507dab9636",
+            "manifest": "1ffabe5266b835982a96c1c346393d5655b89dc8231e570ebf95c4fac1564a83",
+            "seal": "22d89912251c1b3985fb0a6a85f6f525e84104e72d250732d19ff5685eaa43b4"
+          },
+          "sealedArtifacts": true
+        }
+      }
+    ],
+    "ethereumTransactionsSigned": 0,
+    "identities": [
+      {
+        "chains": [
+          {
+            "chainId": 11155111,
+            "entityId": "0xcfcdd2d155d6ee85d446d49045cb444a78df66b89a18c84959665a040671dae2",
+            "name": "Ethereum Sepolia",
+            "signerId": "0x61ff4c022bcc7d342d0d68a7b85f18e0fd7d9446",
+            "signerIndex": 0
+          },
+          {
+            "chainId": 421614,
+            "entityId": "0x01c743c9d2139446cf0d331676f122a042450522c26d8f09ce2b5a5b35add42a",
+            "name": "Arbitrum Sepolia",
+            "signerId": "0xb77348f8f01e060934024fefc319c66653df6fa2",
+            "signerIndex": 650934
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "chains": [
+          {
+            "chainId": 11155111,
+            "entityId": "0xd3a0d7b3939571af73af38d3cfb0f914f065e23e50daaf60fc80cd6fd52e70a8",
+            "name": "Ethereum Sepolia",
+            "signerId": "0x7fd492c67d1b1bab5ba3487e4246c8044db44598",
+            "signerLabel": "1"
+          },
+          {
+            "chainId": 421614,
+            "entityId": "0x0b669a275953ec4f68ebbf1ec6a0aedd7f2ae671ba527fcf745bde4df44c5447",
+            "name": "Arbitrum Sepolia",
+            "signerId": "0x0b2fffb8b3e09bb3ea2d5ec2442cf055bdfdcdd2",
+            "signerLabel": "1:Arbitrum Sepolia"
+          }
+        ],
+        "role": "hub"
+      },
+      {
+        "chains": [
+          {
+            "chainId": 11155111,
+            "entityId": "0xb17188fb0c15ab321f651a0d2c0996d480828a9deea24dfc26e87a1435f664ef",
+            "name": "Ethereum Sepolia",
+            "signerId": "0xcc26bfec25957d476e4a116fecb206ab9198d196",
+            "signerLabel": "1"
+          },
+          {
+            "chainId": 421614,
+            "entityId": "0x81ea586f4c4214a13cd4b081f5c4465db29f22c1b67c6589ad64ee3799ef5583",
+            "name": "Arbitrum Sepolia",
+            "signerId": "0x00d44b29953dfa094058eaa31440338c899bef37",
+            "signerLabel": "1:Arbitrum Sepolia"
+          }
+        ],
+        "role": "mm"
+      }
+    ],
+    "observedAt": "2026-11-17T18:14:48.757Z",
+    "publicFinancialBroadcasts": 0
+  },
+  "remainingRequirements": [
+    "Explicit owner approval of this candidate, six exact operations, payer/recipients, token amounts and native fee/value limits.",
+    "Revalidate current bindings, anchor, nonce domains, balances and authority immediately before execution.",
+    "Estimate each exact E2R after authorized signing and confirmed allowance; stop before deposit broadcast above the proposed 600000 gas cap.",
+    "Retain all six canonical receipts at depth 12 and actual fee/balance reconciliation.",
+    "Restore the original Hub/MM Runtime stores and commit authenticated J observations; chain receipts alone do not close 11.",
+    "Ticket 05 must still prepare complete five-run quote, credit, gas and recovery obligations; this packet does not authorize any user journey."
+  ],
+  "status": "prepared-unapproved",
+  "supersedes": "The older operator-capital-plan.json funding snapshot for this implemented candidate; economic projections and credit exposure remain separate unchanged planning inputs.",
+  "ticket": "11"
+}

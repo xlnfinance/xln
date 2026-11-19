@@ -1,0 +1,41 @@
+{
+  "scope": "Private Anvil gateway authorization and recovery for a single source C2R",
+  "candidateHead": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26",
+  "candidateDigest": "7c1dc0e7b67b7e79389845459ff95c673128c348320ac669dbd229cb19295fc4",
+  "publicBroadcasts": 0,
+  "chainId": 11155111,
+  "anchorNumber": 16,
+  "receipt": {
+    "transactionHash": "0x145ce95e75f994a5f5a2107f30e88b16759624a0512fd4775f71c38e2177354a",
+    "status": 1,
+    "payerNonceBefore": 1,
+    "payerNonceAfter": 2,
+    "hubBatchNonce": "2",
+    "accountNonce": 8,
+    "collateralAtoms": ["1000000", "0"],
+    "sourceHubReserveAtoms": ["1", "1000001"],
+    "sourceUserReserveAfterAtoms": "0",
+    "targetHubReserveAtoms": ["1000000", "1000000"]
+  },
+  "recovery": {
+    "duplicatePendingHashIdentical": true,
+    "replacementWhilePendingRejected": true,
+    "sameReceiptAfterGatewayRestart": true,
+    "replacementAfterMiningRejected": true,
+    "nextNonceRejected": true
+  },
+  "verification": {
+    "focused": {
+      "files": 3,
+      "pass": 17,
+      "fail": 0,
+      "assertions": 125,
+      "ordinaryJourneyPayouts": 5
+    },
+    "deploymentTypeScript": "pass",
+    "fullCheck": "pass",
+    "shortGates": 3,
+    "sourceGates": 38,
+    "soundcheckGates": 10
+  }
+}

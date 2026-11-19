@@ -1,0 +1,70 @@
+{
+  "ticket": "12",
+  "status": "hub-catch-up-stalled",
+  "startedAt": "2026-11-17T20:44:02.293Z",
+  "observedAt": "2026-11-17T20:45:28.507Z",
+  "candidateHead": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26",
+  "candidateDigest": "feb3cafb91c0a8ef1579892e873423e1ff163ae9c5a91a2baa20cbe4f359b824",
+  "dirty": true,
+  "originalHubStore": ".logs/ts-usdc-cross-j-poc/public/hub/attempt-1794864456845",
+  "sessionDirectory": ".logs/ts-usdc-cross-j-poc/public/sessions/restore-x5vWlC",
+  "mode": "hub-only",
+  "gateway": "managed read-only",
+  "startupTimeoutMs": 120000,
+  "standTimeoutMs": 180000,
+  "sessionElapsedMs": 85905,
+  "sessionExitCode": 1,
+  "sessionError": "USDC_SESSION_CHILD_EXIT:hub:1:null",
+  "watcherError": "J_WATCHER_DRAIN_STALLED",
+  "watcherStallTimeoutMs": 60000,
+  "watcherIdleAtDetectionMs": 80229.67275,
+  "queuedJInputsAtStall": 0,
+  "hubDeliveryReady": false,
+  "mmLaunched": false,
+  "userLaunched": false,
+  "additionalFinancialBroadcasts": 0,
+  "standReleased": true,
+  "chains": [
+    {
+      "chainId": 11155111,
+      "headerHost": "ethereum-sepolia-rpc.publicnode.com",
+      "headerFingerprint": "18dddd47c8f4b183a5b2322a292c534f78b4c31ed168fbbc1af18f41767f3899",
+      "historyFingerprint": "92eca84d3029d9e3b8330990d4463178eb8ac68b2dd77f1e9989b22c8c80f5e3",
+      "initialHeadProbe": 12156843,
+      "committedBefore": 12149976,
+      "committedAtStall": 12149976,
+      "authenticatedThroughAtStall": 0,
+      "lastRetryFromBlock": 12149977,
+      "lastRetryToBlock": 12150834,
+      "upstreamHttp429LogEntries": 16
+    },
+    {
+      "chainId": 421614,
+      "headerHost": "arbitrum-sepolia-rpc.publicnode.com",
+      "headerFingerprint": "b290f0154fffbfcf92b01e44993e5a79d9bfecf955f77a79566ee001e4e172c0",
+      "historyFingerprint": "17d81ad60c2be3ff9ce4bec3563dd1104a82df8c7883ebd70ffd0b4e30515a4b",
+      "initialHeadProbe": 330206397,
+      "committedBefore": 329895132,
+      "committedAtStall": 329895132,
+      "authenticatedThroughAtStall": 0,
+      "restoredLocalScanThrough": 329895386,
+      "lastRetryFromBlock": 329895133,
+      "lastRetryToBlock": 329896155,
+      "upstreamHttp429LogEntries": 14
+    }
+  ],
+  "hubWal": {
+    "restoredRuntimeHeight": 42,
+    "latestRuntimeHeightAfterStop": 43,
+    "newFrames": [{ "height": 43, "runtimeTxs": ["importJ"], "entityTxs": [], "runtimeOutputCount": 0 }]
+  },
+  "localValidation": {
+    "fundedRestorePasses": 1,
+    "fundedRestoreAssertions": 43,
+    "preflightPasses": 7,
+    "preflightAssertions": 61,
+    "deploymentTypecheck": "pass",
+    "aggregateCheck": { "shortGates": 3, "sourceGates": 38, "soundcheckGates": 10 }
+  },
+  "limitsOfInference": "The initial head probes are not captured watcher targets. The zero authenticated frontier is the session's unadvanced scan marker. Upstream 429 and 5-second client timeouts were both observed during receipt-range header reads. Queue wait and upstream service time were not measured separately, so the run does not identify the contribution of stale queued work or a sustainable scan rate."
+}

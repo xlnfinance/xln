@@ -1,0 +1,60 @@
+{
+  "address": "0x3dae23be54dab4e88b92d4e4c3db42f7d9ce0df9",
+  "blockNumber": 329895119,
+  "chainId": 421614,
+  "financialBroadcasts": 0,
+  "method": "eth_getProof",
+  "observedAt": "2026-11-17T18:41:18.367Z",
+  "providerFingerprints": {
+    "archive": "17d81ad60c2be3ff9ce4bec3563dd1104a82df8c7883ebd70ffd0b4e30515a4b",
+    "runtime": "2905786cf5364719a0186fa2573377b737954c925ee9af61c56a07d19771f940"
+  },
+  "results": [
+    {
+      "point": {
+        "hash": "0x7c048e049035829ee8b6c8e8830eeae4076aa3ae017644f969ce7c596b890ca3",
+        "number": 329895119,
+        "stateRoot": "0xb853a3b3173f3c173731e201d7088597a9e9cae79ae3f49206043bedae0ed187"
+      },
+      "proof": {
+        "account": {
+          "balance": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "codeHash": "0x22fb345563a7b06d7dfb6ff95e8f56a6f678f6b59da6c926dd67e32c06c38b87",
+          "nonce": {
+            "__xlnType": "BigInt",
+            "value": "1"
+          },
+          "storageRoot": "0xe414a05ad47e3ef3d5d7e084b707bb49ce422fa806e5d6d878d95fc4e328c66a"
+        },
+        "storage": {
+          "__xlnType": "Map",
+          "value": [
+            [
+              {
+                "__xlnType": "BigInt",
+                "value": "4"
+              },
+              {
+                "__xlnType": "BigInt",
+                "value": "2"
+              }
+            ]
+          ]
+        }
+      },
+      "role": "archive",
+      "status": "verified"
+    },
+    {
+      "error": "could not coalesce error (error={ \"code\": -32000, \"message\": \"historical state b853a3b3173f3c173731e201d7088597a9e9cae79ae3f49206043bedae0ed187 is not available\" }, payload={ \"id\": 4, \"json[REDACTED_RPC_CREDENTIAL]\": \"2.0\", \"method\": \"eth_getProof\", \"params\": [ \"0x3dae23be54dab4e88b92d4e4c3db42f7d9ce0df9\", [ \"0x0000000000000000000000000000000000000000000000000000000000000004\" ], \"0x13a9cccf\" ] }, code=UNKNOWN_ERROR, version=6.17.0)",
+      "role": "runtime",
+      "status": "unavailable"
+    }
+  ],
+  "slots": [
+    "4"
+  ]
+}

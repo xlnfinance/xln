@@ -1,0 +1,85 @@
+{
+  "apiBase": "http://localhost:8080",
+  "approved": false,
+  "candidateDigest": "03f29fbccc5c14f8db59935cd003fe68a0191dd9fa2f4640025106cf108a4535",
+  "candidateHead": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26",
+  "catalogDigest": "a46f46e495c3085057c3eeed7d0d17b8ac595b9338d96440b4f124461852dbf1",
+  "chains": [
+    {
+      "anchorHash": "0x8e35b53b5cd2de0cd4af7b57c0eb2e23ba5a35fde3018f70b49ea2172aa4aa4e",
+      "anchorNumber": 12163530,
+      "chainId": 11155111,
+      "codeHashes": {
+        "0x175343fc9d198b31f493cafe2639fe6dcda59c77": "0x64ebb5db40c6deb7a16b733a30481752a3e64a51323fd51c41fa1c4b4b24eac5",
+        "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238": "0xcd3f29e2ea9c61dadd48bfeaf8b2884b6de9dfee7bf45329452c4c33d0868ceb",
+        "0x32a4a72992ad142e36fa1c5989b95fed60987818": "0xd56dbdedd8973d72780dd49bbe5b25d9cc6a2cf00d5182651b448d9782005a51",
+        "0x9c4173eed1dc7c24c5207a705382488c859588e3": "0xc0333495db29b94d20a25de1df465e4e4b95cd1981dacd9627dc83f03da84334",
+        "0xa2950f711292216419d0691b2aa17dd3ac947e35": "0x02413ad800e58e168089146dd8b10a7e36316bfbe35a201f1e6f02c12a2ed717",
+        "0xa8674d878bce007812beea6b131a80dde43ef4cf": "0x2b53ca548ebd0cb7cd1eca973f6857deea6203c12ea29e1f14f06fae5e117a9c"
+      },
+      "depository": "0x32A4A72992aD142E36fA1C5989b95FeD60987818",
+      "entityProvider": "0x9C4173eed1DC7c24c5207A705382488c859588E3",
+      "hubEntity": "0x64abda6ea9caaae7ecc550e8d4531200893574572d253a8c7e3495d725995260",
+      "hubSigner": "0x944d742ada37d5416774d6303a649326eb1e9478",
+      "payers": [
+        {
+          "address": "0x61ff4c022bcc7d342d0d68a7b85f18e0fd7d9446",
+          "firstNonce": 0,
+          "gasLimit": "600000",
+          "maxFeePerGasWei": "1000000000",
+          "maxPriorityFeePerGasWei": "1000000000",
+          "role": "source-user",
+          "totalFeeLimitWei": "1800000000000000"
+        }
+      ],
+      "token": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+      "userEntity": "0xcfcdd2d155d6ee85d446d49045cb444a78df66b89a18c84959665a040671dae2",
+      "userSigner": "0x61ff4c022bcc7d342d0d68a7b85f18e0fd7d9446"
+    },
+    {
+      "anchorHash": "0xd17574fcdfa0e346775519c08f9f6285b0f7d6efa300828f6729a36b4abf5459",
+      "anchorNumber": 330512661,
+      "chainId": 421614,
+      "codeHashes": {
+        "0x2b65518871ea15d5a1bc43218e3c95621b54ccec": "0xeffc7111141a0b22ada7a83fc538d312951a0538610aff119f7bb0376d938e7d",
+        "0x37a9bdc2f8736bb31ffefb778a70ba7d544ff103": "0x02413ad800e58e168089146dd8b10a7e36316bfbe35a201f1e6f02c12a2ed717",
+        "0x3dae23be54dab4e88b92d4e4c3db42f7d9ce0df9": "0x22fb345563a7b06d7dfb6ff95e8f56a6f678f6b59da6c926dd67e32c06c38b87",
+        "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d": "0x9a736af6aac290d9196883e8686fc1d127ff657ca534fe4b88d6d40dc0bc6750",
+        "0x8223aa4c60adb851f53a120c3d3841de9e77c188": "0x8474e986e82636c385f7ca9ef92c97e3d400ba862fa065eb51807b774ad9a72c",
+        "0xcb7053c91ea02890b3ca702caaaea69656dc3ccf": "0x64ebb5db40c6deb7a16b733a30481752a3e64a51323fd51c41fa1c4b4b24eac5"
+      },
+      "depository": "0x8223AA4c60Adb851f53a120c3D3841De9e77c188",
+      "entityProvider": "0x3DaE23be54dAb4e88b92D4e4c3db42f7D9ce0Df9",
+      "hubEntity": "0x529aa3f7dca1cbe2366f781ab55915bc9b0762b26bcc382ef321433d9de2b4a2",
+      "hubSigner": "0xa73b329dc876173b2a7161cdde716a78209b0cac",
+      "payers": [
+        {
+          "address": "0xb77348f8f01e060934024fefc319c66653df6fa2",
+          "firstNonce": 0,
+          "gasLimit": "700000",
+          "maxFeePerGasWei": "100000000",
+          "maxPriorityFeePerGasWei": "100000000",
+          "role": "target-user",
+          "totalFeeLimitWei": "70000000000000"
+        },
+        {
+          "address": "0xa73b329dc876173b2a7161cdde716a78209b0cac",
+          "firstNonce": 0,
+          "gasLimit": "500000",
+          "maxFeePerGasWei": "100000000",
+          "maxPriorityFeePerGasWei": "100000000",
+          "role": "target-hub",
+          "totalFeeLimitWei": "50000000000000"
+        }
+      ],
+      "token": "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d",
+      "userEntity": "0x01c743c9d2139446cf0d331676f122a042450522c26d8f09ce2b5a5b35add42a",
+      "userSigner": "0xb77348f8f01e060934024fefc319c66653df6fa2"
+    }
+  ],
+  "expiresAt": 1795044600000,
+  "runIds": [
+    "fresh-w4vgds-1usdc-20261118-guarded"
+  ],
+  "version": 1
+}

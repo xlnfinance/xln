@@ -1,0 +1,276 @@
+{
+  "executionOrder": [
+    "Revalidate this exact manifest and expiry, deployed code hashes and opening chain state. Confirm the prior hash is absent and the approved EOA nonce is free.",
+    "Restore the original Hub and user and catch up authenticated source-chain observations. Compare the retained bilateral workspace and the terminal Hub batch before the local requeue.",
+    "Requeue the single retained C2R. Confirm the exact batch hash, Account nonce, Entity batch nonce, counterparty Hanko and expected new local broadcast generation.",
+    "Use the normal Runtime J batch path to certify the Hub batch and prepare one EOA transaction. Estimate with exact Hankos and stop on any scope or gas mismatch. Verify the exact signed wire and gas before the gateway forwards it.",
+    "On uncertainty inspect the transaction hash and nonce. On a mismatch, revert or expiry stop and preserve the WAL and any receipt.",
+    "Confirm collateral is zero, the Hub reserve is 1,000,001 atoms, and both original Runtime WALs observed settlement nonce 8."
+  ],
+  "gas": {
+    "freshExactEstimate": null,
+    "historicalExactEstimate": {
+      "__xlnType": "BigInt",
+      "value": "718231"
+    },
+    "marginGas": {
+      "__xlnType": "BigInt",
+      "value": "81769"
+    },
+    "maxFeePerGasWei": {
+      "__xlnType": "BigInt",
+      "value": "1000000000"
+    },
+    "maxPriorityFeePerGasWei": {
+      "__xlnType": "BigInt",
+      "value": "100000000"
+    },
+    "nativeBalanceAfterWorstCaseCostWei": {
+      "__xlnType": "BigInt",
+      "value": "200000000000000"
+    },
+    "proposedGasLimit": {
+      "__xlnType": "BigInt",
+      "value": "800000"
+    },
+    "totalFeeLimitWei": {
+      "__xlnType": "BigInt",
+      "value": "800000000000000"
+    }
+  },
+  "gatewayCheck": {
+    "reason": "USDC_EXECUTION_AUTHORITY_MISSING",
+    "unapprovedManifestRejected": true
+  },
+  "manifest": "fresh-public-demo-source-c2r-requeue-authority-unsigned.json",
+  "manifestSha256": "790625d71f5ad100c0ae5aa222cd0204a7f456fcb84e6c6e7a0e31a3b7dcf179",
+  "opening": {
+    "candidateHash": "0x40d4b57ad8675d886561eb4a1299f635390de51a4e7cbeb635a8e76e1b2a3922",
+    "observedAt": "2026-11-18T23:56:14.236Z",
+    "preparedHashLookup": [
+      {
+        "receipt": null,
+        "transaction": null
+      },
+      {
+        "receipt": null,
+        "transaction": null
+      }
+    ],
+    "rpcs": ["https://ethereum-sepolia-rpc.publicnode.com", "https://rpc.sepolia.ethpandaops.io"],
+    "state": {
+      "accountKey": "0x64abda6ea9caaae7ecc550e8d4531200893574572d253a8c7e3495d725995260cfcdd2d155d6ee85d446d49045cb444a78df66b89a18c84959665a040671dae2",
+      "accountNonce": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "chainId": 11155111,
+      "codeHashesMatched": 6,
+      "collateralAtoms": {
+        "__xlnType": "BigInt",
+        "value": "1000000"
+      },
+      "depositoryBackingAtoms": {
+        "__xlnType": "BigInt",
+        "value": "2000001"
+      },
+      "disputeHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "hub": {
+        "board": {
+          "current": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "exists": false,
+          "proposed": "0x0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "debtAtoms": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "entityNonce": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "eoaNonce": 0,
+        "nativeWei": {
+          "__xlnType": "BigInt",
+          "value": "1000000000000000"
+        },
+        "reserveAtoms": {
+          "__xlnType": "BigInt",
+          "value": "1"
+        }
+      },
+      "ondelta": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "point": {
+        "baseFeePerGasWei": {
+          "__xlnType": "BigInt",
+          "value": "16"
+        },
+        "hash": "0x9c06539c5fed02f8f32fa58a854e5cf1ca42610be2d38bd4b233a9842894f7c2",
+        "number": 12164807,
+        "timestamp": "2026-11-18T23:56:00.000Z"
+      },
+      "user": {
+        "board": {
+          "current": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "exists": false,
+          "proposed": "0x0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "debtAtoms": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "entityNonce": {
+          "__xlnType": "BigInt",
+          "value": "2"
+        },
+        "eoaNonce": 3,
+        "nativeWei": {
+          "__xlnType": "BigInt",
+          "value": "1999999986561179"
+        },
+        "reserveAtoms": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        }
+      }
+    },
+    "tip": [
+      {
+        "fee": {
+          "gasPriceWei": {
+            "__xlnType": "BigInt",
+            "value": "18"
+          },
+          "maxPriorityFeePerGasWei": {
+            "__xlnType": "BigInt",
+            "value": "2"
+          }
+        },
+        "hubEOA": {
+          "latest": 0,
+          "pending": 0
+        }
+      },
+      {
+        "fee": {
+          "gasPriceWei": {
+            "__xlnType": "BigInt",
+            "value": "18"
+          },
+          "maxPriorityFeePerGasWei": {
+            "__xlnType": "BigInt",
+            "value": "2"
+          }
+        },
+        "hubEOA": {
+          "latest": 0,
+          "pending": 0
+        }
+      }
+    ]
+  },
+  "originalWalFramesWritten": 0,
+  "ownerApprovalScope": {
+    "accountNonceBefore": 0,
+    "accountSettlementNonce": 8,
+    "amountAtoms": "1000000",
+    "authorizedHubCommands": [
+      {
+        "data": {
+          "reason": "Owner-authorized source C2R recovery",
+          "requeueToCurrent": true
+        },
+        "type": "j_abort_sent_batch"
+      },
+      {
+        "data": {
+          "feeOverrides": {
+            "maxFeePerGasWei": "1000000000",
+            "maxPriorityFeePerGasWei": "100000000"
+          }
+        },
+        "type": "j_broadcast"
+      }
+    ],
+    "chainId": 11155111,
+    "contract": "0x32a4a72992ad142e36fa1c5989b95fed60987818",
+    "eoaNonce": 0,
+    "existingHubAndUserStores": true,
+    "hubEntity": "0x64abda6ea9caaae7ecc550e8d4531200893574572d253a8c7e3495d725995260",
+    "hubEntityBatchNonce": "1",
+    "hubJBatchHanko": "Certify the same batch hash through the canonical Entity path",
+    "maximumNewEoaSignatures": 1,
+    "maximumPublicTransactions": 1,
+    "method": "processBatch(bytes,bytes,uint256)",
+    "newEoaHash": null,
+    "payer": "0x944d742ada37d5416774d6303a649326eb1e9478",
+    "separateAuthorizationRequired": [
+      "A different batch or nonce",
+      "Repeat signing or a replacement",
+      "Funding",
+      "Deposit",
+      "Cross-J",
+      "External payout",
+      "Dispute"
+    ],
+    "token": "USDC",
+    "tokenId": 1,
+    "unchangedBatchHash": "0x36f0151551f22448e02925705e49a69cba2cd06089524e3aa19ebf80fc1a9d14",
+    "userEntity": "0xcfcdd2d155d6ee85d446d49045cb444a78df66b89a18c84959665a040671dae2",
+    "userHanko": "Reuse the retained cooperative authorization for the same C2R",
+    "userSigner": "0x61ff4c022bcc7d342d0d68a7b85f18e0fd7d9446",
+    "valueWei": "0"
+  },
+  "priorSavedWireProposalSha256": "dc8ff63efeb4c981f314b7da235dcf327cb7a201a86fae497cb54de1d462ee8c",
+  "proposedExpiryUtc": "2026-11-19T00:56:00.000Z",
+  "publicBroadcasts": 0,
+  "signaturesProduced": 0,
+  "stand": "fresh-w4vGds",
+  "status": "unsigned-requeue-review",
+  "walRecoveryProof": {
+    "confirmedRuntimeFramesWritten": 0,
+    "publicBroadcasts": 0,
+    "recovery": {
+      "abortAndRequeue": {
+        "accountNonce": 8,
+        "entityBatchNonce": 1,
+        "existingEvmWireOnDraft": false,
+        "hubBatchHashToSign": "0x36f0151551f22448e02925705e49a69cba2cd06089524e3aa19ebf80fc1a9d14",
+        "identicalBatchHash": true,
+        "identicalCounterpartyHanko": true,
+        "identicalEncodedBatch": true,
+        "newGeneration": 2,
+        "oldGeneration": 1,
+        "operations": 1
+      },
+      "externalPreparedRecordRejected": true,
+      "manualRebroadcastBlocked": true,
+      "originalOutboxEntries": 0,
+      "plainBroadcastBlocked": true,
+      "savedEvmTransactionHash": "0x40d4b57ad8675d886561eb4a1299f635390de51a4e7cbeb635a8e76e1b2a3922",
+      "savedHubWalFrame": 236,
+      "scheduledRetryBlocked": true,
+      "sealedHubBatchHash": "0x36f0151551f22448e02925705e49a69cba2cd06089524e3aa19ebf80fc1a9d14"
+    },
+    "signaturesProduced": 0,
+    "views": [
+      {
+        "accountFrame": 10,
+        "accountRoot": "0xacf3ab83ac3b82cc0dc78529ae6ea062a24c10dcefa5fd308c60a8694253e6d5",
+        "frame": 237,
+        "role": "hub",
+        "workspaceHash": "0xb5454df9709e5dcc638583cc1744d2c67f0b517bf4f700f27df595cd40eee137"
+      },
+      {
+        "accountFrame": 10,
+        "accountRoot": "0xacf3ab83ac3b82cc0dc78529ae6ea062a24c10dcefa5fd308c60a8694253e6d5",
+        "frame": 77,
+        "role": "user",
+        "workspaceHash": "0xb5454df9709e5dcc638583cc1744d2c67f0b517bf4f700f27df595cd40eee137"
+      }
+    ]
+  }
+}

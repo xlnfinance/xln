@@ -1,0 +1,46 @@
+{
+  "anchor": {
+    "blockHash": "0x92ce121497d8a6f365fb0817d2c1e0609c5f4944db5adbe0fc514c64be4437cd",
+    "blockNumber": 14
+  },
+  "approvedAtPreparation": false,
+  "candidateDigest": "979c9e2708f37872584ff22f72894474f0d721f589aae71909ce71f0c4ab1d9e",
+  "candidateHead": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26",
+  "chainId": 421614,
+  "depositAtoms": "799602",
+  "feesWei": "174382582769353",
+  "fixture": "Two private loopback Anvil chains with real USDC and Depository contracts.",
+  "hubReserveAfterAtoms": "899801",
+  "hubReserveBeforeAtoms": "100199",
+  "manifestVersion": 2,
+  "nativeTransferWei": "0",
+  "observedAt": "2026-11-18T21:46:04.846Z",
+  "publicBroadcasts": 0,
+  "receipts": [
+    {
+      "blockHash": "0x185d9bf43aab1a2eec8a1b60eead6f24383a22e3787f702af27475a00394058c",
+      "blockNumber": 17,
+      "hash": "0x3230c8c20a10705ee88ba569c9cf7a59be073dc3cc4b955b71cea88ae48ebd40",
+      "nonce": 14,
+      "stage": "approval",
+      "status": 1
+    },
+    {
+      "blockHash": "0xf3c51f4d1beaac31c6d9483c8e451211910efe510f36a2325439dcc6594800d4",
+      "blockNumber": 30,
+      "hash": "0x26d7546cdafaa5aa3f64065a394e4903a1d45a5da9cea54f3a6b53d318e435d9",
+      "nonce": 15,
+      "stage": "deposit",
+      "status": 1
+    }
+  ],
+  "status": "locally-verified",
+  "verification": {
+    "absentExpectedReserve": "Rejected at preparation with USDC_FUNDING_RESERVE_BASELINE_MISMATCH.",
+    "incorrectManifestReserve": "Rejected at execution with USDC_FUNDING_CHAIN_ACCOUNTING_MISMATCH before broadcast.",
+    "interruption": "SIGKILL after the deposit was accepted. Resume and another report reconciled the same two receipts.",
+    "sourceChainFunderNonceDelta": 0,
+    "sourceHubReserveAtoms": "1000001",
+    "targetChainFunderNonceDelta": 2
+  }
+}

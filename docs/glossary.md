@@ -73,6 +73,23 @@ rules. Normative TypeScript and state-machine safety remains in
 - **Outbox** is the flat ordered external output of one sealed Runtime frame.
   It is published only after that frame is durable.
 
+## Swap markets
+
+**Same-J Swap**:
+An exchange between assets within one settlement jurisdiction.
+
+**Cross-J Swap**:
+An exchange between assets in distinct settlement jurisdictions. The assets may
+have the same token symbol, such as USDC on two different networks.
+
+## Cross-J amounts
+
+- **Source Deposit** is the user's external-token contribution credited to the
+  source-jurisdiction reserve. It is distinct from operator capital and gas funds.
+- **Net External Payout** is the external recipient's token-balance increase
+  attributable to the withdrawal after exchange pricing and applicable token
+  fees. An Account claim or quoted receive amount is not an external payout.
+
 ## Jurisdiction deployment
 
 - **Stack Deployment** is a versioned operation that creates, configures and

@@ -1,0 +1,206 @@
+{
+  "expiresAtUtc": "2026-11-18T23:14:00.000Z",
+  "gatewayCheck": {
+    "mode": "source-c2r",
+    "reason": "USDC_EXECUTION_AUTHORITY_MISSING",
+    "unapprovedManifestRejected": true
+  },
+  "manifest": "fresh-public-demo-source-c2r-authority-unsigned.json",
+  "manifestSha256": "2aeba7c0bd247091a9836b5552cfe89257475e0893e6ad50f456b6111a1eb697",
+  "observation": {
+    "observedAt": "2026-11-18T22:14:56.470Z",
+    "rpcs": ["https://ethereum-sepolia-rpc.publicnode.com", "https://rpc.sepolia.ethpandaops.io"],
+    "state": {
+      "accountKey": "0x64abda6ea9caaae7ecc550e8d4531200893574572d253a8c7e3495d725995260cfcdd2d155d6ee85d446d49045cb444a78df66b89a18c84959665a040671dae2",
+      "accountNonce": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "chainId": 11155111,
+      "codeHashesMatched": 6,
+      "collateralAtoms": {
+        "__xlnType": "BigInt",
+        "value": "1000000"
+      },
+      "depositoryBackingAtoms": {
+        "__xlnType": "BigInt",
+        "value": "2000001"
+      },
+      "disputeHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "hub": {
+        "board": {
+          "current": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "exists": false,
+          "proposed": "0x0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "debtAtoms": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "entityNonce": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "eoaNonce": 0,
+        "nativeWei": {
+          "__xlnType": "BigInt",
+          "value": "1000000000000000"
+        },
+        "reserveAtoms": {
+          "__xlnType": "BigInt",
+          "value": "1"
+        }
+      },
+      "ondelta": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "point": {
+        "baseFeePerGasWei": {
+          "__xlnType": "BigInt",
+          "value": "14"
+        },
+        "hash": "0xe9778ac484b0af23011347cb6f1dccab3f4d0a737591cffc408712c8a9878d0b",
+        "number": 12164312,
+        "timestamp": "2026-11-18T22:14:48.000Z"
+      },
+      "user": {
+        "board": {
+          "current": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "exists": false,
+          "proposed": "0x0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "debtAtoms": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "entityNonce": {
+          "__xlnType": "BigInt",
+          "value": "2"
+        },
+        "eoaNonce": 3,
+        "nativeWei": {
+          "__xlnType": "BigInt",
+          "value": "1999999986561179"
+        },
+        "reserveAtoms": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        }
+      }
+    },
+    "tip": [
+      {
+        "fee": {
+          "gasPriceWei": {
+            "__xlnType": "BigInt",
+            "value": "16"
+          },
+          "maxPriorityFeePerGasWei": {
+            "__xlnType": "BigInt",
+            "value": "2"
+          }
+        },
+        "hubEOA": {
+          "latest": 0,
+          "pending": 0
+        }
+      },
+      {
+        "fee": {
+          "gasPriceWei": {
+            "__xlnType": "BigInt",
+            "value": "16"
+          },
+          "maxPriorityFeePerGasWei": {
+            "__xlnType": "BigInt",
+            "value": "2"
+          }
+        },
+        "hubEOA": {
+          "latest": 0,
+          "pending": 0
+        }
+      }
+    ]
+  },
+  "offlineWalReplay": {
+    "accountFrame": 6,
+    "accountRoot": "0x4fd6751a3c46dc3ba25869c423e147f3fdc2dcd5e00f3a7db3bbe424560035d4",
+    "accountStateHash": "0x84544417d2d5e3100a57223c5b3ccf4fc357639b623014407572782f96957917",
+    "cooperativeHashPreview": "0x30036e2dbcd215e3101359f1981114ff8b2a047f0421312387667204b47679a3",
+    "delta": {
+      "collateral": {
+        "__xlnType": "BigInt",
+        "value": "1000000"
+      },
+      "hubShare": {
+        "__xlnType": "BigInt",
+        "value": "1000000"
+      },
+      "offdelta": {
+        "__xlnType": "BigInt",
+        "value": "1000000"
+      },
+      "ondelta": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "userShare": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      }
+    },
+    "hubNonceCursor": {
+      "counterpartyDisputeProofNonce": 7,
+      "currentDisputeProofNonce": 6,
+      "jNonce": 0,
+      "nextProofNonce": 7,
+      "nextSettlementNonce": 8
+    },
+    "hubRuntimeFrame": 221,
+    "liveJurisdictionCatchup": false,
+    "matchingCachedHankos": true,
+    "previousRouteStatus": "settled",
+    "userNonceCursor": {
+      "counterpartyDisputeProofNonce": 6,
+      "currentDisputeProofNonce": 7,
+      "jNonce": 0,
+      "nextProofNonce": 8,
+      "nextSettlementNonce": 8
+    },
+    "userRuntimeFrame": 67,
+    "workspaceHashPreview": "0xb5454df9709e5dcc638583cc1744d2c67f0b517bf4f700f27df595cd40eee137"
+  },
+  "previousJourneyManifestSha256": "4e896b982ec9423ed804424ea5bac684d33c225fa8dd1336bc210c2638a221f0",
+  "projected": {
+    "collateralAfterAtoms": "0",
+    "diffs": [
+      {
+        "collateralDiff": {
+          "__xlnType": "BigInt",
+          "value": "-1000000"
+        },
+        "leftDiff": {
+          "__xlnType": "BigInt",
+          "value": "1000000"
+        },
+        "ondeltaDiff": {
+          "__xlnType": "BigInt",
+          "value": "-1000000"
+        },
+        "rightDiff": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "tokenId": 1
+      }
+    ],
+    "sourceHubReserveAfterAtoms": "1000001",
+    "sourceUserReserveAfterAtoms": "0"
+  },
+  "publicBroadcasts": 0,
+  "signedGasEstimate": null,
+  "signedWires": 0,
+  "status": "unsigned-review"
+}

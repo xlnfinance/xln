@@ -1,0 +1,199 @@
+{
+  "authority": {
+    "approved": false,
+    "candidateDigest": "d84d264559ae425aabd002145636f2a385c8128cc3d26a04902e524025d6429a",
+    "candidateHead": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26",
+    "catalogDigest": "a46f46e495c3085057c3eeed7d0d17b8ac595b9338d96440b4f124461852dbf1",
+    "chains": [
+      {
+        "anchorHash": "0xcc551217c5380a4153801a4fcdb88160b815ad29dbc3045a95d995fbcbf1ab49",
+        "anchorNumber": 12156163,
+        "chainId": 11155111,
+        "codeHashes": {
+          "0x175343fc9d198b31f493cafe2639fe6dcda59c77": "0x64ebb5db40c6deb7a16b733a30481752a3e64a51323fd51c41fa1c4b4b24eac5",
+          "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238": "0xcd3f29e2ea9c61dadd48bfeaf8b2884b6de9dfee7bf45329452c4c33d0868ceb",
+          "0x32a4a72992ad142e36fa1c5989b95fed60987818": "0xd56dbdedd8973d72780dd49bbe5b25d9cc6a2cf00d5182651b448d9782005a51",
+          "0x9c4173eed1dc7c24c5207a705382488c859588e3": "0xc0333495db29b94d20a25de1df465e4e4b95cd1981dacd9627dc83f03da84334",
+          "0xa2950f711292216419d0691b2aa17dd3ac947e35": "0x02413ad800e58e168089146dd8b10a7e36316bfbe35a201f1e6f02c12a2ed717",
+          "0xa8674d878bce007812beea6b131a80dde43ef4cf": "0x2b53ca548ebd0cb7cd1eca973f6857deea6203c12ea29e1f14f06fae5e117a9c"
+        },
+        "depository": "0x32A4A72992aD142E36fA1C5989b95FeD60987818",
+        "entityNonce": "2",
+        "entityProvider": "0x9C4173eed1DC7c24c5207A705382488c859588E3",
+        "funder": {
+          "address": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+          "firstNonce": 106
+        },
+        "funderEntity": "0xaaa77fe2366ac1c1bc54cdcee97e0e95afb7bd999720ea9858257c75fad9d88b",
+        "hubEntity": "0xd3a0d7b3939571af73af38d3cfb0f914f065e23e50daaf60fc80cd6fd52e70a8",
+        "hubSigner": "0x7fd492c67d1b1bab5ba3487e4246c8044db44598",
+        "limits": {
+          "amount": "1000000",
+          "calls": {
+            "approval": {
+              "gasLimit": "200000",
+              "maxFeePerGasWei": "1000000000",
+              "maxPriorityFeePerGasWei": "100000000"
+            },
+            "deposit": {
+              "gasLimit": "600000",
+              "maxFeePerGasWei": "1000000000",
+              "maxPriorityFeePerGasWei": "100000000"
+            },
+            "native-topup": {
+              "gasLimit": "300000",
+              "maxFeePerGasWei": "1000000000",
+              "maxPriorityFeePerGasWei": "100000000"
+            }
+          },
+          "chainId": 11155111,
+          "hubTopupWei": "1000000000000000",
+          "totalFeeLimitWei": "2000000000000000",
+          "totalNativeOutflowLimitWei": "3000000000000000"
+        },
+        "token": "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238"
+      },
+      {
+        "anchorHash": "0xbf2279f7542f524e91ecc82d3ec2d38dad57135e27dcea4bedebf8f0b8443c57",
+        "anchorNumber": 330176097,
+        "chainId": 421614,
+        "codeHashes": {
+          "0x2b65518871ea15d5a1bc43218e3c95621b54ccec": "0xeffc7111141a0b22ada7a83fc538d312951a0538610aff119f7bb0376d938e7d",
+          "0x37a9bdc2f8736bb31ffefb778a70ba7d544ff103": "0x02413ad800e58e168089146dd8b10a7e36316bfbe35a201f1e6f02c12a2ed717",
+          "0x3dae23be54dab4e88b92d4e4c3db42f7d9ce0df9": "0x22fb345563a7b06d7dfb6ff95e8f56a6f678f6b59da6c926dd67e32c06c38b87",
+          "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d": "0x9a736af6aac290d9196883e8686fc1d127ff657ca534fe4b88d6d40dc0bc6750",
+          "0x8223aa4c60adb851f53a120c3d3841de9e77c188": "0x8474e986e82636c385f7ca9ef92c97e3d400ba862fa065eb51807b774ad9a72c",
+          "0xcb7053c91ea02890b3ca702caaaea69656dc3ccf": "0x64ebb5db40c6deb7a16b733a30481752a3e64a51323fd51c41fa1c4b4b24eac5"
+        },
+        "depository": "0x8223AA4c60Adb851f53a120c3D3841De9e77c188",
+        "entityNonce": "2",
+        "entityProvider": "0x3DaE23be54dAb4e88b92D4e4c3db42f7D9ce0Df9",
+        "funder": {
+          "address": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+          "firstNonce": 30
+        },
+        "funderEntity": "0xaaa77fe2366ac1c1bc54cdcee97e0e95afb7bd999720ea9858257c75fad9d88b",
+        "hubEntity": "0x0b669a275953ec4f68ebbf1ec6a0aedd7f2ae671ba527fcf745bde4df44c5447",
+        "hubSigner": "0x0b2fffb8b3e09bb3ea2d5ec2442cf055bdfdcdd2",
+        "limits": {
+          "amount": "5000000",
+          "calls": {
+            "approval": {
+              "gasLimit": "90000",
+              "maxFeePerGasWei": "100000000",
+              "maxPriorityFeePerGasWei": "0"
+            },
+            "deposit": {
+              "gasLimit": "600000",
+              "maxFeePerGasWei": "100000000",
+              "maxPriorityFeePerGasWei": "0"
+            },
+            "native-topup": {
+              "gasLimit": "300000",
+              "maxFeePerGasWei": "100000000",
+              "maxPriorityFeePerGasWei": "0"
+            }
+          },
+          "chainId": 421614,
+          "hubTopupWei": "100000000000000",
+          "totalFeeLimitWei": "200000000000000",
+          "totalNativeOutflowLimitWei": "300000000000000"
+        },
+        "token": "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d"
+      }
+    ],
+    "expiresAt": 1795025712831,
+    "operation": "operator-funding",
+    "version": 1
+  },
+  "authorityFile": "/Users/nick/Projects/xlnfinance/xln/.logs/ts-usdc-cross-j-poc/public/funding-2026-11-17T18-15-12-830Z/resume-readonly-authority.json",
+  "authorityFileSha256": "0a1da8a6d77cea7804e40219a86be22aa511ed398ec8b44e8f38a1e1eb88a1ad",
+  "candidateDigest": "d84d264559ae425aabd002145636f2a385c8128cc3d26a04902e524025d6429a",
+  "executionAllowed": false,
+  "observations": [
+    {
+      "chainId": 11155111,
+      "funderNativeWei": {
+        "__xlnType": "BigInt",
+        "value": "41202999650295764930"
+      },
+      "funderUsdc": {
+        "__xlnType": "BigInt",
+        "value": "9000000"
+      },
+      "gas": {
+        "approval": {
+          "__xlnType": "BigInt",
+          "value": "140018"
+        },
+        "deposit": {
+          "gasLimit": {
+            "__xlnType": "BigInt",
+            "value": "600000"
+          },
+          "reason": "Exact authorized Hanko and confirmed allowance are required before deposit estimation.",
+          "status": "conditional-cap"
+        },
+        "native-topup": {
+          "__xlnType": "BigInt",
+          "value": "207391"
+        }
+      },
+      "point": {
+        "hash": "0xcc551217c5380a4153801a4fcdb88160b815ad29dbc3045a95d995fbcbf1ab49",
+        "number": 12156163
+      }
+    },
+    {
+      "chainId": 421614,
+      "funderNativeWei": {
+        "__xlnType": "BigInt",
+        "value": "528569400505305600"
+      },
+      "funderUsdc": {
+        "__xlnType": "BigInt",
+        "value": "20000000"
+      },
+      "gas": {
+        "approval": {
+          "__xlnType": "BigInt",
+          "value": "56240"
+        },
+        "deposit": {
+          "gasLimit": {
+            "__xlnType": "BigInt",
+            "value": "600000"
+          },
+          "reason": "Exact authorized Hanko and confirmed allowance are required before deposit estimation.",
+          "status": "conditional-cap"
+        },
+        "native-topup": {
+          "__xlnType": "BigInt",
+          "value": "21000"
+        }
+      },
+      "point": {
+        "hash": "0xbf2279f7542f524e91ecc82d3ec2d38dad57135e27dcea4bedebf8f0b8443c57",
+        "number": 330176097
+      }
+    }
+  ],
+  "observedAt": "2026-11-17T18:27:24.751Z",
+  "publicEthereumTransactionsSigned": 0,
+  "publicFinancialBroadcasts": 0,
+  "remaining": [
+    "Explicit owner confirmation of the six concrete funding operations, payer/recipients and native limits.",
+    "Exact E2R gas estimation after authorized signing and confirmed allowance; stop above the selected 600000 gas limit.",
+    "Canonical receipts with 12 confirmations and balance/fee reconciliation.",
+    "Authenticated reserve observation and restore in the original Hub/MM stores before closing ticket 11."
+  ],
+  "signerCheck": {
+    "environmentSelector": "DEPLOYER_PRIVATE_KEY",
+    "matchesFunder": true,
+    "method": "Address derivation only; no signature or RPC.",
+    "publicAddress": "0x42Da3Ba8c586F6fe9eF6ed1d09423eB73E4fe25b"
+  },
+  "status": "fresh-preparation-unapproved",
+  "ticket": "11",
+  "userPrincipalIncluded": false
+}

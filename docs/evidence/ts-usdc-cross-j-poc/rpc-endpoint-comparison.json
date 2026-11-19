@@ -1,0 +1,471 @@
+{
+  "ticket": "12",
+  "status": "bounded-samples-verified",
+  "phase": "B after paced Hub run",
+  "candidateDigest": "778128e61e1b82c130b813eaac77a6694ac58be4315dfce035f87c784358c8f0",
+  "probeSha256": "5225af0a464c946f7655e997b76b2e3112d82b16368993357a70d1c47df0cbb9",
+  "checks": {
+    "matchingHeaderBatchDigests": 8,
+    "matchingProofAnchorValues": 2,
+    "matchingReceiptBlockHashes": 5,
+    "arbitrumAnchorMatchesRetainedProof": true
+  },
+  "additionalFinancialBroadcasts": 0,
+  "limitsOfInference": "Serial, bounded method calls at fixed heights show capability and observed latency only. The 128-header Arbitrum public response is one HTTP 429 in this sample, not a measured batch limit. Protected bindings are shown only by fingerprints. No candidate has demonstrated sustained funded Runtime catch-up here.",
+  "startedAt": "2026-11-17T21:10:41.173Z",
+  "observedAt": "2026-11-17T21:11:24.947Z",
+  "profile": {
+    "headerBatchSizes": [
+      32,
+      32,
+      32,
+      128
+    ],
+    "headerGapAfterResponseMs": 500,
+    "receiptsGapAfterResponseMs": 1000,
+    "timeoutMs": 5000
+  },
+  "results": [
+    {
+      "chainId": 11155111,
+      "name": "PublicNode",
+      "fingerprint": "18dddd47c8f4b183a5b2322a292c534f78b4c31ed168fbbc1af18f41767f3899",
+      "host": "ethereum-sepolia-rpc.publicnode.com",
+      "binding": {
+        "status": "verified",
+        "ms": 323
+      },
+      "headers": [
+        {
+          "fromBlock": 12149977,
+          "count": 32,
+          "status": "verified",
+          "ms": 308,
+          "validHeaders": 32,
+          "failures": {},
+          "headerDigest": "5b98881647649399d397784de8cf27fe2e6243bdf12cd4efec2b95a6ebf0ee69"
+        },
+        {
+          "fromBlock": 12150009,
+          "count": 32,
+          "status": "verified",
+          "ms": 275,
+          "validHeaders": 32,
+          "failures": {},
+          "headerDigest": "1385c8d45f004e62cfcb823ab60c2c39828b77e84a390d381d9b51edd3af38e4"
+        },
+        {
+          "fromBlock": 12150041,
+          "count": 32,
+          "status": "verified",
+          "ms": 260,
+          "validHeaders": 32,
+          "failures": {},
+          "headerDigest": "3fd8215c0cbf6dd5225f45fd08383badd656176eab7edf7722fd669e5c3500dc"
+        },
+        {
+          "fromBlock": 12150073,
+          "count": 128,
+          "status": "verified",
+          "ms": 1314,
+          "validHeaders": 128,
+          "failures": {},
+          "headerDigest": "e6185cfbfd15dba3a510d1391c626703eed6c06304c38907efdd376f370151f8"
+        }
+      ],
+      "proof": {
+        "block": 12149976,
+        "status": "historical-state-unavailable",
+        "code": 4444,
+        "ms": 180
+      },
+      "receipts": [
+        {
+          "block": 12149995,
+          "status": "verified",
+          "ms": 388,
+          "blockHash": "0x8078baf2bcfedcc55b9979c59cd590b53c56eced3939ef083dcb3630e6e06469",
+          "blockReceipts": 159
+        },
+        {
+          "block": 12156195,
+          "status": "verified",
+          "ms": 206,
+          "blockHash": "0x79bd64912196770e09614749393c975478fe7ede4d89e70abb2abf56978b293a",
+          "blockReceipts": 100
+        },
+        {
+          "block": 12128807,
+          "status": "receipt-block-unavailable",
+          "ms": 186
+        }
+      ]
+    },
+    {
+      "chainId": 11155111,
+      "name": "ethPandaOps",
+      "fingerprint": "ea37f436779dc1fa5fb56704e8ea35da30c159d85b333faa3e5bfcb758afd2f1",
+      "host": "rpc.sepolia.ethpandaops.io",
+      "binding": {
+        "status": "verified",
+        "ms": 533
+      },
+      "headers": [
+        {
+          "fromBlock": 12149977,
+          "count": 32,
+          "status": "verified",
+          "ms": 359,
+          "validHeaders": 32,
+          "failures": {},
+          "headerDigest": "5b98881647649399d397784de8cf27fe2e6243bdf12cd4efec2b95a6ebf0ee69"
+        },
+        {
+          "fromBlock": 12150009,
+          "count": 32,
+          "status": "verified",
+          "ms": 244,
+          "validHeaders": 32,
+          "failures": {},
+          "headerDigest": "1385c8d45f004e62cfcb823ab60c2c39828b77e84a390d381d9b51edd3af38e4"
+        },
+        {
+          "fromBlock": 12150041,
+          "count": 32,
+          "status": "verified",
+          "ms": 257,
+          "validHeaders": 32,
+          "failures": {},
+          "headerDigest": "3fd8215c0cbf6dd5225f45fd08383badd656176eab7edf7722fd669e5c3500dc"
+        },
+        {
+          "fromBlock": 12150073,
+          "count": 128,
+          "status": "verified",
+          "ms": 1168,
+          "validHeaders": 128,
+          "failures": {},
+          "headerDigest": "e6185cfbfd15dba3a510d1391c626703eed6c06304c38907efdd376f370151f8"
+        }
+      ],
+      "proof": {
+        "block": 12149976,
+        "status": "verified",
+        "ms": 313,
+        "blockHash": "0x4487de807cff4ed3dda1b1d6205820618b730ca4a089f867ad29f7a4d3e19095",
+        "stateRoot": "0x583fce3e17ca17b52edee3717823e6fef88242f1bce3d27ee277673fc7c0f945",
+        "value": "2"
+      },
+      "receipts": [
+        {
+          "block": 12149995,
+          "status": "verified",
+          "ms": 305,
+          "blockHash": "0x8078baf2bcfedcc55b9979c59cd590b53c56eced3939ef083dcb3630e6e06469",
+          "blockReceipts": 159
+        },
+        {
+          "block": 12156195,
+          "status": "verified",
+          "ms": 291,
+          "blockHash": "0x79bd64912196770e09614749393c975478fe7ede4d89e70abb2abf56978b293a",
+          "blockReceipts": 100
+        },
+        {
+          "block": 12128807,
+          "status": "verified",
+          "ms": 267,
+          "blockHash": "0x70e7635ce252c8ea01699018418bbb2713865d2a2ee38ff511fb3f43ff4d5989",
+          "blockReceipts": 119
+        }
+      ]
+    },
+    {
+      "chainId": 11155111,
+      "name": "protected-history",
+      "fingerprint": "92eca84d3029d9e3b8330990d4463178eb8ac68b2dd77f1e9989b22c8c80f5e3",
+      "binding": {
+        "status": "verified",
+        "ms": 281
+      },
+      "headers": [
+        {
+          "fromBlock": 12149977,
+          "count": 32,
+          "status": "verified",
+          "ms": 313,
+          "validHeaders": 32,
+          "failures": {},
+          "headerDigest": "5b98881647649399d397784de8cf27fe2e6243bdf12cd4efec2b95a6ebf0ee69"
+        },
+        {
+          "fromBlock": 12150009,
+          "count": 32,
+          "status": "verified",
+          "ms": 237,
+          "validHeaders": 32,
+          "failures": {},
+          "headerDigest": "1385c8d45f004e62cfcb823ab60c2c39828b77e84a390d381d9b51edd3af38e4"
+        },
+        {
+          "fromBlock": 12150041,
+          "count": 32,
+          "status": "verified",
+          "ms": 310,
+          "validHeaders": 32,
+          "failures": {},
+          "headerDigest": "3fd8215c0cbf6dd5225f45fd08383badd656176eab7edf7722fd669e5c3500dc"
+        },
+        {
+          "fromBlock": 12150073,
+          "count": 128,
+          "status": "verified",
+          "ms": 788,
+          "validHeaders": 128,
+          "failures": {},
+          "headerDigest": "e6185cfbfd15dba3a510d1391c626703eed6c06304c38907efdd376f370151f8"
+        }
+      ],
+      "proof": {
+        "block": 12149976,
+        "status": "verified",
+        "ms": 540,
+        "blockHash": "0x4487de807cff4ed3dda1b1d6205820618b730ca4a089f867ad29f7a4d3e19095",
+        "stateRoot": "0x583fce3e17ca17b52edee3717823e6fef88242f1bce3d27ee277673fc7c0f945",
+        "value": "2"
+      },
+      "receipts": [
+        {
+          "block": 12149995,
+          "status": "verified",
+          "ms": 288,
+          "blockHash": "0x8078baf2bcfedcc55b9979c59cd590b53c56eced3939ef083dcb3630e6e06469",
+          "blockReceipts": 159
+        },
+        {
+          "block": 12156195,
+          "status": "verified",
+          "ms": 327,
+          "blockHash": "0x79bd64912196770e09614749393c975478fe7ede4d89e70abb2abf56978b293a",
+          "blockReceipts": 100
+        },
+        {
+          "block": 12128807,
+          "status": "verified",
+          "ms": 236,
+          "blockHash": "0x70e7635ce252c8ea01699018418bbb2713865d2a2ee38ff511fb3f43ff4d5989",
+          "blockReceipts": 119
+        }
+      ]
+    },
+    {
+      "chainId": 421614,
+      "name": "PublicNode",
+      "fingerprint": "b290f0154fffbfcf92b01e44993e5a79d9bfecf955f77a79566ee001e4e172c0",
+      "host": "arbitrum-sepolia-rpc.publicnode.com",
+      "binding": {
+        "status": "verified",
+        "ms": 266
+      },
+      "headers": [
+        {
+          "fromBlock": 329895133,
+          "count": 32,
+          "status": "verified",
+          "ms": 104,
+          "validHeaders": 32,
+          "failures": {},
+          "headerDigest": "5defee1fe7c3ae0cb1c15b7f90f383808359ce5cad5773cdd2a345b8e224d5e1"
+        },
+        {
+          "fromBlock": 329895165,
+          "count": 32,
+          "status": "verified",
+          "ms": 105,
+          "validHeaders": 32,
+          "failures": {},
+          "headerDigest": "443dbd47dfef3d30b6c0ac15857480a1b0059aa0637c50002084317949120b61"
+        },
+        {
+          "fromBlock": 329895197,
+          "count": 32,
+          "status": "verified",
+          "ms": 104,
+          "validHeaders": 32,
+          "failures": {},
+          "headerDigest": "08c668ff2ad98d9c641372cca3681693fac4c7b0c237759ff67bdc555d778550"
+        },
+        {
+          "fromBlock": 329895229,
+          "count": 128,
+          "status": "verified",
+          "ms": 142,
+          "validHeaders": 128,
+          "failures": {},
+          "headerDigest": "4d0fd4e23dac06772f3c9d873b771d1b354b9a7cf62fa3556ff6f8b0c7c9b4be"
+        }
+      ],
+      "proof": {
+        "block": 329895119,
+        "status": "historical-state-unavailable",
+        "code": -32000,
+        "ms": 197
+      },
+      "receipts": [
+        {
+          "block": 330178730,
+          "status": "verified",
+          "ms": 198,
+          "blockHash": "0x950fc351c7e760aa9c7ea20c8f7b2c54435943e45ad5e481eeb455377711d0e0",
+          "blockReceipts": 4
+        },
+        {
+          "block": 328950104,
+          "status": "verified",
+          "ms": 227,
+          "blockHash": "0x3327fe7971ad6d768a66c33641a7b800c8b6c29ec5263c44cb6f8791aca7b3dc",
+          "blockReceipts": 5
+        }
+      ]
+    },
+    {
+      "chainId": 421614,
+      "name": "Arbitrum public",
+      "fingerprint": "2905786cf5364719a0186fa2573377b737954c925ee9af61c56a07d19771f940",
+      "host": "sepolia-rollup.arbitrum.io",
+      "binding": {
+        "status": "verified",
+        "ms": 409
+      },
+      "headers": [
+        {
+          "fromBlock": 329895133,
+          "count": 32,
+          "status": "verified",
+          "ms": 351,
+          "validHeaders": 32,
+          "failures": {},
+          "headerDigest": "5defee1fe7c3ae0cb1c15b7f90f383808359ce5cad5773cdd2a345b8e224d5e1"
+        },
+        {
+          "fromBlock": 329895165,
+          "count": 32,
+          "status": "verified",
+          "ms": 332,
+          "validHeaders": 32,
+          "failures": {},
+          "headerDigest": "443dbd47dfef3d30b6c0ac15857480a1b0059aa0637c50002084317949120b61"
+        },
+        {
+          "fromBlock": 329895197,
+          "count": 32,
+          "status": "verified",
+          "ms": 338,
+          "validHeaders": 32,
+          "failures": {},
+          "headerDigest": "08c668ff2ad98d9c641372cca3681693fac4c7b0c237759ff67bdc555d778550"
+        },
+        {
+          "fromBlock": 329895229,
+          "count": 128,
+          "status": "http-error",
+          "code": 429,
+          "ms": 187
+        }
+      ],
+      "proof": {
+        "block": 329895119,
+        "status": "historical-state-unavailable",
+        "code": -32000,
+        "ms": 381
+      },
+      "receipts": [
+        {
+          "block": 330178730,
+          "status": "verified",
+          "ms": 359,
+          "blockHash": "0x950fc351c7e760aa9c7ea20c8f7b2c54435943e45ad5e481eeb455377711d0e0",
+          "blockReceipts": 4
+        },
+        {
+          "block": 328950104,
+          "status": "verified",
+          "ms": 362,
+          "blockHash": "0x3327fe7971ad6d768a66c33641a7b800c8b6c29ec5263c44cb6f8791aca7b3dc",
+          "blockReceipts": 5
+        }
+      ]
+    },
+    {
+      "chainId": 421614,
+      "name": "protected-history",
+      "fingerprint": "17d81ad60c2be3ff9ce4bec3563dd1104a82df8c7883ebd70ffd0b4e30515a4b",
+      "binding": {
+        "status": "verified",
+        "ms": 293
+      },
+      "headers": [
+        {
+          "fromBlock": 329895133,
+          "count": 32,
+          "status": "verified",
+          "ms": 167,
+          "validHeaders": 32,
+          "failures": {},
+          "headerDigest": "5defee1fe7c3ae0cb1c15b7f90f383808359ce5cad5773cdd2a345b8e224d5e1"
+        },
+        {
+          "fromBlock": 329895165,
+          "count": 32,
+          "status": "verified",
+          "ms": 180,
+          "validHeaders": 32,
+          "failures": {},
+          "headerDigest": "443dbd47dfef3d30b6c0ac15857480a1b0059aa0637c50002084317949120b61"
+        },
+        {
+          "fromBlock": 329895197,
+          "count": 32,
+          "status": "verified",
+          "ms": 215,
+          "validHeaders": 32,
+          "failures": {},
+          "headerDigest": "08c668ff2ad98d9c641372cca3681693fac4c7b0c237759ff67bdc555d778550"
+        },
+        {
+          "fromBlock": 329895229,
+          "count": 128,
+          "status": "verified",
+          "ms": 272,
+          "validHeaders": 128,
+          "failures": {},
+          "headerDigest": "4d0fd4e23dac06772f3c9d873b771d1b354b9a7cf62fa3556ff6f8b0c7c9b4be"
+        }
+      ],
+      "proof": {
+        "block": 329895119,
+        "status": "verified",
+        "ms": 533,
+        "blockHash": "0x7c048e049035829ee8b6c8e8830eeae4076aa3ae017644f969ce7c596b890ca3",
+        "stateRoot": "0xb853a3b3173f3c173731e201d7088597a9e9cae79ae3f49206043bedae0ed187",
+        "value": "2"
+      },
+      "receipts": [
+        {
+          "block": 330178730,
+          "status": "verified",
+          "ms": 237,
+          "blockHash": "0x950fc351c7e760aa9c7ea20c8f7b2c54435943e45ad5e481eeb455377711d0e0",
+          "blockReceipts": 4
+        },
+        {
+          "block": 328950104,
+          "status": "verified",
+          "ms": 266,
+          "blockHash": "0x3327fe7971ad6d768a66c33641a7b800c8b6c29ec5263c44cb6f8791aca7b3dc",
+          "blockReceipts": 5
+        }
+      ]
+    }
+  ]
+}

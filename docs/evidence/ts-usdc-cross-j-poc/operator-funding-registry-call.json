@@ -1,0 +1,10 @@
+{
+  "chainId": 11155111,
+  "financialBroadcasts": 0,
+  "method": "eth_call",
+  "observedAt": "2026-11-17T19:00:38.096Z",
+  "result": {
+    "status": "success",
+    "value": "0x0000000000000000000000000000000000000000000000000000000000000002"
+  }
+}

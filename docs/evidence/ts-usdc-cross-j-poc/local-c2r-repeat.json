@@ -1,0 +1,165 @@
+{
+  "c2r": {
+    "amount": {
+      "__xlnType": "BigInt",
+      "value": "1000000"
+    },
+    "blockNumber": 36,
+    "collateralAfter": {
+      "__xlnType": "BigInt",
+      "value": "0"
+    },
+    "execution": "Source Hub Runtime proposed cooperative C2R over the authenticated Runtime adapter. User and Hub observed the committed Account.",
+    "hash": "0x292e28eb15e27efbec142d76dc83920be3a39eb5baf858751a00548b28456ea5",
+    "hubNonce": 0,
+    "reserveAfter": {
+      "__xlnType": "BigInt",
+      "value": "1000001"
+    },
+    "reserveBefore": {
+      "__xlnType": "BigInt",
+      "value": "1"
+    }
+  },
+  "candidateDigest": "aeba1893e56e24232365afb5df76d05c82ed951e6520aba9c731ae802f7bb073",
+  "candidateHead": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26",
+  "firstRun": {
+    "execution": "Canonical TypeScript ingress, Cross-J and external payout commands through a fixture gateway.",
+    "paidUsdcAtoms": {
+      "__xlnType": "BigInt",
+      "value": "899801"
+    },
+    "targetHubReserveAfter": {
+      "__xlnType": "BigInt",
+      "value": "100199"
+    }
+  },
+  "prepareBeforeC2R": {
+    "reason": "USDC_EXECUTION_EXISTING_POSITION_REQUIRES_ORIGINAL_AUTHORITY",
+    "rejected": true
+  },
+  "publicBroadcasts": 0,
+  "secondManifest": {
+    "approved": false,
+    "chains": [
+      {
+        "chainId": 11155111,
+        "hubEntity": "0x4f8937dcb1e2903c2e7b7b79f16a56457134ae2963485f7be6f2b0f765bc6ddc",
+        "payers": [
+          {
+            "address": "0x1f40468c43feedc80f30882792ed64714e5a7cf2",
+            "firstNonce": 3,
+            "role": "source-user"
+          }
+        ],
+        "userEntity": "0x2ff212de3ae680da9990d05f3e618d2c6c108d71d49fde52794bed8e9444f923"
+      },
+      {
+        "chainId": 421614,
+        "hubEntity": "0x11691d8afbe349157ba48d23b497ca8e94b13684f583019269684abd76c1594e",
+        "payers": [
+          {
+            "address": "0x797aef12afc7d969eba90b704fc13375f59d3211",
+            "firstNonce": 1,
+            "role": "target-user"
+          },
+          {
+            "address": "0xf6d8510a72efdbc7ff21914070da7cea14733cdf",
+            "firstNonce": 1,
+            "role": "target-hub"
+          }
+        ],
+        "userEntity": "0x5135239c83d930f44b59ff7f35ac43c272d66a18f588760b13bd84450e98af8a"
+      }
+    ],
+    "runId": "local-second",
+    "sameAccounts": true
+  },
+  "secondRun": {
+    "execution": "Production financial CLI with existing operator/user stores and an authority copy approved only for the local fixture.",
+    "ingress": [
+      {
+        "blockHash": "0x6ef5b09949b2465e777f692a778ba9f0363b453b950891873426eeb4fa8365d8",
+        "blockNumber": 50,
+        "hash": "0x5823358c2a840658c3683d4a087cba452eed72572f875fba5a922c2664762de9",
+        "nonce": 3,
+        "payer": "0x1f40468c43feedc80f30882792ed64714e5a7cf2",
+        "status": 1
+      },
+      {
+        "blockHash": "0x3c4d25f21f68b1e7250b393afc9341c972349ee2951c6b8f8ae6ea0e9bb88575",
+        "blockNumber": 51,
+        "hash": "0x7fc3f5bc54f5eacc3c296711a45327aae637bba3707f0af174d628bd3b27b69e",
+        "nonce": 4,
+        "payer": "0x1f40468c43feedc80f30882792ed64714e5a7cf2",
+        "status": 1
+      },
+      {
+        "blockHash": "0xf8ee5e0c7be5b31ab1941d78d1085f87398a73f94a68e1bd2f0eb46311134b47",
+        "blockNumber": 54,
+        "hash": "0x4586d3294411e6bf95d2a85244c20d8a5095ecf14124996acd76d06a1aa2a9b7",
+        "nonce": 5,
+        "payer": "0x1f40468c43feedc80f30882792ed64714e5a7cf2",
+        "status": 1
+      }
+    ],
+    "paidUsdcAtoms": {
+      "__xlnType": "BigInt",
+      "value": "899801"
+    },
+    "recipientAfter": {
+      "__xlnType": "BigInt",
+      "value": "1799602"
+    },
+    "recipientBefore": {
+      "__xlnType": "BigInt",
+      "value": "899801"
+    },
+    "sourceAmount": {
+      "__xlnType": "BigInt",
+      "value": "1000000"
+    },
+    "target": [
+      {
+        "blockHash": "0x9dd32445d59516d20c49e695b999da2701899fa3d40fea17f9094fbbad1d3f2c",
+        "blockNumber": 52,
+        "hash": "0xe7d539850cadab0791166286ada2ea19f23e6038efac85fde9999dd901dd8cda",
+        "nonce": 1,
+        "payer": "0xf6d8510a72efdbc7ff21914070da7cea14733cdf",
+        "status": 1
+      },
+      {
+        "blockHash": "0x31fe21113898e1f99965c74b9360bd0fcc686f962f77c4f7c2b8c07af3e00066",
+        "blockNumber": 56,
+        "hash": "0x640f745a3a5cced9a66167710699bb7cc2b7c6261b83c8906c98f02eecb19cdb",
+        "nonce": 1,
+        "payer": "0x797aef12afc7d969eba90b704fc13375f59d3211",
+        "status": 1
+      }
+    ],
+    "targetHubReserveAfter": {
+      "__xlnType": "BigInt",
+      "value": "0"
+    }
+  },
+  "stand": "Two private loopback Anvil chains, real Depository contracts and separate Runtime processes.",
+  "status": "local-same-accounts-repeat-complete",
+  "targetTopup": {
+    "amount": {
+      "__xlnType": "BigInt",
+      "value": "799602"
+    },
+    "approvalHash": "0xeeefec3c8052de5920369fca5ec00d2fa39bd7977dc5a26e342bf2fbbb2b777b",
+    "execution": "Local fixture sponsor used exact approve and signed E2R with a nonzero reserve baseline.",
+    "reserveAfter": {
+      "__xlnType": "BigInt",
+      "value": "899801"
+    },
+    "reserveBefore": {
+      "__xlnType": "BigInt",
+      "value": "100199"
+    },
+    "transactionHash": "0xf3b61bd8a4229fa1e0bd31c2b9422b5a87da14e77eda0fe74c99b6ef2ece8188"
+  },
+  "verifiedAt": "2026-11-18T21:33:33.306Z"
+}

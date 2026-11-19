@@ -1,0 +1,209 @@
+{
+  "status": "external-gateway-retry-prepared-unapproved",
+  "manifest": "fresh-public-demo-one-run-guarded-authority.json",
+  "manifestSha256": "4e896b982ec9423ed804424ea5bac684d33c225fa8dd1336bc210c2638a221f0",
+  "runId": "fresh-w4vgds-1usdc-20261118-guarded",
+  "predecessorAttempt": "fresh-public-demo-one-run-catalog-mismatch.json",
+  "expiresAt": "2026-11-18T23:30:00Z",
+  "configurationProof": {
+    "manifestSha256": "4e896b982ec9423ed804424ea5bac684d33c225fa8dd1336bc210c2638a221f0",
+    "runId": "fresh-w4vgds-1usdc-20261118-guarded",
+    "expiresAt": 1795044600000,
+    "observedAt": "2026-11-18T20:06:25.708Z",
+    "originalCatalogDigest": "a46f46e495c3085057c3eeed7d0d17b8ac595b9338d96440b4f124461852dbf1",
+    "projectedCatalogDigest": "8806dd4f3948be491e06da7fea23ef3e612c63194880be417960853bf032c7b1",
+    "originalPassesInMemoryAuthorityValidation": true,
+    "projectedCatalogRejected": true,
+    "readOnlyGatewayRejectsAuthority": true,
+    "operatorRoles": [
+      "hub",
+      "mm"
+    ],
+    "operatorArgs": [
+      "--directory",
+      "/Users/nick/Projects/xlnfinance/xln/.logs/ts-usdc-cross-j-poc/demo/fresh-w4vGds",
+      "--external-gateway",
+      "--operators-only",
+      "--hub-store",
+      ".logs/ts-usdc-cross-j-poc/demo/fresh-w4vGds/hub/runtime",
+      "--mm-store",
+      ".logs/ts-usdc-cross-j-poc/demo/fresh-w4vGds/mm/runtime",
+      "--user-store",
+      ".logs/ts-usdc-cross-j-poc/demo/fresh-w4vGds/user/runtime",
+      "--startup-timeout-ms",
+      "2100000"
+    ],
+    "financialCliStarted": false,
+    "runtimeOperatorsStarted": false,
+    "signatureCount": 0,
+    "broadcastCount": 0
+  },
+  "plannedGateway": {
+    "entrypoint": "jurisdictions/scripts/usdc-cross-j-preflight/operators/gateway.ts",
+    "catalogPath": ".logs/ts-usdc-cross-j-poc/demo/fresh-w4vGds/jurisdictions.json",
+    "apiBase": "http://localhost:8080",
+    "operatorFlags": [
+      "--external-gateway",
+      "--operators-only"
+    ]
+  },
+  "anchorAndPayerVerification": {
+    "verifiedAt": "2026-11-18T20:06:24.571Z",
+    "signatureAuthorityRejected": true,
+    "authorityDigest": "341d85b43873a8f464202b740bc5dad85b3d3ce9069191ec6ed565fa6d3b54a6",
+    "chains": [
+      {
+        "chainId": 11155111,
+        "verification": "passed",
+        "currentAndHistoryAgree": true,
+        "payers": [
+          {
+            "role": "source-user",
+            "nativeWei": "2000000000000000",
+            "maximumWei": "1800000000000000",
+            "unallocatedWei": "200000000000000"
+          }
+        ]
+      },
+      {
+        "chainId": 421614,
+        "verification": "passed",
+        "currentAndHistoryAgree": true,
+        "payers": [
+          {
+            "role": "target-user",
+            "nativeWei": "100000000000000",
+            "maximumWei": "70000000000000",
+            "unallocatedWei": "30000000000000"
+          },
+          {
+            "role": "target-hub",
+            "nativeWei": "100000000000000",
+            "maximumWei": "50000000000000",
+            "unallocatedWei": "50000000000000"
+          }
+        ]
+      }
+    ]
+  },
+  "chainObservations": {
+    "observedAt": "2026-11-18T20:06:25.693Z",
+    "publicBroadcasts": 0,
+    "chains": [
+      {
+        "chainId": 11155111,
+        "observedBlock": {
+          "number": 12163684,
+          "hash": "0x24dabebde8dc9fcc04a73f7b6b981e83ac31fcc16ec9145dd56408deebc34713"
+        },
+        "baseFeeWei": "15",
+        "feeData": {
+          "gasPriceWei": "17",
+          "maxFeePerGasWei": "32",
+          "maxPriorityFeePerGasWei": "2"
+        },
+        "token": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+        "depository": "0x32A4A72992aD142E36fA1C5989b95FeD60987818",
+        "depositoryCodeHash": "0xd56dbdedd8973d72780dd49bbe5b25d9cc6a2cf00d5182651b448d9782005a51",
+        "user": {
+          "signer": "0x61ff4c022bcc7d342d0d68a7b85f18e0fd7d9446",
+          "entity": "0xcfcdd2d155d6ee85d446d49045cb444a78df66b89a18c84959665a040671dae2",
+          "nativeWei": "2000000000000000",
+          "nonce": 0,
+          "pendingNonce": 0,
+          "entityNonce": "0",
+          "usdcAtoms": "1000000",
+          "allowanceAtoms": "0",
+          "reserveAtoms": "0",
+          "collateralAtoms": "0",
+          "activeDebts": "0"
+        },
+        "hub": {
+          "signer": "0x944d742ada37d5416774d6303a649326eb1e9478",
+          "entity": "0x64abda6ea9caaae7ecc550e8d4531200893574572d253a8c7e3495d725995260",
+          "nativeWei": "1000000000000000",
+          "nonce": 0,
+          "pendingNonce": 0,
+          "entityNonce": "0",
+          "reserveAtoms": "1",
+          "activeDebts": "0"
+        },
+        "depositoryUsdcAtoms": "1000001",
+        "approval": {
+          "call": {
+            "from": "0x61ff4c022bcc7d342d0d68a7b85f18e0fd7d9446",
+            "to": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+            "data": "0x095ea7b300000000000000000000000032a4a72992ad142e36fa1c5989b95fed6098781800000000000000000000000000000000000000000000000000000000000f4240"
+          },
+          "gas": "140018"
+        }
+      },
+      {
+        "chainId": 421614,
+        "observedBlock": {
+          "number": 330519269,
+          "hash": "0xa3cdd9246d7ef8889a6cea453c679f68eb0abbaab3cb939b35e70babeae11e24"
+        },
+        "baseFeeWei": "20000000",
+        "feeData": {
+          "gasPriceWei": "20026000",
+          "maxFeePerGasWei": "40052000",
+          "maxPriorityFeePerGasWei": "0"
+        },
+        "token": "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d",
+        "depository": "0x8223AA4c60Adb851f53a120c3D3841De9e77c188",
+        "depositoryCodeHash": "0x8474e986e82636c385f7ca9ef92c97e3d400ba862fa065eb51807b774ad9a72c",
+        "user": {
+          "signer": "0xb77348f8f01e060934024fefc319c66653df6fa2",
+          "entity": "0x01c743c9d2139446cf0d331676f122a042450522c26d8f09ce2b5a5b35add42a",
+          "nativeWei": "100000000000000",
+          "nonce": 0,
+          "pendingNonce": 0,
+          "entityNonce": "0",
+          "usdcAtoms": "0",
+          "allowanceAtoms": "0",
+          "reserveAtoms": "0",
+          "collateralAtoms": "0",
+          "activeDebts": "0"
+        },
+        "hub": {
+          "signer": "0xa73b329dc876173b2a7161cdde716a78209b0cac",
+          "entity": "0x529aa3f7dca1cbe2366f781ab55915bc9b0762b26bcc382ef321433d9de2b4a2",
+          "nativeWei": "100000000000000",
+          "nonce": 0,
+          "pendingNonce": 0,
+          "entityNonce": "0",
+          "reserveAtoms": "1000000",
+          "activeDebts": "0"
+        },
+        "depositoryUsdcAtoms": "6000000",
+        "nitroL1FromLocalCalldata": [
+          {
+            "stage": "target-r2c",
+            "localReceiptHash": "0xbe8c8d68a32fce8f486e74b4e45b173c701652e7e5e1aadc8a98d90b390cd9be",
+            "dataBytes": 1220,
+            "l1Gas": "0",
+            "baseFeeWei": "20026000",
+            "l1BaseFeeEstimateWei": "0"
+          },
+          {
+            "stage": "target-c2r-r2e",
+            "localReceiptHash": "0xa2a10fe063ae41f995809598c69a6cbc000da7701d04441a4d05d12f38b44da0",
+            "dataBytes": 2468,
+            "l1Gas": "0",
+            "baseFeeWei": "20026000",
+            "l1BaseFeeEstimateWei": "0"
+          }
+        ]
+      }
+    ]
+  },
+  "readinessEvidence": "fresh-public-demo-guarded-live-readiness.json",
+  "beforeFinancialExecution": [
+    "Obtain explicit retry authorization for the same run and manifest.",
+    "Wait for the restored Hub and MM and refresh the live quote, tariff, credit, reserve backing, payer balances and nonces.",
+    "Estimate each exact authorized batch with Hanko once its preceding state commits."
+  ],
+  "publicTransactionSignatures": 0,
+  "publicBroadcasts": 0
+}

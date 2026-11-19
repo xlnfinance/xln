@@ -1,0 +1,19 @@
+{
+  "financialBroadcasts": 0,
+  "observedAt": "2026-11-17T18:54:31.784Z",
+  "purpose": "Explicit candidate capability probe, no Runtime failover configured.",
+  "results": [
+    {
+      "chainId": 11155111,
+      "error": "could not coalesce error (error={ \"code\": 4444, \"message\": \"distance to target block exceeds maximum proof window\" }, payload={ \"id\": 4, \"jsonrpc\": \"2.0\", \"method\": \"eth_getProof\", \"params\": [ \"0x9C4173eed1DC7c24c5207A705382488c859588E3\", [ \"0x0000000000000000000000000000000000000000000000000000000000000004\" ], \"0xb964d8\" ] }, code=UNKNOWN_ERROR, version=6.17.0)",
+      "status": "unavailable",
+      "url": "https://ethereum-sepolia-rpc.publicnode.com"
+    },
+    {
+      "chainId": 421614,
+      "error": "could not coalesce error (error={ \"code\": -32000, \"message\": \"historical state b853a3b3173f3c173731e201d7088597a9e9cae79ae3f49206043bedae0ed187 is not available\" }, payload={ \"id\": 4, \"jsonrpc\": \"2.0\", \"method\": \"eth_getProof\", \"params\": [ \"0x3DaE23be54dAb4e88b92D4e4c3db42f7D9ce0Df9\", [ \"0x0000000000000000000000000000000000000000000000000000000000000004\" ], \"0x13a9cccf\" ] }, code=UNKNOWN_ERROR, version=6.17.0)",
+      "status": "unavailable",
+      "url": "https://arbitrum-sepolia-rpc.publicnode.com"
+    }
+  ]
+}

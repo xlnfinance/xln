@@ -1,0 +1,124 @@
+{
+  "ticket": "12",
+  "status": "official-arbitrum-rpc-measured-funded-reserves-pending",
+  "startedAt": "2026-11-17T22:04:48.703Z",
+  "observedAt": "2026-11-17T22:06:53.202Z",
+  "candidateHead": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26",
+  "candidateDigest": "16b247e8d0aa20caaf38afa141e3b0f66de3830554847634d033c72ec1f92b78",
+  "dirty": true,
+  "source": "https://docs.arbitrum.io/chain-info#arbitrum-public-rpc-endpoints",
+  "sessionDirectory": ".logs/ts-usdc-cross-j-poc/public/sessions/restore-9VUjRD",
+  "originalHubStore": ".logs/ts-usdc-cross-j-poc/public/hub/attempt-1794864456845",
+  "mode": "hub-only, managed read-only gateway, pacing enabled",
+  "startupTimeoutMs": 120000,
+  "sessionElapsedMs": 124063,
+  "sessionResult": "USDC_SESSION_READINESS_TIMEOUT:hub",
+  "profile": {
+    "pageBlocks": {
+      "11155111": 31,
+      "421614": 127
+    },
+    "maximumHeaderBatchCalls": 32,
+    "headerDispatchIntervalMs": 250,
+    "receiptDispatchIntervalMs": 1000
+  },
+  "upstreamHeaderMultiItemRangeBatches": 184,
+  "headerBatchesSentAfterObservedClientAbort": 0,
+  "chains": [
+    {
+      "chainId": 11155111,
+      "headerHost": "rpc.sepolia.ethpandaops.io",
+      "headerFingerprint": "ea37f436779dc1fa5fb56704e8ea35da30c159d85b333faa3e5bfcb758afd2f1",
+      "historyFingerprint": "92eca84d3029d9e3b8330990d4463178eb8ac68b2dd77f1e9989b22c8c80f5e3",
+      "initialHeadProbe": 12157242,
+      "incorporatedJCursor": 12149976,
+      "restoredLocalScanThrough": 12150100,
+      "committedBeforeEachRange": [
+        12149976
+      ],
+      "authenticatedRanges": 4,
+      "authenticatedBlocks": 68,
+      "firstAuthenticatedBlock": 12149977,
+      "authenticatedThrough": 12150044,
+      "receiptResults": {
+        "reply": 104,
+        "429": 4
+      },
+      "headers": {
+        "sent": 22,
+        "maxItems": 32
+      },
+      "headerHttp429": 0,
+      "receipt429": 4,
+      "walLocalScanThroughAfter": 12150100,
+      "newPersistentLocalScanBlocks": 0,
+      "fundingDepositBlock": 12156195,
+      "blocksRemainingToFundingAfter": 6095,
+      "authenticatedBlocksPerSecond": 0.548
+    },
+    {
+      "chainId": 421614,
+      "headerHost": "sepolia-rollup.arbitrum.io",
+      "headerFingerprint": "2905786cf5364719a0186fa2573377b737954c925ee9af61c56a07d19771f940",
+      "historyFingerprint": "17d81ad60c2be3ff9ce4bec3563dd1104a82df8c7883ebd70ffd0b4e30515a4b",
+      "initialHeadProbe": 330223707,
+      "incorporatedJCursor": 329895132,
+      "restoredLocalScanThrough": 329896420,
+      "committedBeforeEachRange": [
+        329895132
+      ],
+      "authenticatedRanges": 77,
+      "authenticatedBlocks": 1010,
+      "firstAuthenticatedBlock": 329895133,
+      "authenticatedThrough": 329896142,
+      "receiptResults": {
+        "reply": 8
+      },
+      "headers": {
+        "sent": 258,
+        "maxItems": 32,
+        "RPC_BATCH_HTTP_429": 7
+      },
+      "headerHttp429": 7,
+      "receipt429": 0,
+      "walLocalScanThroughAfter": 329896420,
+      "newPersistentLocalScanBlocks": 0,
+      "fundingDepositBlock": 330178730,
+      "blocksRemainingToFundingAfter": 282310,
+      "authenticatedBlocksPerSecond": 8.141
+    }
+  ],
+  "hubWal": {
+    "replayHeight": 58,
+    "afterLatestHeight": 59,
+    "frames": [
+      {
+        "height": 59,
+        "runtimeTxs": [
+          {
+            "type": "importJ"
+          }
+        ],
+        "entityTxs": [],
+        "runtimeOutputCount": 0
+      }
+    ],
+    "observedEventBlocks": 0,
+    "cursorAdvanceTransactions": 0
+  },
+  "mmLaunched": false,
+  "userLaunched": false,
+  "additionalFinancialBroadcasts": 0,
+  "standReleased": true,
+  "validation": {
+    "focusedTests": 81,
+    "focusedAssertions": 3357,
+    "deploymentTypecheck": "pass",
+    "aggregateCheck": "pass",
+    "shortGates": 3,
+    "sourceGates": 38,
+    "soundcheckGates": 10,
+    "frozenCore": "unchanged"
+  },
+  "limitsOfInference": "Direct test of the official Arbitrum header endpoint at a higher dispatch rate than the measured 500/1000 ms PublicNode profile. PublicNode runs also used different dispatch intervals. This is a profile feasibility measurement rather than a controlled endpoint ranking. The run reauthenticated the previous validator-local suffix. The sample does not establish sustained rate or full funded restore."
+}

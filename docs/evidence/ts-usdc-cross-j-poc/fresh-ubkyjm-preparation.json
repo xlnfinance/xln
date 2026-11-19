@@ -1,0 +1,647 @@
+{
+  "status": "fresh-runtime-and-unsigned-funding-verified",
+  "startedAt": "2026-11-19T17:23:20.266Z",
+  "stand": ".logs/ts-usdc-cross-j-poc/demo/fresh-UbkYJm",
+  "candidate": {
+    "digest": "7c1dc0e7b67b7e79389845459ff95c673128c348320ac669dbd229cb19295fc4",
+    "head": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26"
+  },
+  "catalog": {
+    "sha256": "1ea542525a4a0c773cd3b4890f75331b66df095be006f0dc57eac3d0163a3ff0",
+    "identicalTo": ".logs/ts-usdc-cross-j-poc/demo/fresh-w4vGds/jurisdictions.json",
+    "codeHashesMatchPreviouslyVerifiedStacks": true
+  },
+  "startup": {
+    "headerBindings": [
+      {
+        "chainId": 11155111,
+        "headerFingerprint": "18dddd47c8f4b183a5b2322a292c534f78b4c31ed168fbbc1af18f41767f3899",
+        "headerHost": "ethereum-sepolia-rpc.publicnode.com",
+        "historyFingerprint": "92eca84d3029d9e3b8330990d4463178eb8ac68b2dd77f1e9989b22c8c80f5e3"
+      },
+      {
+        "chainId": 421614,
+        "headerFingerprint": "b290f0154fffbfcf92b01e44993e5a79d9bfecf955f77a79566ee001e4e172c0",
+        "headerHost": "arbitrum-sepolia-rpc.publicnode.com",
+        "historyFingerprint": "17d81ad60c2be3ff9ce4bec3563dd1104a82df8c7883ebd70ffd0b4e30515a4b"
+      }
+    ],
+    "chainHeadsAtStartup": {
+      "421614": 330799699,
+      "11155111": 12169835
+    },
+    "jurisdictionReadyAtMs": {
+      "hub": 16794,
+      "mm": 37934
+    },
+    "health": {
+      "hub": {
+        "height": 48,
+        "jadapterReady": true,
+        "ok": true,
+        "phase": null,
+        "ready": null,
+        "reservesOk": false,
+        "tokenCatalogCount": 1
+      },
+      "mm": {
+        "height": 36,
+        "jadapterReady": null,
+        "ok": true,
+        "phase": null,
+        "ready": true,
+        "reservesOk": null,
+        "tokenCatalogCount": null
+      }
+    },
+    "unfundedIdentitiesChecked": true
+  },
+  "identities": {
+    "operators": [
+      {
+        "chains": [
+          {
+            "chainId": 11155111,
+            "entityId": "0x088c57a2803f70d7ee168cf5067e45a3c9a77bc8879e6b5f072e3ecc0d2245e7",
+            "jurisdictionName": "Ethereum Sepolia",
+            "name": "H1",
+            "signerId": "0x02e42216729d4db2981b1b0d2780d97c7582a9f6",
+            "signerLabel": "1"
+          },
+          {
+            "chainId": 421614,
+            "entityId": "0xccf32e2712576c8684040614a5073fb1b26e6e6e705730037dddbf2a8b9c86d8",
+            "jurisdictionName": "Arbitrum Sepolia",
+            "name": "H1",
+            "signerId": "0x661c2a253ff995d04fd8a602663ab829d4afb2a9",
+            "signerLabel": "1:Arbitrum Sepolia"
+          }
+        ],
+        "role": "hub"
+      },
+      {
+        "chains": [
+          {
+            "chainId": 11155111,
+            "entityId": "0x1ea1898b25485b9977c80023370ec60a316168e0069244634e191c58bffe0c87",
+            "jurisdictionName": "Ethereum Sepolia",
+            "name": "MM",
+            "signerId": "0xea37e92bf43842a5d672b66540c7e48a14dd3004",
+            "signerLabel": "1"
+          },
+          {
+            "chainId": 421614,
+            "entityId": "0x042fc0b44c77a8beb854384d27e8be4b3d1a64d97594f827aa15a9cf1385e990",
+            "jurisdictionName": "Arbitrum Sepolia",
+            "name": "MM",
+            "signerId": "0x1eaa42003deff091a2d4dd471fc574e9e768c0a2",
+            "signerLabel": "1:Arbitrum Sepolia"
+          }
+        ],
+        "role": "mm"
+      }
+    ],
+    "user": [
+      {
+        "chainId": 11155111,
+        "signerId": "0xa45408c58813bbd64b4fccbb2d45a479e05d3d05",
+        "entityId": "0xa61dfde7f0db6d47fe3682f60c62c83262f7137f8af45ab2b0b7124a530d00d0"
+      },
+      {
+        "chainId": 421614,
+        "signerId": "0xc610e84b42230a7294852f8f5d6cf2f6a181778a",
+        "entityId": "0xa4905e36a64f8d297b6cc3651bfa2e761d362b913d5e9ecf71697d56eea2173f"
+      }
+    ]
+  },
+  "wal": {
+    "operatorIntegrity": [
+      {
+        "anchors": [
+          {
+            "batchNonce": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "block": 12169834,
+            "blockHash": "0xd9625fa44e332f8b464f35c9ded48b937ba9fd87810b1a8de8050f15cc869f6f",
+            "chainId": 11155111,
+            "entityId": "0x088c57a2803f70d7ee168cf5067e45a3c9a77bc8879e6b5f072e3ecc0d2245e7",
+            "provenValuesRoot": "0xb357048f6e41726e32ec73f74fc4896f823f99d84d202f3ccc92f74c0afb7a21",
+            "runtimeFrame": 13,
+            "stateRoot": "0x069a935476cba1e95d2b78ef224626524ce7978aac62d718c59bbffa9b3b96de",
+            "tokenOneReserveAtoms": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            }
+          },
+          {
+            "batchNonce": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "block": 330799722,
+            "blockHash": "0x32e2bac395118cb23a4fb604c8f78f00e2b0b5aa9a4e37cc55b4c863588bbd65",
+            "chainId": 421614,
+            "entityId": "0xccf32e2712576c8684040614a5073fb1b26e6e6e705730037dddbf2a8b9c86d8",
+            "provenValuesRoot": "0x8630c40d79c04e23e0399fcb3e254ecae0626d17fdb30c7971b133acaaf97105",
+            "runtimeFrame": 13,
+            "stateRoot": "0x9de3c7db5c8e19082b57936359a19f2242291e23a91cb704fcb61bfcfc77ea24",
+            "tokenOneReserveAtoms": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            }
+          }
+        ],
+        "role": "hub",
+        "verified": {
+          "checkedFrames": 49,
+          "latestHeight": 49
+        }
+      },
+      {
+        "anchors": [
+          {
+            "batchNonce": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "block": 12169835,
+            "blockHash": "0x897b3023c4618353f982d2146d4b75516dce4ce47393d3022a3950cf5b7a21b6",
+            "chainId": 11155111,
+            "entityId": "0x1ea1898b25485b9977c80023370ec60a316168e0069244634e191c58bffe0c87",
+            "provenValuesRoot": "0x0afc14d85392dd481b73285b4d9a3d185a9357ba27bd63b41595e01225ebf9a3",
+            "runtimeFrame": 6,
+            "stateRoot": "0x56ce5fe1971e9899638487083f3f5356cd173b7e7093e300d91e1c847ca59dc9",
+            "tokenOneReserveAtoms": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            }
+          },
+          {
+            "batchNonce": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "block": 330799785,
+            "blockHash": "0x2684560d85a066d1e3dcd40c50dd9a068d9dd97d56003e6d8654255d97efc737",
+            "chainId": 421614,
+            "entityId": "0x042fc0b44c77a8beb854384d27e8be4b3d1a64d97594f827aa15a9cf1385e990",
+            "provenValuesRoot": "0xa5e9e36dad072a9b9fc974107b81bee7fbbac449e84964e6e6444aef14e9ec4a",
+            "runtimeFrame": 8,
+            "stateRoot": "0xd20e491159f3fae29b562706deddc7ecf0500348e5b6c4dd3df5b58387f80095",
+            "tokenOneReserveAtoms": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            }
+          }
+        ],
+        "role": "mm",
+        "verified": {
+          "checkedFrames": 36,
+          "latestHeight": 36
+        }
+      }
+    ],
+    "operatorReplay": [
+      {
+        "role": "hub",
+        "height": 49,
+        "restoredHeadVerified": true,
+        "runtimeId": "0x02e42216729d4db2981b1b0d2780d97c7582a9f6",
+        "entities": [
+          {
+            "chainId": 11155111,
+            "entityId": "0x088c57a2803f70d7ee168cf5067e45a3c9a77bc8879e6b5f072e3ecc0d2245e7",
+            "finalizedThroughHeight": 12169836,
+            "reserveAtoms": "0",
+            "accounts": 2
+          },
+          {
+            "chainId": 421614,
+            "entityId": "0xccf32e2712576c8684040614a5073fb1b26e6e6e705730037dddbf2a8b9c86d8",
+            "finalizedThroughHeight": 330799842,
+            "reserveAtoms": "0",
+            "accounts": 2
+          }
+        ]
+      },
+      {
+        "role": "mm",
+        "height": 36,
+        "restoredHeadVerified": true,
+        "runtimeId": "0xea37e92bf43842a5d672b66540c7e48a14dd3004",
+        "entities": [
+          {
+            "chainId": 11155111,
+            "entityId": "0x1ea1898b25485b9977c80023370ec60a316168e0069244634e191c58bffe0c87",
+            "finalizedThroughHeight": 12169836,
+            "reserveAtoms": "0",
+            "accounts": 1
+          },
+          {
+            "chainId": 421614,
+            "entityId": "0x042fc0b44c77a8beb854384d27e8be4b3d1a64d97594f827aa15a9cf1385e990",
+            "finalizedThroughHeight": 330799806,
+            "reserveAtoms": "0",
+            "accounts": 1
+          }
+        ]
+      }
+    ],
+    "userReplay": {
+      "height": 12,
+      "comparedIdentical": ["runtimeId", "height", "canonicalStateHash", "entityHashes", "accounts"],
+      "integrity": {
+        "latestHeight": 12,
+        "checkedFrames": 12
+      },
+      "livePendingOutputCount": 0,
+      "committedOutputCount": 1,
+      "restoredOutboxMatchesCommitted": true,
+      "outputs": [
+        {
+          "entityId": "0xccf32e2712576c8684040614a5073fb1b26e6e6e705730037dddbf2a8b9c86d8",
+          "originFrame": 12,
+          "operations": ["accountInput"]
+        }
+      ],
+      "canonicalStateHash": "0x26efe27662af3d88280dc9483e865f483bb85f9954757f16a73d5f630d216c55",
+      "orderedOutboxDigestAtLiveObservation": "0x632315f5af09a9a7da25ae16c4f8560df2b48d94d524d354b69f35289c56e0ea",
+      "orderedOutboxDigestAfterRestore": "0xadcb69949c4802965fa3e0820f9cad90e4014a0f0d03bacacabf36684a055bd3"
+    },
+    "totalFramesChecked": 97
+  },
+  "userAccounts": [
+    {
+      "chainId": 11155111,
+      "entityId": "0xa61dfde7f0db6d47fe3682f60c62c83262f7137f8af45ab2b0b7124a530d00d0",
+      "height": 2,
+      "hubEntityId": "0x088c57a2803f70d7ee168cf5067e45a3c9a77bc8879e6b5f072e3ecc0d2245e7",
+      "signerId": "0xa45408c58813bbd64b4fccbb2d45a479e05d3d05",
+      "bilateralFrameStateHash": "0xe1afbc4067475844787f159e655e41b3e5cb7c9d436e1cdd02449095bdeab40c",
+      "bothFrameHankosMatched": true
+    },
+    {
+      "chainId": 421614,
+      "entityId": "0xa4905e36a64f8d297b6cc3651bfa2e761d362b913d5e9ecf71697d56eea2173f",
+      "height": 2,
+      "hubEntityId": "0xccf32e2712576c8684040614a5073fb1b26e6e6e705730037dddbf2a8b9c86d8",
+      "signerId": "0xc610e84b42230a7294852f8f5d6cf2f6a181778a",
+      "bilateralFrameStateHash": "0x24d12af4c9e7870da9daa9f0df6df1def8f47d4d294be13b807a3395c45e28f1",
+      "bothFrameHankosMatched": true
+    }
+  ],
+  "funding": {
+    "approved": false,
+    "authorityPath": "docs/evidence/ts-usdc-cross-j-poc/fresh-ubkyjm-funding-authority-unsigned.json",
+    "chains": [
+      {
+        "anchorHash": "0xf144dad2cb4bd581667f852c9a629fd33689b836c703b6adf0dde8db1e6eb677",
+        "anchorNumber": 12169844,
+        "calls": [
+          {
+            "cap": {
+              "gasLimit": {
+                "__xlnType": "BigInt",
+                "value": "200000"
+              },
+              "maxFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "1000000000"
+              },
+              "maxPriorityFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "100000000"
+              }
+            },
+            "data": "0x095ea7b300000000000000000000000032a4a72992ad142e36fa1c5989b95fed609878180000000000000000000000000000000000000000000000000000000000000001",
+            "estimate": {
+              "__xlnType": "BigInt",
+              "value": "139993"
+            },
+            "nonce": 114,
+            "stage": "approval",
+            "to": "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
+            "valueWei": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            }
+          },
+          {
+            "cap": {
+              "gasLimit": {
+                "__xlnType": "BigInt",
+                "value": "600000"
+              },
+              "maxFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "1000000000"
+              },
+              "maxPriorityFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "100000000"
+              }
+            },
+            "encodedBatch": "0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000160000000000000000000000000000000000000000000000000000000000000018000000000000000000000000000000000000000000000000000000000000001a000000000000000000000000000000000000000000000000000000000000001c000000000000000000000000000000000000000000000000000000000000001e000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000220000000000000000000000000000000000000000000000000000000000000024000000000000000000000000000000000000000000000000000000000000003200000000000000000000000000000000000000000000000000000000000000340000000000000000000000000000000000000000000000000000000000000036000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001088c57a2803f70d7ee168cf5067e45a3c9a77bc8879e6b5f072e3ecc0d2245e70000000000000000000000001c7d4b196cb0c7b01d743fbc6116a902379c72380000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+            "estimate": "conditional-on-confirmed-allowance-and-authorized-hanko",
+            "hankoHash": "0x5b46ae8d05bb2ba163888e033c1910580dda788308dcc2d2260b80e31fddfc3d",
+            "nextEntityNonce": {
+              "__xlnType": "BigInt",
+              "value": "5"
+            },
+            "nonce": 115,
+            "stage": "deposit",
+            "to": "0x32a4a72992ad142e36fa1c5989b95fed60987818",
+            "valueWei": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            }
+          },
+          {
+            "cap": {
+              "gasLimit": {
+                "__xlnType": "BigInt",
+                "value": "300000"
+              },
+              "maxFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "1000000000"
+              },
+              "maxPriorityFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "100000000"
+              }
+            },
+            "data": "0x",
+            "estimate": {
+              "__xlnType": "BigInt",
+              "value": "207391"
+            },
+            "nonce": 116,
+            "stage": "native-topup",
+            "to": "0x02e42216729d4db2981b1b0d2780d97c7582a9f6",
+            "valueWei": {
+              "__xlnType": "BigInt",
+              "value": "1000000000000000"
+            }
+          },
+          {
+            "cap": {
+              "gasLimit": {
+                "__xlnType": "BigInt",
+                "value": "200000"
+              },
+              "maxFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "1000000000"
+              },
+              "maxPriorityFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "100000000"
+              }
+            },
+            "data": "0xa9059cbb000000000000000000000000a45408c58813bbd64b4fccbb2d45a479e05d3d0500000000000000000000000000000000000000000000000000000000000f4240",
+            "estimate": {
+              "__xlnType": "BigInt",
+              "value": "154151"
+            },
+            "nonce": 117,
+            "stage": "user-principal-transfer",
+            "to": "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
+            "valueWei": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            }
+          },
+          {
+            "cap": {
+              "gasLimit": {
+                "__xlnType": "BigInt",
+                "value": "300000"
+              },
+              "maxFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "1000000000"
+              },
+              "maxPriorityFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "100000000"
+              }
+            },
+            "data": "0x",
+            "estimate": {
+              "__xlnType": "BigInt",
+              "value": "207391"
+            },
+            "nonce": 118,
+            "stage": "user-native-topup",
+            "to": "0xa45408c58813bbd64b4fccbb2d45a479e05d3d05",
+            "valueWei": {
+              "__xlnType": "BigInt",
+              "value": "2000000000000000"
+            }
+          }
+        ],
+        "chainId": 11155111,
+        "depository": "0x32a4a72992ad142e36fa1c5989b95fed60987818",
+        "feesWei": {
+          "__xlnType": "BigInt",
+          "value": "1600000000000000"
+        },
+        "funder": {
+          "address": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+          "firstNonce": 114
+        },
+        "funderNativeWei": {
+          "__xlnType": "BigInt",
+          "value": "41198834504570788475"
+        },
+        "funderUsdcAtoms": {
+          "__xlnType": "BigInt",
+          "value": "6999999"
+        },
+        "hubEntity": "0x088c57a2803f70d7ee168cf5067e45a3c9a77bc8879e6b5f072e3ecc0d2245e7",
+        "hubSigner": "0x02e42216729d4db2981b1b0d2780d97c7582a9f6",
+        "hubUsdcAtoms": {
+          "__xlnType": "BigInt",
+          "value": "1"
+        },
+        "nativeOutflowCeilingWei": {
+          "__xlnType": "BigInt",
+          "value": "4600000000000000"
+        },
+        "token": "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
+        "userSigner": "0xa45408c58813bbd64b4fccbb2d45a479e05d3d05",
+        "userUsdcAtoms": {
+          "__xlnType": "BigInt",
+          "value": "1000000"
+        }
+      },
+      {
+        "anchorHash": "0x6532dafb634a1ee7c8fbb5846e43580ad9677dcacbc101ac8c13176340f3ca2b",
+        "anchorNumber": 330800173,
+        "calls": [
+          {
+            "cap": {
+              "gasLimit": {
+                "__xlnType": "BigInt",
+                "value": "90000"
+              },
+              "maxFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "100000000"
+              },
+              "maxPriorityFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "0"
+              }
+            },
+            "data": "0x095ea7b30000000000000000000000008223aa4c60adb851f53a120c3d3841de9e77c18800000000000000000000000000000000000000000000000000000000000f4240",
+            "estimate": {
+              "__xlnType": "BigInt",
+              "value": "56240"
+            },
+            "nonce": 37,
+            "stage": "approval",
+            "to": "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d",
+            "valueWei": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            }
+          },
+          {
+            "cap": {
+              "gasLimit": {
+                "__xlnType": "BigInt",
+                "value": "600000"
+              },
+              "maxFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "100000000"
+              },
+              "maxPriorityFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "0"
+              }
+            },
+            "encodedBatch": "0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000160000000000000000000000000000000000000000000000000000000000000018000000000000000000000000000000000000000000000000000000000000001a000000000000000000000000000000000000000000000000000000000000001c000000000000000000000000000000000000000000000000000000000000001e000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000220000000000000000000000000000000000000000000000000000000000000024000000000000000000000000000000000000000000000000000000000000003200000000000000000000000000000000000000000000000000000000000000340000000000000000000000000000000000000000000000000000000000000036000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001ccf32e2712576c8684040614a5073fb1b26e6e6e705730037dddbf2a8b9c86d800000000000000000000000075faf114eafb1bdbe2f0316df893fd58ce46aa4d00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+            "estimate": "conditional-on-confirmed-allowance-and-authorized-hanko",
+            "hankoHash": "0xa6f88b9da4f1ecf2039a3d324ad4761c947994ae7f5e04ae8fbcedfba425bf0b",
+            "nextEntityNonce": {
+              "__xlnType": "BigInt",
+              "value": "5"
+            },
+            "nonce": 38,
+            "stage": "deposit",
+            "to": "0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+            "valueWei": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            }
+          },
+          {
+            "cap": {
+              "gasLimit": {
+                "__xlnType": "BigInt",
+                "value": "300000"
+              },
+              "maxFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "100000000"
+              },
+              "maxPriorityFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "0"
+              }
+            },
+            "data": "0x",
+            "estimate": {
+              "__xlnType": "BigInt",
+              "value": "21000"
+            },
+            "nonce": 39,
+            "stage": "native-topup",
+            "to": "0x661c2a253ff995d04fd8a602663ab829d4afb2a9",
+            "valueWei": {
+              "__xlnType": "BigInt",
+              "value": "100000000000000"
+            }
+          },
+          {
+            "cap": {
+              "gasLimit": {
+                "__xlnType": "BigInt",
+                "value": "300000"
+              },
+              "maxFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "100000000"
+              },
+              "maxPriorityFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "0"
+              }
+            },
+            "data": "0x",
+            "estimate": {
+              "__xlnType": "BigInt",
+              "value": "21000"
+            },
+            "nonce": 40,
+            "stage": "user-native-topup",
+            "to": "0xc610e84b42230a7294852f8f5d6cf2f6a181778a",
+            "valueWei": {
+              "__xlnType": "BigInt",
+              "value": "100000000000000"
+            }
+          }
+        ],
+        "chainId": 421614,
+        "depository": "0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+        "feesWei": {
+          "__xlnType": "BigInt",
+          "value": "129000000000000"
+        },
+        "funder": {
+          "address": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+          "firstNonce": 37
+        },
+        "funderNativeWei": {
+          "__xlnType": "BigInt",
+          "value": "528259525552181600"
+        },
+        "funderUsdcAtoms": {
+          "__xlnType": "BigInt",
+          "value": "14000000"
+        },
+        "hubEntity": "0xccf32e2712576c8684040614a5073fb1b26e6e6e705730037dddbf2a8b9c86d8",
+        "hubSigner": "0x661c2a253ff995d04fd8a602663ab829d4afb2a9",
+        "hubUsdcAtoms": {
+          "__xlnType": "BigInt",
+          "value": "1000000"
+        },
+        "nativeOutflowCeilingWei": {
+          "__xlnType": "BigInt",
+          "value": "329000000000000"
+        },
+        "token": "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d",
+        "userSigner": "0xc610e84b42230a7294852f8f5d6cf2f6a181778a",
+        "userUsdcAtoms": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        }
+      }
+    ],
+    "executionAllowed": false,
+    "expiresAt": "2026-11-19T19:25:23.860Z",
+    "publicBroadcasts": 0,
+    "publicSignatures": 0,
+    "sha256": "f7c4cedce67e0636da18055dbddf21ac3b11573427a73002339f8fc7ec40bcc5",
+    "verifiedSameCandidate": true
+  },
+  "separateNextStage": "confirm funded reserves in the same WALs and obtain the new executable quote, tariff and guarded journey package",
+  "publicTransactionSignatures": 0,
+  "publicTransactionBroadcasts": 0,
+  "standReleased": true
+}

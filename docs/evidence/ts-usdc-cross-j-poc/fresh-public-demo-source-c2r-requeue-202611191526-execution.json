@@ -1,0 +1,952 @@
+{
+  "schemaVersion": 1,
+  "scope": "source-c2r recovery for fresh-w4vGds on Ethereum Sepolia",
+  "manifestSha256": "ed9470338240fe7a9a2fc4efb75419358d09ccd56fee851e08cc8ad1c7d24228",
+  "sourceCandidate": {
+    "head": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26",
+    "executableDigest": "7c1dc0e7b67b7e79389845459ff95c673128c348320ac669dbd229cb19295fc4"
+  },
+  "expiryUtc": "2026-11-19T17:26:00Z",
+  "priorLocallyPreparedHash": "0x40d4b57ad8675d886561eb4a1299f635390de51a4e7cbeb635a8e76e1b2a3922",
+  "closedAt": "2026-11-19T17:20:54Z",
+  "standReleased": true,
+  "firstExecution": {
+    "profile": {
+      "headerProvider": "ethPandaOps",
+      "watcherPageBlocks": 31,
+      "headerBatchCalls": 32,
+      "receiptBatchCalls": 32,
+      "receiptProvider": "HyperRPC",
+      "receiptIntervalMs": 12500
+    },
+    "openingObservedAt": "2026-11-19T15:32:00.384Z",
+    "opening": {
+      "candidateHash": "0x40d4b57ad8675d886561eb4a1299f635390de51a4e7cbeb635a8e76e1b2a3922",
+      "observedAt": "2026-11-19T15:32:00.384Z",
+      "preparedHashLookup": [
+        {
+          "receipt": null,
+          "transaction": null
+        },
+        {
+          "receipt": null,
+          "transaction": null
+        }
+      ],
+      "rpcs": ["https://ethereum-sepolia-rpc.publicnode.com", "https://rpc.sepolia.ethpandaops.io"],
+      "state": {
+        "accountKey": "0x64abda6ea9caaae7ecc550e8d4531200893574572d253a8c7e3495d725995260cfcdd2d155d6ee85d446d49045cb444a78df66b89a18c84959665a040671dae2",
+        "accountNonce": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "chainId": 11155111,
+        "codeHashesMatched": 6,
+        "collateralAtoms": {
+          "__xlnType": "BigInt",
+          "value": "1000000"
+        },
+        "depositoryBackingAtoms": {
+          "__xlnType": "BigInt",
+          "value": "2000001"
+        },
+        "disputeHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "hub": {
+          "board": {
+            "current": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "exists": false,
+            "proposed": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "debtAtoms": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "entityNonce": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "eoaNonce": 0,
+          "nativeWei": {
+            "__xlnType": "BigInt",
+            "value": "1000000000000000"
+          },
+          "reserveAtoms": {
+            "__xlnType": "BigInt",
+            "value": "1"
+          }
+        },
+        "ondelta": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "point": {
+          "baseFeePerGasWei": {
+            "__xlnType": "BigInt",
+            "value": "15"
+          },
+          "hash": "0x1918faf1e154d12e8710d76a171bab89f76e1d74e4255a50d1feeac6eeac9370",
+          "number": 12169295,
+          "timestamp": "2026-11-19T15:31:48.000Z"
+        },
+        "user": {
+          "board": {
+            "current": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "exists": false,
+            "proposed": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "debtAtoms": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "entityNonce": {
+            "__xlnType": "BigInt",
+            "value": "2"
+          },
+          "eoaNonce": 3,
+          "nativeWei": {
+            "__xlnType": "BigInt",
+            "value": "1999999986561179"
+          },
+          "reserveAtoms": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          }
+        }
+      },
+      "tip": [
+        {
+          "fee": {
+            "gasPriceWei": {
+              "__xlnType": "BigInt",
+              "value": "18"
+            },
+            "maxPriorityFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "3"
+            }
+          },
+          "hubEOA": {
+            "latest": 0,
+            "pending": 0
+          }
+        },
+        {
+          "fee": {
+            "gasPriceWei": {
+              "__xlnType": "BigInt",
+              "value": "18"
+            },
+            "maxPriorityFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "3"
+            }
+          },
+          "hubEOA": {
+            "latest": 0,
+            "pending": 0
+          }
+        }
+      ]
+    },
+    "workerRanges": [
+      {
+        "role": "hub",
+        "recoveredAtRuntimeFrame": 237,
+        "firstBlockToAuthenticate": 12164509,
+        "lastAuthenticatedBlock": 12167996,
+        "firstError": null,
+        "readiness": null
+      },
+      {
+        "role": "user",
+        "recoveredAtRuntimeFrame": 77,
+        "firstBlockToAuthenticate": 12164493,
+        "lastAuthenticatedBlock": 12166706,
+        "firstError": "J_WATCHER_DRAIN_STALLED:idleMs=61989.814333999995:timeoutMs=60000:{\"consensus\":[{\"jPrefixRound\":null,\"key\":\"0xcfcdd2d155d6ee85d446d49045cb444a78df66b89a18c84959665a040671dae2:0x61ff4c022bcc7d342d0d68a7b85f18e0fd7d9446\",\"lastConsensusProgressAt\":1795042296556,\"leaderVotes\":{\"__xlnType\":\"Map\",\"value\":[]},\"lockedFrameHash\":\"\",\"lockedFrameSignatures\":{\"__xlnType\":\"Map\",\"value\":[]},\"mempool\":[],\"pendingLeaderCertificate\":null,\"proposalHankos\":[],\"proposalHash\":\"\",\"proposalSignatures\":{\"__xlnType\":\"Map\",\"value\":[]},\"validatorFrameHash\":\"\"}],\"mempoolInputs\":[],\"networkInbox\":[],\"pendingNetworkOutputs\":[],\"queuedJInputs\":[],\"statuses\":[\"[12164492,12166706,[[\\\"0xcfcdd2d155d6ee85d446d49045cb444a78df66b89a18c84959665a040671dae2:0x61ff4c022bcc7d342d0d68a7b85f18e0fd7d9446\\\",12166616,12166706,12164492,false]]]\"]}",
+        "readiness": null
+      }
+    ],
+    "rpcReceiptBatches": {
+      "reply": 279,
+      "error": 8
+    },
+    "headerBatchFailures": {
+      "RPC_BATCH_TIMEOUT:10000": 3
+    },
+    "launcherStages": ["approved-gateway-ready"],
+    "firstLauncherError": "C2R_CHILD_EXIT:user:1",
+    "exitStatus": 1,
+    "wireReleasedToGateway": false
+  },
+  "retryRpcReadProbes": {
+    "protectedRpc": [
+      "eth_getBlockByNumber 12164493 200 31 - 800",
+      "eth_getBlockReceipts 12164493 200 16 429 646",
+      "eth_getBlockByNumber 12169000 200 2 429 172",
+      "eth_getBlockReceipts 12169000 429 0 - 91"
+    ],
+    "largeBatchSamples": [
+      {
+        "name": "hyperrpc-receipts",
+        "from": 12164509,
+        "size": 96,
+        "http": 200,
+        "ok": 96,
+        "code": null,
+        "ms": 2007,
+        "bytes": 29166651
+      },
+      {
+        "name": "publicnode-headers",
+        "from": 12164508,
+        "size": 100,
+        "http": 200,
+        "ok": 100,
+        "code": null,
+        "ms": 1644,
+        "bytes": 1218843
+      },
+      {
+        "name": "ethpandaops-headers",
+        "from": 12164508,
+        "size": 100,
+        "http": 200,
+        "ok": 100,
+        "code": null,
+        "ms": 913,
+        "bytes": 1218843
+      }
+    ]
+  },
+  "stopBoundary": {
+    "runtime": "hub",
+    "phase": "after authenticated relay and Runtime delivery activation",
+    "failureCode": "CROSS_J_PULL_CLOSE_PROPOSAL_FAILED",
+    "validationMessage": "Cross-j source close deadline exceeded",
+    "pullId": "0x9785ef81f992c44c40c46c6128857579c5f6943881f95335a2d61d92ffe4b851",
+    "fatalMarker": {
+      "message": "RUNTIME_ENTITY_INPUT_APPLY_FAILED:entity=0x64abda6ea9caaae7ecc550e8d4531200893574572d253a8c7e3495d725995260:signer=0x944d742ada37d5416774d6303a649326eb1e9478:txs=none:proposal=no:c"
+    }
+  },
+  "preDispatchChain": {
+    "candidateHash": "0x40d4b57ad8675d886561eb4a1299f635390de51a4e7cbeb635a8e76e1b2a3922",
+    "observedAt": "2026-11-19T17:18:42.811Z",
+    "preparedHashLookup": [
+      {
+        "receipt": null,
+        "transaction": null
+      },
+      {
+        "receipt": null,
+        "transaction": null
+      }
+    ],
+    "rpcs": ["https://ethereum-sepolia-rpc.publicnode.com", "https://rpc.sepolia.ethpandaops.io"],
+    "state": {
+      "accountKey": "0x64abda6ea9caaae7ecc550e8d4531200893574572d253a8c7e3495d725995260cfcdd2d155d6ee85d446d49045cb444a78df66b89a18c84959665a040671dae2",
+      "accountNonce": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "chainId": 11155111,
+      "codeHashesMatched": 6,
+      "collateralAtoms": {
+        "__xlnType": "BigInt",
+        "value": "1000000"
+      },
+      "depositoryBackingAtoms": {
+        "__xlnType": "BigInt",
+        "value": "2000001"
+      },
+      "disputeHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "hub": {
+        "board": {
+          "current": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "exists": false,
+          "proposed": "0x0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "debtAtoms": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "entityNonce": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "eoaNonce": 0,
+        "nativeWei": {
+          "__xlnType": "BigInt",
+          "value": "1000000000000000"
+        },
+        "reserveAtoms": {
+          "__xlnType": "BigInt",
+          "value": "1"
+        }
+      },
+      "ondelta": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "point": {
+        "baseFeePerGasWei": {
+          "__xlnType": "BigInt",
+          "value": "14"
+        },
+        "hash": "0xd758ca69f00d582adc8be9485ee5fe1277f6e2ea8ed564571348b18706d5191b",
+        "number": 12169814,
+        "timestamp": "2026-11-19T17:18:24.000Z"
+      },
+      "user": {
+        "board": {
+          "current": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "exists": false,
+          "proposed": "0x0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "debtAtoms": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "entityNonce": {
+          "__xlnType": "BigInt",
+          "value": "2"
+        },
+        "eoaNonce": 3,
+        "nativeWei": {
+          "__xlnType": "BigInt",
+          "value": "1999999986561179"
+        },
+        "reserveAtoms": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        }
+      }
+    },
+    "tip": [
+      {
+        "fee": {
+          "gasPriceWei": {
+            "__xlnType": "BigInt",
+            "value": "64"
+          },
+          "maxPriorityFeePerGasWei": {
+            "__xlnType": "BigInt",
+            "value": "50"
+          }
+        },
+        "hubEOA": {
+          "latest": 0,
+          "pending": 0
+        }
+      },
+      {
+        "fee": {
+          "gasPriceWei": {
+            "__xlnType": "BigInt",
+            "value": "64"
+          },
+          "maxPriorityFeePerGasWei": {
+            "__xlnType": "BigInt",
+            "value": "50"
+          }
+        },
+        "hubEOA": {
+          "latest": 0,
+          "pending": 0
+        }
+      }
+    ]
+  },
+  "postStopChain": {
+    "candidateHash": "0x40d4b57ad8675d886561eb4a1299f635390de51a4e7cbeb635a8e76e1b2a3922",
+    "observedAt": "2026-11-19T17:20:26.341Z",
+    "preparedHashLookup": [
+      {
+        "receipt": null,
+        "transaction": null
+      },
+      {
+        "receipt": null,
+        "transaction": null
+      }
+    ],
+    "rpcs": ["https://ethereum-sepolia-rpc.publicnode.com", "https://rpc.sepolia.ethpandaops.io"],
+    "state": {
+      "accountKey": "0x64abda6ea9caaae7ecc550e8d4531200893574572d253a8c7e3495d725995260cfcdd2d155d6ee85d446d49045cb444a78df66b89a18c84959665a040671dae2",
+      "accountNonce": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "chainId": 11155111,
+      "codeHashesMatched": 6,
+      "collateralAtoms": {
+        "__xlnType": "BigInt",
+        "value": "1000000"
+      },
+      "depositoryBackingAtoms": {
+        "__xlnType": "BigInt",
+        "value": "2000001"
+      },
+      "disputeHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "hub": {
+        "board": {
+          "current": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "exists": false,
+          "proposed": "0x0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "debtAtoms": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "entityNonce": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "eoaNonce": 0,
+        "nativeWei": {
+          "__xlnType": "BigInt",
+          "value": "1000000000000000"
+        },
+        "reserveAtoms": {
+          "__xlnType": "BigInt",
+          "value": "1"
+        }
+      },
+      "ondelta": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "point": {
+        "baseFeePerGasWei": {
+          "__xlnType": "BigInt",
+          "value": "14"
+        },
+        "hash": "0x27be8ee449d2c9a166db3625f3b3907041fd74fff2df0426eb576c690da434b6",
+        "number": 12169822,
+        "timestamp": "2026-11-19T17:20:12.000Z"
+      },
+      "user": {
+        "board": {
+          "current": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "exists": false,
+          "proposed": "0x0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "debtAtoms": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "entityNonce": {
+          "__xlnType": "BigInt",
+          "value": "2"
+        },
+        "eoaNonce": 3,
+        "nativeWei": {
+          "__xlnType": "BigInt",
+          "value": "1999999986561179"
+        },
+        "reserveAtoms": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        }
+      }
+    },
+    "tip": [
+      {
+        "fee": {
+          "gasPriceWei": {
+            "__xlnType": "BigInt",
+            "value": "64"
+          },
+          "maxPriorityFeePerGasWei": {
+            "__xlnType": "BigInt",
+            "value": "50"
+          }
+        },
+        "hubEOA": {
+          "latest": 0,
+          "pending": 0
+        }
+      },
+      {
+        "fee": {
+          "gasPriceWei": {
+            "__xlnType": "BigInt",
+            "value": "64"
+          },
+          "maxPriorityFeePerGasWei": {
+            "__xlnType": "BigInt",
+            "value": "50"
+          }
+        },
+        "hubEOA": {
+          "latest": 0,
+          "pending": 0
+        }
+      }
+    ]
+  },
+  "retryExecution": {
+    "profile": {
+      "headerProvider": "PublicNode",
+      "watcherPageBlocks": 95,
+      "headerBatchCalls": 96,
+      "receiptBatchCalls": 96,
+      "receiptProvider": "HyperRPC",
+      "receiptIntervalMs": 12500
+    },
+    "openingObservedAt": "2026-11-19T16:37:34.608Z",
+    "opening": {
+      "candidateHash": "0x40d4b57ad8675d886561eb4a1299f635390de51a4e7cbeb635a8e76e1b2a3922",
+      "observedAt": "2026-11-19T16:37:34.608Z",
+      "preparedHashLookup": [
+        {
+          "receipt": null,
+          "transaction": null
+        },
+        {
+          "receipt": null,
+          "transaction": null
+        }
+      ],
+      "rpcs": ["https://ethereum-sepolia-rpc.publicnode.com", "https://rpc.sepolia.ethpandaops.io"],
+      "state": {
+        "accountKey": "0x64abda6ea9caaae7ecc550e8d4531200893574572d253a8c7e3495d725995260cfcdd2d155d6ee85d446d49045cb444a78df66b89a18c84959665a040671dae2",
+        "accountNonce": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "chainId": 11155111,
+        "codeHashesMatched": 6,
+        "collateralAtoms": {
+          "__xlnType": "BigInt",
+          "value": "1000000"
+        },
+        "depositoryBackingAtoms": {
+          "__xlnType": "BigInt",
+          "value": "2000001"
+        },
+        "disputeHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "hub": {
+          "board": {
+            "current": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "exists": false,
+            "proposed": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "debtAtoms": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "entityNonce": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "eoaNonce": 0,
+          "nativeWei": {
+            "__xlnType": "BigInt",
+            "value": "1000000000000000"
+          },
+          "reserveAtoms": {
+            "__xlnType": "BigInt",
+            "value": "1"
+          }
+        },
+        "ondelta": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "point": {
+          "baseFeePerGasWei": {
+            "__xlnType": "BigInt",
+            "value": "15"
+          },
+          "hash": "0x6a3ed1f107e7397708081a62dc311225f09baa7f8e3359190208d0f2066d2f2a",
+          "number": 12169612,
+          "timestamp": "2026-11-19T16:37:24.000Z"
+        },
+        "user": {
+          "board": {
+            "current": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "exists": false,
+            "proposed": "0x0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "debtAtoms": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "entityNonce": {
+            "__xlnType": "BigInt",
+            "value": "2"
+          },
+          "eoaNonce": 3,
+          "nativeWei": {
+            "__xlnType": "BigInt",
+            "value": "1999999986561179"
+          },
+          "reserveAtoms": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          }
+        }
+      },
+      "tip": [
+        {
+          "fee": {
+            "gasPriceWei": {
+              "__xlnType": "BigInt",
+              "value": "1000"
+            },
+            "maxPriorityFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "985"
+            }
+          },
+          "hubEOA": {
+            "latest": 0,
+            "pending": 0
+          }
+        },
+        {
+          "fee": {
+            "gasPriceWei": {
+              "__xlnType": "BigInt",
+              "value": "1000"
+            },
+            "maxPriorityFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "985"
+            }
+          },
+          "hubEOA": {
+            "latest": 0,
+            "pending": 0
+          }
+        }
+      ]
+    },
+    "workerRanges": [
+      {
+        "role": "hub",
+        "recoveredAtRuntimeFrame": 265,
+        "firstBlockToAuthenticate": 12164509,
+        "lastAuthenticatedBlock": 12169790,
+        "firstError": null,
+        "readiness": {
+          "after": {
+            "accountFrame": 10,
+            "accountRoot": "0xacf3ab83ac3b82cc0dc78529ae6ea062a24c10dcefa5fd308c60a8694253e6d5",
+            "accountStateHash": "0x64a490f369fc3d9cfbf7b73103a10185b8379e92584e18c478c1a96477bd6b1b",
+            "allocatedToRoleAtoms": {
+              "__xlnType": "BigInt",
+              "value": "1000000"
+            },
+            "collateralAtoms": {
+              "__xlnType": "BigInt",
+              "value": "1000000"
+            },
+            "jNonce": 0,
+            "nextSettlementNonce": 9,
+            "offdelta": {
+              "__xlnType": "BigInt",
+              "value": "1000000"
+            },
+            "ondelta": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "peerHankoDigest": "7b7a1660b45e0dc343d7534c6dd649792e7d3849fcdad42dfedb85d22522c1b0",
+            "reserveAtoms": {
+              "__xlnType": "BigInt",
+              "value": "1"
+            },
+            "selfHankoDigest": "34eb442bd3b61852eb56fe2f47f676f0296fca2bdbef664611f553bdcbc635fe"
+          },
+          "before": {
+            "accountFrame": 10,
+            "accountRoot": "0xacf3ab83ac3b82cc0dc78529ae6ea062a24c10dcefa5fd308c60a8694253e6d5",
+            "accountStateHash": "0x64a490f369fc3d9cfbf7b73103a10185b8379e92584e18c478c1a96477bd6b1b",
+            "allocatedToRoleAtoms": {
+              "__xlnType": "BigInt",
+              "value": "1000000"
+            },
+            "collateralAtoms": {
+              "__xlnType": "BigInt",
+              "value": "1000000"
+            },
+            "jNonce": 0,
+            "nextSettlementNonce": 9,
+            "offdelta": {
+              "__xlnType": "BigInt",
+              "value": "1000000"
+            },
+            "ondelta": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "peerHankoDigest": "7b7a1660b45e0dc343d7534c6dd649792e7d3849fcdad42dfedb85d22522c1b0",
+            "reserveAtoms": {
+              "__xlnType": "BigInt",
+              "value": "1"
+            },
+            "selfHankoDigest": "34eb442bd3b61852eb56fe2f47f676f0296fca2bdbef664611f553bdcbc635fe"
+          },
+          "deliveryReady": false,
+          "p2pStarted": false,
+          "role": "hub",
+          "runtimeFrameAfter": 274,
+          "runtimeFrameBefore": 265,
+          "status": {
+            "authenticatedThrough": 12169695,
+            "chainId": 11155111,
+            "committedCursor": 12164508,
+            "depositoryAddress": "0x32a4a72992ad142e36fa1c5989b95fed60987818",
+            "replicas": [
+              {
+                "authenticatedThrough": 12169695,
+                "entityFinalizedThrough": 12164508,
+                "key": "0x64abda6ea9caaae7ecc550e8d4531200893574572d253a8c7e3495d725995260:0x944d742ada37d5416774d6303a649326eb1e9478",
+                "localScannedThrough": 12169600,
+                "pendingDueFinality": false
+              }
+            ],
+            "targetBlock": 12169611
+          },
+          "verifiedPersistedHead": true
+        }
+      },
+      {
+        "role": "user",
+        "recoveredAtRuntimeFrame": 95,
+        "firstBlockToAuthenticate": 12164493,
+        "lastAuthenticatedBlock": 12169644,
+        "firstError": null,
+        "readiness": {
+          "after": {
+            "accountFrame": 10,
+            "accountRoot": "0xacf3ab83ac3b82cc0dc78529ae6ea062a24c10dcefa5fd308c60a8694253e6d5",
+            "accountStateHash": "0x64a490f369fc3d9cfbf7b73103a10185b8379e92584e18c478c1a96477bd6b1b",
+            "allocatedToRoleAtoms": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "collateralAtoms": {
+              "__xlnType": "BigInt",
+              "value": "1000000"
+            },
+            "jNonce": 0,
+            "nextSettlementNonce": 9,
+            "offdelta": {
+              "__xlnType": "BigInt",
+              "value": "1000000"
+            },
+            "ondelta": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "peerHankoDigest": "34eb442bd3b61852eb56fe2f47f676f0296fca2bdbef664611f553bdcbc635fe",
+            "reserveAtoms": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "selfHankoDigest": "7b7a1660b45e0dc343d7534c6dd649792e7d3849fcdad42dfedb85d22522c1b0"
+          },
+          "before": {
+            "accountFrame": 10,
+            "accountRoot": "0xacf3ab83ac3b82cc0dc78529ae6ea062a24c10dcefa5fd308c60a8694253e6d5",
+            "accountStateHash": "0x64a490f369fc3d9cfbf7b73103a10185b8379e92584e18c478c1a96477bd6b1b",
+            "allocatedToRoleAtoms": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "collateralAtoms": {
+              "__xlnType": "BigInt",
+              "value": "1000000"
+            },
+            "jNonce": 0,
+            "nextSettlementNonce": 9,
+            "offdelta": {
+              "__xlnType": "BigInt",
+              "value": "1000000"
+            },
+            "ondelta": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "peerHankoDigest": "34eb442bd3b61852eb56fe2f47f676f0296fca2bdbef664611f553bdcbc635fe",
+            "reserveAtoms": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "selfHankoDigest": "7b7a1660b45e0dc343d7534c6dd649792e7d3849fcdad42dfedb85d22522c1b0"
+          },
+          "deliveryReady": false,
+          "p2pStarted": false,
+          "role": "user",
+          "runtimeFrameAfter": 115,
+          "runtimeFrameBefore": 95,
+          "status": {
+            "authenticatedThrough": 12169621,
+            "chainId": 11155111,
+            "committedCursor": 12164492,
+            "depositoryAddress": "0x32a4a72992ad142e36fa1c5989b95fed60987818",
+            "replicas": [
+              {
+                "authenticatedThrough": 12169621,
+                "entityFinalizedThrough": 12164492,
+                "key": "0xcfcdd2d155d6ee85d446d49045cb444a78df66b89a18c84959665a040671dae2:0x61ff4c022bcc7d342d0d68a7b85f18e0fd7d9446",
+                "localScannedThrough": 12169529,
+                "pendingDueFinality": false
+              }
+            ],
+            "targetBlock": 12169611
+          },
+          "verifiedPersistedHead": true
+        }
+      }
+    ],
+    "rpcReceiptBatches": {
+      "reply": 197
+    },
+    "headerBatchFailures": {},
+    "launcherStages": [
+      "approved-gateway-ready",
+      "permit-requeue",
+      "permit-seal",
+      "exact-calldata-gas-verified 718231",
+      "open-relay",
+      "permit-transaction"
+    ],
+    "firstLauncherError": "C2R_CHILD_EXIT:hub:1",
+    "exitStatus": 1,
+    "wireReleasedToGateway": false
+  },
+  "requeue": {
+    "batchHash": "0x36f0151551f22448e02925705e49a69cba2cd06089524e3aa19ebf80fc1a9d14",
+    "frame": 275,
+    "priorGeneration": 1,
+    "workspaceHash": "0xb5454df9709e5dcc638583cc1744d2c67f0b517bf4f700f27df595cd40eee137"
+  },
+  "certifiedBatch": {
+    "accountNonce": 8,
+    "batchHash": "0x36f0151551f22448e02925705e49a69cba2cd06089524e3aa19ebf80fc1a9d14",
+    "currentHankosVerified": true,
+    "exactEstimate": {
+      "__xlnType": "BigInt",
+      "value": "718231"
+    },
+    "frame": 277,
+    "generation": 2,
+    "hubBatchNonce": {
+      "__xlnType": "BigInt",
+      "value": "1"
+    },
+    "workspaceHash": "0xb5454df9709e5dcc638583cc1744d2c67f0b517bf4f700f27df595cd40eee137"
+  },
+  "preparedTransaction": null,
+  "receiptReconciliation": {
+    "hashLookups": [
+      [
+        {
+          "blockNumber": null,
+          "hash": "0x40d4b57ad8675d886561eb4a1299f635390de51a4e7cbeb635a8e76e1b2a3922",
+          "receiptStatus": null,
+          "transactionFound": false
+        }
+      ],
+      [
+        {
+          "blockNumber": null,
+          "hash": "0x40d4b57ad8675d886561eb4a1299f635390de51a4e7cbeb635a8e76e1b2a3922",
+          "receiptStatus": null,
+          "transactionFound": false
+        }
+      ]
+    ],
+    "manifestSha256": "ed9470338240fe7a9a2fc4efb75419358d09ccd56fee851e08cc8ad1c7d24228",
+    "newHash": null,
+    "nonces": [
+      {
+        "latest": 0,
+        "pending": 0
+      },
+      {
+        "latest": 0,
+        "pending": 0
+      }
+    ],
+    "observedAt": "2026-11-19T17:19:18.334Z",
+    "scope": "no-consumed-or-pending-slot",
+    "wireReleasedToGateway": false
+  },
+  "independentWalReplay": {
+    "actions": [
+      {
+        "frame": 275,
+        "type": "j_abort_sent_batch"
+      },
+      {
+        "frame": 276,
+        "type": "j_broadcast"
+      }
+    ],
+    "endpoints": [
+      {
+        "accountFrame": 10,
+        "accountRoot": "0xacf3ab83ac3b82cc0dc78529ae6ea062a24c10dcefa5fd308c60a8694253e6d5",
+        "collateralAtoms": {
+          "__xlnType": "BigInt",
+          "value": "1000000"
+        },
+        "jNonce": 0,
+        "liveOutboxEntries": 1,
+        "nextJScanStart": 12169791,
+        "reserveAtoms": {
+          "__xlnType": "BigInt",
+          "value": "1"
+        },
+        "role": "hub",
+        "runtimeFrame": 277,
+        "sentBatch": {
+          "entityNonce": 1,
+          "generation": 2,
+          "hash": "0x36f0151551f22448e02925705e49a69cba2cd06089524e3aa19ebf80fc1a9d14",
+          "status": "sent"
+        },
+        "workspace": {
+          "hash": "0xb5454df9709e5dcc638583cc1744d2c67f0b517bf4f700f27df595cd40eee137",
+          "nonce": 8,
+          "status": "submitted"
+        }
+      },
+      {
+        "accountFrame": 10,
+        "accountRoot": "0xacf3ab83ac3b82cc0dc78529ae6ea062a24c10dcefa5fd308c60a8694253e6d5",
+        "collateralAtoms": {
+          "__xlnType": "BigInt",
+          "value": "1000000"
+        },
+        "jNonce": 0,
+        "liveOutboxEntries": 0,
+        "nextJScanStart": 12169645,
+        "reserveAtoms": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "role": "user",
+        "runtimeFrame": 116,
+        "sentBatch": null,
+        "workspace": {
+          "hash": "0xb5454df9709e5dcc638583cc1744d2c67f0b517bf4f700f27df595cd40eee137",
+          "nonce": 8,
+          "status": "submitted"
+        }
+      }
+    ],
+    "frequencies": {
+      "j_abort_sent_batch": 1,
+      "j_broadcast": 1,
+      "j_rebroadcast": 0,
+      "recordJPreparedTransaction": 0,
+      "replaceJPreparedTransaction": 0
+    },
+    "verifiedBilateralSettlement": false
+  }
+}

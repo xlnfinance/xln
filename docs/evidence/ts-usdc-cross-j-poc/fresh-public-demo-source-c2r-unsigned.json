@@ -1,0 +1,281 @@
+{
+  "accountKey": "0x64abda6ea9caaae7ecc550e8d4531200893574572d253a8c7e3495d725995260cfcdd2d155d6ee85d446d49045cb444a78df66b89a18c84959665a040671dae2",
+  "approved": false,
+  "authorizesSigning": false,
+  "candidate": {
+    "catalogDigest": "a46f46e495c3085057c3eeed7d0d17b8ac595b9338d96440b4f124461852dbf1",
+    "digest": "979c9e2708f37872584ff22f72894474f0d721f589aae71909ce71f0c4ab1d9e",
+    "head": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26",
+    "worktree": "working-tree candidate"
+  },
+  "chainId": 11155111,
+  "counterparty": {
+    "entity": "0xcfcdd2d155d6ee85d446d49045cb444a78df66b89a18c84959665a040671dae2",
+    "signer": "0x61ff4c022bcc7d342d0d68a7b85f18e0fd7d9446"
+  },
+  "entityProvider": "0x9c4173eed1dc7c24c5207a705382488c859588e3",
+  "evmEnvelope": {
+    "call": "processBatch(bytes,bytes,uint256)",
+    "calldata": null,
+    "eoaNonce": 0,
+    "exclusiveBatchOperation": {
+      "accountNoncePreview": 8,
+      "amountAtoms": "1000000",
+      "cooperativeHashPreview": "0x30036e2dbcd215e3101359f1981114ff8b2a047f0421312387667204b47679a3",
+      "counterparty": "0xcfcdd2d155d6ee85d446d49045cb444a78df66b89a18c84959665a040671dae2",
+      "counterpartyHanko": null,
+      "tokenId": 1,
+      "type": "collateralToReserve"
+    },
+    "from": "0x944d742ada37d5416774d6303a649326eb1e9478",
+    "hubBatchNonce": "1",
+    "hubHanko": null,
+    "type": 2,
+    "valueWei": "0"
+  },
+  "hub": {
+    "entity": "0x64abda6ea9caaae7ecc550e8d4531200893574572d253a8c7e3495d725995260",
+    "signer": "0x944d742ada37d5416774d6303a649326eb1e9478"
+  },
+  "observation": {
+    "account": {
+      "collateralAtoms": {
+        "__xlnType": "BigInt",
+        "value": "1000000"
+      },
+      "disputeHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "nonce": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "ondelta": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      }
+    },
+    "codeHashesMatched": 6,
+    "depositoryBackingAtoms": {
+      "__xlnType": "BigInt",
+      "value": "2000001"
+    },
+    "feeReads": [
+      {
+        "fee": {
+          "gasPriceWei": {
+            "__xlnType": "BigInt",
+            "value": "16"
+          },
+          "maxPriorityFeePerGasWei": {
+            "__xlnType": "BigInt",
+            "value": "2"
+          }
+        },
+        "hubEOA": {
+          "latest": 0,
+          "pending": 0
+        }
+      },
+      {
+        "fee": {
+          "gasPriceWei": {
+            "__xlnType": "BigInt",
+            "value": "16"
+          },
+          "maxPriorityFeePerGasWei": {
+            "__xlnType": "BigInt",
+            "value": "2"
+          }
+        },
+        "hubEOA": {
+          "latest": 0,
+          "pending": 0
+        }
+      }
+    ],
+    "hub": {
+      "board": {
+        "current": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "exists": false,
+        "proposed": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "debtAtoms": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "entityNonce": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "eoaNonce": 0,
+      "nativeWei": {
+        "__xlnType": "BigInt",
+        "value": "1000000000000000"
+      },
+      "reserveAtoms": {
+        "__xlnType": "BigInt",
+        "value": "1"
+      }
+    },
+    "observedAt": "2026-11-18T21:54:18.396Z",
+    "point": {
+      "baseFeePerGasWei": {
+        "__xlnType": "BigInt",
+        "value": "14"
+      },
+      "hash": "0xd5500f34c6cba6c5e0b0592c29671aa8b490ce9567e6970e4688bbe57659cbae",
+      "number": 12164210,
+      "timestamp": "2026-11-18T21:54:12.000Z"
+    },
+    "rpcs": ["https://ethereum-sepolia-rpc.publicnode.com", "https://rpc.sepolia.ethpandaops.io"],
+    "user": {
+      "board": {
+        "current": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "exists": false,
+        "proposed": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "debtAtoms": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      },
+      "entityNonce": {
+        "__xlnType": "BigInt",
+        "value": "2"
+      },
+      "eoaNonce": 3,
+      "nativeWei": {
+        "__xlnType": "BigInt",
+        "value": "1999999986561179"
+      },
+      "reserveAtoms": {
+        "__xlnType": "BigInt",
+        "value": "0"
+      }
+    }
+  },
+  "originalDemoManifestSha256": "4e896b982ec9423ed804424ea5bac684d33c225fa8dd1336bc210c2638a221f0",
+  "projectedLedger": {
+    "amountAtoms": "1000000",
+    "collateralAfterAtoms": "0",
+    "depositoryBackingAfterAtoms": "2000001",
+    "diffs": [
+      {
+        "collateralDiff": {
+          "__xlnType": "BigInt",
+          "value": "-1000000"
+        },
+        "leftDiff": {
+          "__xlnType": "BigInt",
+          "value": "1000000"
+        },
+        "ondeltaDiff": {
+          "__xlnType": "BigInt",
+          "value": "-1000000"
+        },
+        "rightDiff": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "tokenId": 1
+      }
+    ],
+    "forgiveTokenIds": [],
+    "sourceHubReserveAfterAtoms": "1000001",
+    "userReserveAfterAtoms": "0"
+  },
+  "proposedCaps": {
+    "basis": "Prior Ethereum demo review envelope for gas and max fee. The priority ceiling comes from the operator funding budget.",
+    "exactSignedGasEstimate": null,
+    "gasLimit": "600000",
+    "maxFeePerGasWei": "1000000000",
+    "maxNativeOutflowWei": "600000000000000",
+    "maxPriorityFeePerGasWei": "100000000",
+    "status": "for-review"
+  },
+  "publicBroadcasts": 0,
+  "purpose": "Cooperative source C2R before another demo on the existing Accounts",
+  "remaining": [
+    "Restore the same demo stores with a read-only RPC gateway. Catch up authenticated J observations and recheck the pinned balances, Account heads, signer authority and pending nonces.",
+    "Prepare a one-call authorization for the source Hub payer and the exact compressed C2R stage. Existing journey and funding manifests cover other operations.",
+    "Get explicit owner authorization for the settlement, gas caps and expiry before producing the counterparty and Hub settlement signatures.",
+    "Recompute Account nonce and cooperative hash at workspace approval. Verify both current Hankos and estimate the exact processBatch call before any submission.",
+    "Reconcile the successful canonical receipt, source reserves and the authenticated Account observations on both sides."
+  ],
+  "replay": {
+    "accountFrame": 6,
+    "accountRoot": "0x4fd6751a3c46dc3ba25869c423e147f3fdc2dcd5e00f3a7db3bbe424560035d4",
+    "accountStateHash": "0x84544417d2d5e3100a57223c5b3ccf4fc357639b623014407572782f96957917",
+    "hubCollateralShareAtoms": {
+      "__xlnType": "BigInt",
+      "value": "1000000"
+    },
+    "hubNonceCursor": {
+      "counterpartyDisputeProofNonce": 7,
+      "currentDisputeProofNonce": 6,
+      "jNonce": 0,
+      "nextProofNonce": 7,
+      "nextSettlementNonce": 8
+    },
+    "hubRuntimeFrame": 221,
+    "matchingCachedHankos": true,
+    "offdelta": {
+      "__xlnType": "BigInt",
+      "value": "1000000"
+    },
+    "ondelta": {
+      "__xlnType": "BigInt",
+      "value": "0"
+    },
+    "routeId": "usdc-poc-0xcfcdd2d155d6ee85d446d49045cb444a78df66b89a18c84959665a040671dae2-fresh-w4vgds-1usdc-20261118-guarded",
+    "routeStatus": "settled",
+    "sourceRemaining": {
+      "__xlnType": "BigInt",
+      "value": "0"
+    },
+    "targetRemaining": {
+      "__xlnType": "BigInt",
+      "value": "0"
+    },
+    "userCollateralShareAtoms": {
+      "__xlnType": "BigInt",
+      "value": "0"
+    },
+    "userNonceCursor": {
+      "counterpartyDisputeProofNonce": 6,
+      "currentDisputeProofNonce": 7,
+      "jNonce": 0,
+      "nextProofNonce": 8,
+      "nextSettlementNonce": 8
+    },
+    "userRuntimeFrame": 67
+  },
+  "runtimeProposal": {
+    "data": {
+      "continuation": {
+        "actions": [],
+        "broadcast": false
+      },
+      "counterpartyEntityId": "0xcfcdd2d155d6ee85d446d49045cb444a78df66b89a18c84959665a040671dae2",
+      "executorIsLeft": true,
+      "memo": "poc-repeat-source-c2r",
+      "ops": [
+        {
+          "amount": {
+            "__xlnType": "BigInt",
+            "value": "1000000"
+          },
+          "tokenId": 1,
+          "type": "c2r"
+        }
+      ]
+    },
+    "type": "settle_propose",
+    "workspaceHashPreview": "0xb5454df9709e5dcc638583cc1744d2c67f0b517bf4f700f27df595cd40eee137"
+  },
+  "status": "unsigned-review-packet",
+  "to": "0x32a4a72992ad142e36fa1c5989b95fed60987818",
+  "token": {
+    "address": "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
+    "decimals": 6,
+    "tokenId": 1
+  }
+}

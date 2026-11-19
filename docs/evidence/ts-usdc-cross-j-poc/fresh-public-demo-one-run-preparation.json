@@ -1,0 +1,453 @@
+{
+  "status": "prepared-unapproved",
+  "runId": "fresh-w4vgds-1usdc-20261118",
+  "authorityFile": "fresh-public-demo-one-run-unsigned-authority.json",
+  "authorityFileSha256": "67a520954d0d9e20ddb8398e9fb3a41443dfccbade0a91a39e99ffcdd2d681fd",
+  "authorityVerification": {
+    "verifiedAt": "2026-11-18T19:25:24.702Z",
+    "signatureAuthorityRejected": true,
+    "authorityDigest": "9bfaed0b4def14fba1b28e75412d47d098c00f5ced97202ddde98ad1db64df14",
+    "chains": [
+      {
+        "chainId": 11155111,
+        "verification": "passed",
+        "currentAndHistoryAgree": true,
+        "payers": [
+          {
+            "role": "source-user",
+            "nativeWei": "2000000000000000",
+            "maximumWei": "1800000000000000",
+            "unallocatedWei": "200000000000000"
+          }
+        ]
+      },
+      {
+        "chainId": 421614,
+        "verification": "passed",
+        "currentAndHistoryAgree": true,
+        "payers": [
+          {
+            "role": "target-user",
+            "nativeWei": "100000000000000",
+            "maximumWei": "70000000000000",
+            "unallocatedWei": "30000000000000"
+          },
+          {
+            "role": "target-hub",
+            "nativeWei": "100000000000000",
+            "maximumWei": "50000000000000",
+            "unallocatedWei": "50000000000000"
+          }
+        ]
+      }
+    ]
+  },
+  "sourcePrincipalUsdcAtoms": "1000000",
+  "minimumPayoutUsdcAtoms": "850000",
+  "expiresAt": "2026-11-18T23:30:00Z",
+  "scope": "One normal-flow run. Five nonce slots. No additional funding transfer.",
+  "observedPublicState": {
+    "observedAt": "2026-11-18T19:22:57.689Z",
+    "publicBroadcasts": 0,
+    "chains": [
+      {
+        "chainId": 11155111,
+        "observedBlock": {
+          "number": 12163468,
+          "hash": "0x12fd874c1b55137d5cec0259e5159539240627070670942efaffaff773cd32b6"
+        },
+        "baseFeeWei": "17",
+        "feeData": {
+          "gasPriceWei": "19",
+          "maxFeePerGasWei": "36",
+          "maxPriorityFeePerGasWei": "2"
+        },
+        "token": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+        "depository": "0x32A4A72992aD142E36fA1C5989b95FeD60987818",
+        "depositoryCodeHash": "0xd56dbdedd8973d72780dd49bbe5b25d9cc6a2cf00d5182651b448d9782005a51",
+        "user": {
+          "signer": "0x61ff4c022bcc7d342d0d68a7b85f18e0fd7d9446",
+          "entity": "0xcfcdd2d155d6ee85d446d49045cb444a78df66b89a18c84959665a040671dae2",
+          "nativeWei": "2000000000000000",
+          "nonce": 0,
+          "pendingNonce": 0,
+          "entityNonce": "0",
+          "usdcAtoms": "1000000",
+          "allowanceAtoms": "0",
+          "reserveAtoms": "0",
+          "collateralAtoms": "0",
+          "activeDebts": "0"
+        },
+        "hub": {
+          "signer": "0x944d742ada37d5416774d6303a649326eb1e9478",
+          "entity": "0x64abda6ea9caaae7ecc550e8d4531200893574572d253a8c7e3495d725995260",
+          "nativeWei": "1000000000000000",
+          "nonce": 0,
+          "pendingNonce": 0,
+          "entityNonce": "0",
+          "reserveAtoms": "1",
+          "activeDebts": "0"
+        },
+        "depositoryUsdcAtoms": "1000001",
+        "approval": {
+          "call": {
+            "from": "0x61ff4c022bcc7d342d0d68a7b85f18e0fd7d9446",
+            "to": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+            "data": "0x095ea7b300000000000000000000000032a4a72992ad142e36fa1c5989b95fed6098781800000000000000000000000000000000000000000000000000000000000f4240"
+          },
+          "gas": "140018"
+        }
+      },
+      {
+        "chainId": 421614,
+        "observedBlock": {
+          "number": 330510014,
+          "hash": "0xb9f08f88b2c322d18edbe1672cc0955af970e91e1da0442820fb85e85ed2ba5a"
+        },
+        "baseFeeWei": "20000000",
+        "feeData": {
+          "gasPriceWei": "20048000",
+          "maxFeePerGasWei": "40096000",
+          "maxPriorityFeePerGasWei": "0"
+        },
+        "token": "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d",
+        "depository": "0x8223AA4c60Adb851f53a120c3D3841De9e77c188",
+        "depositoryCodeHash": "0x8474e986e82636c385f7ca9ef92c97e3d400ba862fa065eb51807b774ad9a72c",
+        "user": {
+          "signer": "0xb77348f8f01e060934024fefc319c66653df6fa2",
+          "entity": "0x01c743c9d2139446cf0d331676f122a042450522c26d8f09ce2b5a5b35add42a",
+          "nativeWei": "100000000000000",
+          "nonce": 0,
+          "pendingNonce": 0,
+          "entityNonce": "0",
+          "usdcAtoms": "0",
+          "allowanceAtoms": "0",
+          "reserveAtoms": "0",
+          "collateralAtoms": "0",
+          "activeDebts": "0"
+        },
+        "hub": {
+          "signer": "0xa73b329dc876173b2a7161cdde716a78209b0cac",
+          "entity": "0x529aa3f7dca1cbe2366f781ab55915bc9b0762b26bcc382ef321433d9de2b4a2",
+          "nativeWei": "100000000000000",
+          "nonce": 0,
+          "pendingNonce": 0,
+          "entityNonce": "0",
+          "reserveAtoms": "1000000",
+          "activeDebts": "0"
+        },
+        "depositoryUsdcAtoms": "6000000",
+        "nitroL1FromLocalCalldata": [
+          {
+            "stage": "target-r2c",
+            "localReceiptHash": "0xbe8c8d68a32fce8f486e74b4e45b173c701652e7e5e1aadc8a98d90b390cd9be",
+            "dataBytes": 1220,
+            "l1Gas": "0",
+            "baseFeeWei": "20036000",
+            "l1BaseFeeEstimateWei": "0"
+          },
+          {
+            "stage": "target-c2r-r2e",
+            "localReceiptHash": "0xa2a10fe063ae41f995809598c69a6cbc000da7701d04441a4d05d12f38b44da0",
+            "dataBytes": 2468,
+            "l1Gas": "0",
+            "baseFeeWei": "20036000",
+            "l1BaseFeeEstimateWei": "0"
+          }
+        ]
+      }
+    ]
+  },
+  "quote": {
+    "committedOrders": 18,
+    "detail": {
+      "existingTargetCredit": "0",
+      "expectedExternalPayout": "899801",
+      "fee": "100099",
+      "gross": "999900",
+      "requiredTargetCredit": "999900",
+      "requiresExactTargetCredit": true,
+      "reserveSupportsEstimatedCover": true,
+      "snapshot": {
+        "account": {
+          "height": 2,
+          "stateHash": "0x56e5a4f5897749508dc68fe0f315c8c2b6d6b7f6e536a2a8e2268c2007afc221",
+          "view": {
+            "ascii": "[|--------------------------------------------------]",
+            "collateral": "0",
+            "delta": "0",
+            "inAllowance": "0",
+            "inCapacity": "0",
+            "inCollateral": "0",
+            "inOwnCredit": "0",
+            "inPeerCredit": "0",
+            "inTotalHold": "0",
+            "outAllowance": "0",
+            "outCapacity": "0",
+            "outCollateral": "0",
+            "outOwnCredit": "0",
+            "outPeerCredit": "0",
+            "outTotalHold": "0",
+            "ownCreditLimit": "0",
+            "ownCreditUsed": "0",
+            "peerCreditLimit": "0",
+            "peerCreditUsed": "0",
+            "totalCapacity": "0"
+          }
+        },
+        "activeDebts": "0",
+        "block": {
+          "hash": "0xd516d10a6b8a1e1fd4ed0797808191610e373d10817b7d9e2cd63de58d2b06ab",
+          "number": 330510705
+        },
+        "collateral": "0",
+        "depositoryTokens": "6000000",
+        "hubActiveDebts": "0",
+        "hubReserve": "1000000",
+        "reserve": "0",
+        "token": "0"
+      },
+      "sourceAccountOutCapacity": "0",
+      "sourceAgreement": {
+        "height": 2,
+        "stateHash": "0x56646b7d13b9630a1aa0a31ba5186ea3ef5774a71e01e649d7065fbe0b32ddce",
+        "matchingSignedAccount": true
+      },
+      "sourceDepositStillRequired": true,
+      "targetAgreement": {
+        "height": 2,
+        "stateHash": "0x56e5a4f5897749508dc68fe0f315c8c2b6d6b7f6e536a2a8e2268c2007afc221",
+        "matchingSignedAccount": true
+      },
+      "terms": {
+        "baseFee": "100000",
+        "effectiveAt": 1795026068884,
+        "gasFee": "0",
+        "liquidityFeeBps": "1",
+        "noticePeriodSeconds": 2592000,
+        "policyVersion": 1,
+        "updatedAt": 1795026068884
+      }
+    },
+    "hubDeliveryReady": false,
+    "liveMatchingOrders": 9,
+    "mmHealth": {
+      "ok": null,
+      "phase": null,
+      "ready": null
+    },
+    "mode": "restored-committed-book",
+    "observedAt": "2026-11-18T19:26:19.135Z",
+    "offer": {
+      "expiresAt": 1795046400000,
+      "makerEntityId": "0x203e42f833f0f73f85443e71b0be1b3fff83f322039f8c9270183bb15c0f7391",
+      "orderId": "mmx-e2b4a2-995260-1-1-c556cb4f342284de6634e565fda6035c0e31737f31601eb618e54994094e330f-sell-1",
+      "priceTicks": "9999",
+      "remaining": {
+        "fillRatio": 0,
+        "filledSourceAmount": "0",
+        "filledTargetAmount": "0",
+        "sourceRemaining": "10198980000",
+        "sourceTotal": "10198980000",
+        "targetRemaining": "10200000000",
+        "targetTotal": "10200000000"
+      },
+      "routeHash": "0xe38067c9587844b76cda6eb1b3e31109ca75b43d6d18eda9824aec18b5df05c7",
+      "sourcePull": {
+        "deadline": 1795046400,
+        "pullId": "0x576a790a73e98338be709b0fa6402d8a77fef6c6cf0485de1d87a8fde673c352"
+      },
+      "targetPull": {
+        "deadline": 1795046633,
+        "pullId": "0x83a9a11b8e1c8f3474f04b2a28d9f59e458f0f5d10f0ee82a3b3dded373116c2"
+      }
+    },
+    "publicBroadcasts": 0,
+    "reserves": [
+      {
+        "amount": "1",
+        "chainId": 11155111,
+        "depositBlock": 12163247,
+        "depositHash": "0x72c2b3d8b1f8c506afe5b75f82fb20a14e4baf66a7d4189a641b9b1fa0c5c88d",
+        "entityHeight": 54,
+        "finalizedThroughHeight": 12163264,
+        "hubEntity": "0x64abda6ea9caaae7ecc550e8d4531200893574572d253a8c7e3495d725995260"
+      },
+      {
+        "amount": "1000000",
+        "chainId": 421614,
+        "depositBlock": 330502193,
+        "depositHash": "0xc2c39450eea1140530fd5b50d8b0b26d05a85f70bd7f547e011396f3869922ae",
+        "entityHeight": 64,
+        "finalizedThroughHeight": 330502493,
+        "hubEntity": "0x529aa3f7dca1cbe2366f781ab55915bc9b0762b26bcc382ef321433d9de2b4a2"
+      }
+    ],
+    "sourcePrincipal": "1000000"
+  },
+  "gasEvidence": [
+    {
+      "stage": "approve",
+      "payerRole": "source-user",
+      "proposedGasCap": "600000",
+      "localFirstRun": {
+        "receiptHash": "0xfa8fcf383c424cbea57efdc9aaf52ea855b09f82411bfc0557dd82acca508506",
+        "gasUsed": "45921",
+        "transactionGasLimit": "2000000",
+        "calldataBytes": 68
+      },
+      "publicEstimateGas": "140018",
+      "publicCallReestimateRequiredBeforeSubmission": true
+    },
+    {
+      "stage": "source-e2r",
+      "payerRole": "source-user",
+      "proposedGasCap": "600000",
+      "localFirstRun": {
+        "receiptHash": "0xc53a281082cf267a24a3e59eabbdc5a9952f40e1c043fb2ba4aee3a8accb673b",
+        "gasUsed": "153720",
+        "transactionGasLimit": "225862",
+        "calldataBytes": 1188
+      },
+      "publicComparableDifferentFundingCall": {
+        "gasUsed": "256202",
+        "receiptHash": "0x72c2b3d8b1f8c506afe5b75f82fb20a14e4baf66a7d4189a641b9b1fa0c5c88d"
+      },
+      "publicCallReestimateRequiredBeforeSubmission": true
+    },
+    {
+      "stage": "source-r2c",
+      "payerRole": "source-user",
+      "proposedGasCap": "600000",
+      "localFirstRun": {
+        "receiptHash": "0x5337ce91a4491a86eb39aee612741010786b2e9fcffc89f824028a6da6ef7067",
+        "gasUsed": "164052",
+        "transactionGasLimit": "232500",
+        "calldataBytes": 1220
+      },
+      "publicCallReestimateRequiredBeforeSubmission": true
+    },
+    {
+      "stage": "target-r2c",
+      "payerRole": "target-hub",
+      "proposedGasCap": "500000",
+      "localFirstRun": {
+        "receiptHash": "0xbe8c8d68a32fce8f486e74b4e45b173c701652e7e5e1aadc8a98d90b390cd9be",
+        "gasUsed": "185940",
+        "transactionGasLimit": "253006",
+        "calldataBytes": 1220
+      },
+      "nitroPostingSample": {
+        "stage": "target-r2c",
+        "localReceiptHash": "0xbe8c8d68a32fce8f486e74b4e45b173c701652e7e5e1aadc8a98d90b390cd9be",
+        "dataBytes": 1220,
+        "l1Gas": "0",
+        "baseFeeWei": "20036000",
+        "l1BaseFeeEstimateWei": "0"
+      },
+      "publicCallReestimateRequiredBeforeSubmission": true
+    },
+    {
+      "stage": "target-c2r-r2e",
+      "payerRole": "target-user",
+      "proposedGasCap": "700000",
+      "localFirstRun": {
+        "receiptHash": "0xa2a10fe063ae41f995809598c69a6cbc000da7701d04441a4d05d12f38b44da0",
+        "gasUsed": "266711",
+        "transactionGasLimit": "379571",
+        "calldataBytes": 2468
+      },
+      "nitroPostingSample": {
+        "stage": "target-c2r-r2e",
+        "localReceiptHash": "0xa2a10fe063ae41f995809598c69a6cbc000da7701d04441a4d05d12f38b44da0",
+        "dataBytes": 2468,
+        "l1Gas": "0",
+        "baseFeeWei": "20036000",
+        "l1BaseFeeEstimateWei": "0"
+      },
+      "publicCallReestimateRequiredBeforeSubmission": true
+    }
+  ],
+  "gasPolicy": {
+    "headroomBpsOnExactBatchEstimate": 12000,
+    "minimumReplacementBumpBps": 1250,
+    "arbitrumL1PostingCostIncludedInExactEthEstimateGas": true,
+    "maximumNormalFeeWeiByChain": {
+      "11155111": "1800000000000000",
+      "421614": "120000000000000"
+    },
+    "allPayersFundNormalReservation": true,
+    "remainingRequirements": [
+      "Repeat balances, exact live quote, tariff, credit and reserve checks after real operator readiness and before financial work.",
+      "The manifest binds counterparties and allowed calls. The execution CLI selects the quote after source ingress.",
+      "After each predecessor confirms, estimate the actual authorized batch and require its calldata, EIP-1559 fees and gas with headroom to fit the manifest."
+    ]
+  },
+  "recovery": {
+    "remainingNormalCalls": "Restore the same WAL, authority and run ID. Reconcile chain receipts, allowance and nonces before retrying.",
+    "sameNonceReplacement": "The replacement must stay in the existing slot and within its fee caps. It does not create a new paid slot.",
+    "forcedOrReverted": "A mined revert consumes its slot. An expired authority, new-nonce retry, or forced dispute requires separate review of the actual remaining obligation and separate authorization.",
+    "forcedDisputePublicEstimateAvailable": false,
+    "evmDisputeBatchGasLimit": 5000000,
+    "illustrativeFeeUpperBoundAtNormalPerGasCapsWei": {
+      "11155111": "5000000000000000",
+      "421614": "500000000000000"
+    },
+    "illustrationScope": "One maximum-size batch at the normal per-gas ceiling. This is neither a gas estimate nor an allocated recovery budget.",
+    "localRecoveryEvidence": "interrupted-recovery.json"
+  },
+  "operatorObservation": {
+    "session": "restore-TlPCZB",
+    "startedAt": "2026-11-18T19:21:38.102Z",
+    "stoppedAt": "2026-11-18T19:27:25.653Z",
+    "status": "stopped-after-book-observation",
+    "hubDeliveryReadyAtQuoteRead": false,
+    "mmReadinessObserved": false,
+    "lastAuthenticatedArbitrumRange": {
+      "chainId": 421614,
+      "committedBeforeRange": 330502493,
+      "fromBlock": 330504489,
+      "pollWindowLimit": 2047,
+      "toBlock": 330504548
+    },
+    "standSlotReleased": true,
+    "noLiveSessionChildren": true,
+    "walIntegrity": [
+      {
+        "role": "hub",
+        "restoredFrame": 96,
+        "finalFrame": 98,
+        "integrity": {
+          "latestHeight": 98,
+          "checkedFrames": 98
+        },
+        "deposits": [],
+        "cursorWrites": {}
+      },
+      {
+        "role": "mm",
+        "restoredFrame": 53,
+        "finalFrame": 53,
+        "integrity": {
+          "latestHeight": 53,
+          "checkedFrames": 53
+        },
+        "deposits": [],
+        "cursorWrites": {}
+      },
+      {
+        "role": "user",
+        "restoredFrame": 12,
+        "finalFrame": 12,
+        "integrity": {
+          "latestHeight": 12,
+          "checkedFrames": 12
+        },
+        "deposits": [],
+        "cursorWrites": {}
+      }
+    ]
+  },
+  "publicTransactionSignatures": 0,
+  "publicBroadcasts": 0
+}

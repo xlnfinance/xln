@@ -1,0 +1,14 @@
+{
+  "candidateDigest": "8fe64e053c1f8faf8b15a63121a6dc55dce8e0e35af9ebe92a5dbe6dda445f05",
+  "error": "USDC_SESSION_CHILD_EXIT:observe-session:1:null",
+  "fundingReceiptFile": "/Users/nick/Projects/xlnfinance/xln/.logs/ts-usdc-cross-j-poc/public/funding-2026-11-17T18-15-12-830Z/funded-public.json",
+  "observedAt": "2026-11-17T19:23:15.075Z",
+  "originalStores": {
+    "hub": "/Users/nick/Projects/xlnfinance/xln/.logs/ts-usdc-cross-j-poc/public/hub/attempt-1794864456845",
+    "mm": "/Users/nick/Projects/xlnfinance/xln/.logs/ts-usdc-cross-j-poc/public/mm/attempt-1794864456848",
+    "user": "/Users/nick/Projects/xlnfinance/xln/.logs/ts-usdc-cross-j-poc/public/user/attempt-1794864471852"
+  },
+  "runDirectory": "/Users/nick/Projects/xlnfinance/xln/.logs/ts-usdc-cross-j-poc/public/funding-2026-11-17T18-15-12-830Z/runtime-observation-muqRmc",
+  "status": "runtime-observation-incomplete",
+  "ticket": "11"
+}

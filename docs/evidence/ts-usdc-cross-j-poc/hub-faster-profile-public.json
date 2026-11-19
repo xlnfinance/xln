@@ -1,0 +1,286 @@
+{
+  "ticket": "12",
+  "status": "profile-comparison-funded-reserves-pending",
+  "candidateHead": "b2dceb3438ff2582cee0c5741fe4a0528f5cbd26",
+  "candidateDigest": "16b247e8d0aa20caaf38afa141e3b0f66de3830554847634d033c72ec1f92b78",
+  "dirty": true,
+  "originalHubStore": ".logs/ts-usdc-cross-j-poc/public/hub/attempt-1794864456845",
+  "mode": "hub-only, managed read-only gateway, pacing enabled",
+  "startupTimeoutMs": 120000,
+  "pageBlocks": {
+    "11155111": 31,
+    "421614": 127
+  },
+  "maximumHeaderBatchCalls": 32,
+  "baseline": "hub-small-range-public.json",
+  "attempts": {
+    "shortIntervals": {
+      "sessionDirectory": ".logs/ts-usdc-cross-j-poc/public/sessions/restore-l8AY1I",
+      "startedAt": "2026-11-17T21:34:18.599Z",
+      "observedAt": "2026-11-17T21:36:23.376Z",
+      "sessionElapsedMs": 124327,
+      "exitCode": 1,
+      "sessionResult": "USDC_SESSION_READINESS_TIMEOUT:hub",
+      "headerDispatchIntervalMs": 250,
+      "receiptDispatchIntervalMs": 500,
+      "multiItemRangeBatchesSent": 271,
+      "sentAfterObservedClientAbort": 0,
+      "headerHttp429": 4,
+      "receipt429": 21,
+      "chains": [
+        {
+          "chainId": 11155111,
+          "headerHost": "rpc.sepolia.ethpandaops.io",
+          "headerFingerprint": "ea37f436779dc1fa5fb56704e8ea35da30c159d85b333faa3e5bfcb758afd2f1",
+          "historyFingerprint": "92eca84d3029d9e3b8330990d4463178eb8ac68b2dd77f1e9989b22c8c80f5e3",
+          "initialHeadProbe": 12157092,
+          "incorporatedJCursor": 12149976,
+          "restoredLocalScanThrough": 12150100,
+          "committedBeforeEachRange": [
+            12149976
+          ],
+          "authenticatedRanges": 49,
+          "authenticatedBlocks": 85,
+          "firstAuthenticatedBlock": 12149977,
+          "authenticatedThrough": 12150061,
+          "receiptResults": {
+            "reply": 106,
+            "429": 18
+          },
+          "headers": {
+            "sent": 164,
+            "maxItems": 32
+          },
+          "headerHttp429": 0,
+          "receipt429": 18,
+          "walLocalScanThroughAfter": 12150100,
+          "newPersistentLocalScanBlocks": 0,
+          "fundingDepositBlock": 12156195,
+          "blocksRemainingToFundingAfter": 6095
+        },
+        {
+          "chainId": 421614,
+          "headerHost": "arbitrum-sepolia-rpc.publicnode.com",
+          "headerFingerprint": "b290f0154fffbfcf92b01e44993e5a79d9bfecf955f77a79566ee001e4e172c0",
+          "historyFingerprint": "17d81ad60c2be3ff9ce4bec3563dd1104a82df8c7883ebd70ffd0b4e30515a4b",
+          "initialHeadProbe": 330217254,
+          "incorporatedJCursor": 329895132,
+          "restoredLocalScanThrough": 329895876,
+          "committedBeforeEachRange": [
+            329895132
+          ],
+          "authenticatedRanges": 60,
+          "authenticatedBlocks": 1170,
+          "firstAuthenticatedBlock": 329895133,
+          "authenticatedThrough": 329896302,
+          "receiptResults": {
+            "reply": 8,
+            "429": 3
+          },
+          "headers": {
+            "sent": 238,
+            "maxItems": 32,
+            "RPC_BATCH_HTTP_429": 4
+          },
+          "headerHttp429": 4,
+          "receipt429": 3,
+          "walLocalScanThroughAfter": 329896290,
+          "newPersistentLocalScanBlocks": 414,
+          "fundingDepositBlock": 330178730,
+          "blocksRemainingToFundingAfter": 282440
+        }
+      ],
+      "hubWal": {
+        "replayHeight": 51,
+        "afterLatestHeight": 56,
+        "frames": [
+          {
+            "height": 52,
+            "runtimeTxs": [
+              {
+                "type": "importJ"
+              }
+            ],
+            "entityTxs": [],
+            "runtimeOutputCount": 0
+          },
+          {
+            "height": 53,
+            "runtimeTxs": [
+              {
+                "type": "observeJRange",
+                "jurisdictionRef": "stack:421614:0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+                "scannedThroughHeight": 329895980,
+                "eventBlocks": 0
+              }
+            ],
+            "entityTxs": [],
+            "runtimeOutputCount": 0
+          },
+          {
+            "height": 54,
+            "runtimeTxs": [
+              {
+                "type": "observeJRange",
+                "jurisdictionRef": "stack:421614:0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+                "scannedThroughHeight": 329896083,
+                "eventBlocks": 0
+              }
+            ],
+            "entityTxs": [],
+            "runtimeOutputCount": 0
+          },
+          {
+            "height": 55,
+            "runtimeTxs": [
+              {
+                "type": "observeJRange",
+                "jurisdictionRef": "stack:421614:0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+                "scannedThroughHeight": 329896188,
+                "eventBlocks": 0
+              }
+            ],
+            "entityTxs": [],
+            "runtimeOutputCount": 0
+          },
+          {
+            "height": 56,
+            "runtimeTxs": [
+              {
+                "type": "observeJRange",
+                "jurisdictionRef": "stack:421614:0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+                "scannedThroughHeight": 329896290,
+                "eventBlocks": 0
+              }
+            ],
+            "entityTxs": [],
+            "runtimeOutputCount": 0
+          }
+        ],
+        "observedEventBlocks": 0,
+        "cursorAdvanceTransactions": 0
+      }
+    },
+    "baselineIntervals": {
+      "sessionDirectory": ".logs/ts-usdc-cross-j-poc/public/sessions/restore-ncv3iU",
+      "startedAt": "2026-11-17T21:36:39.167Z",
+      "observedAt": "2026-11-17T21:38:43.900Z",
+      "sessionElapsedMs": 124330,
+      "exitCode": 1,
+      "sessionResult": "USDC_SESSION_READINESS_TIMEOUT:hub",
+      "headerDispatchIntervalMs": 500,
+      "receiptDispatchIntervalMs": 1000,
+      "multiItemRangeBatchesSent": 126,
+      "sentAfterObservedClientAbort": 0,
+      "headerHttp429": 3,
+      "receipt429": 0,
+      "chains": [
+        {
+          "chainId": 11155111,
+          "headerHost": "rpc.sepolia.ethpandaops.io",
+          "headerFingerprint": "ea37f436779dc1fa5fb56704e8ea35da30c159d85b333faa3e5bfcb758afd2f1",
+          "historyFingerprint": "92eca84d3029d9e3b8330990d4463178eb8ac68b2dd77f1e9989b22c8c80f5e3",
+          "initialHeadProbe": 12157104,
+          "incorporatedJCursor": 12149976,
+          "restoredLocalScanThrough": 12150100,
+          "committedBeforeEachRange": [
+            12149976
+          ],
+          "authenticatedRanges": 4,
+          "authenticatedBlocks": 124,
+          "firstAuthenticatedBlock": 12149977,
+          "authenticatedThrough": 12150100,
+          "receiptResults": {
+            "reply": 112
+          },
+          "headers": {
+            "sent": 16,
+            "maxItems": 32
+          },
+          "headerHttp429": 0,
+          "receipt429": 0,
+          "walLocalScanThroughAfter": 12150100,
+          "newPersistentLocalScanBlocks": 0,
+          "fundingDepositBlock": 12156195,
+          "blocksRemainingToFundingAfter": 6095
+        },
+        {
+          "chainId": 421614,
+          "headerHost": "arbitrum-sepolia-rpc.publicnode.com",
+          "headerFingerprint": "b290f0154fffbfcf92b01e44993e5a79d9bfecf955f77a79566ee001e4e172c0",
+          "historyFingerprint": "17d81ad60c2be3ff9ce4bec3563dd1104a82df8c7883ebd70ffd0b4e30515a4b",
+          "initialHeadProbe": 330217756,
+          "incorporatedJCursor": 329895132,
+          "restoredLocalScanThrough": 329896290,
+          "committedBeforeEachRange": [
+            329895132
+          ],
+          "authenticatedRanges": 36,
+          "authenticatedBlocks": 1288,
+          "firstAuthenticatedBlock": 329895133,
+          "authenticatedThrough": 329896420,
+          "receiptResults": {
+            "reply": 8
+          },
+          "headers": {
+            "sent": 161,
+            "maxItems": 32,
+            "RPC_BATCH_HTTP_429": 3
+          },
+          "headerHttp429": 3,
+          "receipt429": 0,
+          "walLocalScanThroughAfter": 329896420,
+          "newPersistentLocalScanBlocks": 130,
+          "fundingDepositBlock": 330178730,
+          "blocksRemainingToFundingAfter": 282310
+        }
+      ],
+      "hubWal": {
+        "replayHeight": 56,
+        "afterLatestHeight": 58,
+        "frames": [
+          {
+            "height": 57,
+            "runtimeTxs": [
+              {
+                "type": "importJ"
+              }
+            ],
+            "entityTxs": [],
+            "runtimeOutputCount": 0
+          },
+          {
+            "height": 58,
+            "runtimeTxs": [
+              {
+                "type": "observeJRange",
+                "jurisdictionRef": "stack:421614:0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+                "scannedThroughHeight": 329896420,
+                "eventBlocks": 0
+              }
+            ],
+            "entityTxs": [],
+            "runtimeOutputCount": 0
+          }
+        ],
+        "observedEventBlocks": 0,
+        "cursorAdvanceTransactions": 0
+      }
+    }
+  },
+  "mmLaunched": false,
+  "userLaunched": false,
+  "additionalFinancialBroadcasts": 0,
+  "standReleased": true,
+  "validation": {
+    "focusedTests": 81,
+    "focusedAssertions": 3357,
+    "deploymentTypecheck": "pass",
+    "aggregateCheck": "pass",
+    "shortGates": 3,
+    "sourceGates": 38,
+    "soundcheckGates": 10,
+    "frozenCore": "unchanged"
+  },
+  "limitsOfInference": "Compare authenticated blocks above the same Entity-certified frontiers. The watcher reauthenticated the previous local suffix before recording new blocks. WAL scan evidence is validator-local. Short startup runs establish neither sustained rate nor funded reserve observation, Hub/MM readiness or exact funded restore."
+}
