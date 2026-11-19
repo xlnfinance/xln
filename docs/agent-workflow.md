@@ -48,10 +48,9 @@ design documents in `/docs`; do not generate a progress-file trail by default.
 ## Second opinion: one bounded question
 
 Budget and confirmation rules live in [AGENTS.md](../AGENTS.md) (REVIEW AND EXTERNAL
-MODELS): subscriptions first (Codex, Claude, Z.ai via pi `zai-coding-cn`), OpenRouter
-capped at USD 10 per rolling hour across all agents and attempts, and every bug plus
-fix confirmed by at least three different AIs. Unresolved calls retain their full
-reservation; do not infer extra budget from an account balance or a new agent.
+MODELS). Invoke external models only when explicitly requested, under the current
+model and budget policy there. Unresolved calls retain their full reservation;
+do not infer extra budget from an account balance or a new agent.
 
 Use an advisor to confirm a bug and its fix or to resolve a real uncertainty.
 Default one response. A consequential unresolved disagreement may

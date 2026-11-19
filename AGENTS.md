@@ -186,7 +186,8 @@ transitions, one canonical production path, no silent fallback.
 
 ## GIT AND SHARED WORKSPACE
 
-- Always work on `main` (owner 2026-10-17). No task branches or worktrees; never force-push.
+- Work on the current checked-out branch (owner 2026-11-16). No task branches or worktrees;
+  never force-push.
   Apply the [owner-approved Sepolia task exception](docs/deployment/ignition-stack-design.md#owner-approved-execution-exceptions)
   when working on or validating its existing branch and publication route.
 - Preserve unrelated user changes on both Macs, including owner files held by the
@@ -198,10 +199,10 @@ transitions, one canonical production path, no silent fallback.
 - Release evidence names a committed SHA checked on a clean tree; durable evidence lives under
   `docs/evidence/`, never only in `/tmp`. Auditors may use a read-only checkout at an immutable SHA.
 
-## STUDIO EXECUTION AND DEPENDENCIES (owner decision 2026-10-18)
+## EXECUTION HOSTS AND DEPENDENCIES
 
-- All implementation, builds, tests and agents run on Mac Studio. MacBook is control, transfer
-  and exact-SHA proof retrieval only; no project verification there.
+- Implementation, builds, tests, Runtime execution and agents may run on the owner's current
+  computer (including MacBook) or Mac Studio (owner decision 2026-11-16).
 - The sole integrator owns manifests, lockfiles and used JS CLI updates to current official
   stable releases, including necessary major API changes. Preserve exact pre-update source/locks;
   reconcile patches/overrides with upstream; regenerate ABI/bytecode/TypeChain with recorded
@@ -213,11 +214,16 @@ transitions, one canonical production path, no silent fallback.
 
 ## REVIEW AND EXTERNAL MODELS
 
-- External auditors/models run only when the owner explicitly requests them. Owner 2026-10-26
-  requested it for all work: every bug and its fix are confirmed by at least three different
+- External auditors/models run only when the owner explicitly requests them.
+
+<!-- Owner decision 2026-11-16: mandatory three-AI and Claude/Z.ai review is disabled.
+- Owner 2026-10-26 requested it for all work: every bug and its fix are confirmed by at least three different
   AIs, each leg smoke-tested on a known answer first. Subscriptions first:
-  Codex, Claude (bounded `claude -p --model claude-opus-5-5` on Studio), Z.ai via pi
-  `zai-coding-cn`. All paid external-model calls share USD 10 per rolling hour across
+  Codex, Claude (bounded `claude -p --model claude-opus-5-5` on the execution host), Z.ai via pi
+  `zai-coding-cn`.
+-->
+
+- All paid external-model calls share USD 10 per rolling hour across
   providers, agents, harnesses and retries, administered by the sole integrator as the single
   Quorum reservation owner; preserve historical unresolved holds and costs. Reserve before
   dispatch; unresolved calls retain their full reserved maximum; a new hour, agent or restart
