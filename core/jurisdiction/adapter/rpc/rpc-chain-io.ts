@@ -311,6 +311,7 @@ const createAuthenticatedBatchSender = (
 
 const createHeaderReader = (
   config: JAdapterConfig,
+  headerBatchCalls?: number,
 ): RpcChainIo['readBlockHeaders'] => async heights => {
   const canonicalHeights = [...new Set(heights)].sort((left, right) => left - right);
   // The audit batch grows with authority evidence; above MAX_RPC_BATCH_CALLS
@@ -324,7 +325,7 @@ const createHeaderReader = (
   const responses = await sendBatchInChunks(sendChunk, canonicalHeights.map(jHeight => ({
     method: 'eth_getBlockByNumber',
     params: [ethers.toQuantity(jHeight), false],
-  })), config.mode === 'tron' ? 1 : 4) as Array<RpcBatchResponse | undefined>;
+  })), config.mode === 'tron' || headerBatchCalls !== undefined ? 1 : 4, headerBatchCalls) as Array<RpcBatchResponse | undefined>;
   const headers = canonicalHeights.map((id, index) => {
     const response = responses[index];
     const block = response?.result && typeof response.result === 'object'
@@ -357,6 +358,7 @@ export const createRpcChainIo = (
   config: JAdapterConfig,
   provider: ethers.JsonRpcProvider,
   signer: Signer,
+  headerBatchCalls?: number,
 ): RpcChainIo => {
   const settings = readSettings(config);
   const estimateGas = async (estimate: () => Promise<bigint>): Promise<bigint> =>
@@ -379,7 +381,7 @@ export const createRpcChainIo = (
     readLatestBlockTimestamp,
     readSafeBlockNumber: () =>
       config.mode === 'tron' ? readTronSolidifiedBlockNumber(config, provider) : readCurrentBlockNumber(),
-    readBlockHeaders: createHeaderReader(config),
+    readBlockHeaders: createHeaderReader(config, headerBatchCalls),
     sendAuthenticatedBatch: createAuthenticatedBatchSender(config),
     resolveFinalityDepth: scenarioMode => resolveRpcFinalityDepth(config, scenarioMode),
   };

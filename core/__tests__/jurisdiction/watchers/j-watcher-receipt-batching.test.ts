@@ -21,6 +21,49 @@ const hashFor = (height: number): string => sealedAt(height).hash;
 const blockFor = (height: number) => structuredClone(sealedAt(height));
 
 describe('authenticated J watcher RPC batching', () => {
+  test.each([false, true])('reads a fresh complete range fence (missing block: %s)', async missing => {
+    const observed: number[][] = [];
+    const forbidden = async () => { throw new Error('UNEXPECTED_HEADER_TRANSPORT'); };
+    const result = readAuthenticatedReceiptRange(forbidden, 2, 4, ['0x000000000000000000000000000000000000dEaD'], {
+      expectedParent: { height: 1, hash: hashFor(1), finalized: true },
+      readBlockRange: async (from, to) => {
+        observed.push([from, to]);
+        const heights = missing && observed.length === 2 ? [1, 2, 4] : [1, 2, 3, 4];
+        return heights.map(blockFor);
+      },
+    }, forbidden);
+    if (missing) await expect(result).rejects.toThrow('J_RECEIPT_BATCH_LENGTH_MISMATCH');
+    else expect((await result).headers.map(header => header.jBlockHash)).toEqual([2, 3, 4].map(hashFor));
+    expect(observed).toEqual([[1, 4], [1, 4]]);
+  });
+
+  test('a 127-block EVM range authenticates both passes with one 32-header batch at a time', async () => {
+    let active = 0;
+    let peak = 0;
+    const chunks: number[][] = [];
+    const result = await readAuthenticatedReceiptRange(
+      async () => { throw new Error('EMPTY_BLOOMS_REQUIRE_NO_RECEIPTS'); },
+      2,
+      128,
+      ['0x000000000000000000000000000000000000dEaD'],
+      { headerBatchCalls: 32 },
+      async calls => {
+        active++;
+        peak = Math.max(peak, active);
+        const heights = calls.map(call => Number(call.params[0]));
+        chunks.push(heights);
+        await Promise.resolve();
+        active--;
+        return heights.map(blockFor);
+      },
+    );
+    const pass = Array.from({ length: 4 }, (_, chunk) => Array.from({ length: 32 }, (_, offset) => chunk * 32 + offset + 1));
+    expect(chunks).toEqual([...pass, ...pass]);
+    expect(peak).toBe(1);
+    expect(result.headers).toHaveLength(127);
+    expect(result.headers.at(-1)?.jBlockHash).toBe(hashFor(128));
+  });
+
   test.each([false, true])(
     'validates the complete fence bloom after per-pass normalization: malformed=%s',
     async malformed => {

@@ -1,8 +1,15 @@
 import { BLOCKCHAIN } from '../../../../config/constants';
 import type { JAdapterMode } from '../../types';
 
-export const watcherPollWindowLimit = (mode: JAdapterMode): number =>
-  mode === 'tron' ? BLOCKCHAIN.J_WATCHER_TRON_MAX_BLOCKS_PER_POLL : BLOCKCHAIN.J_WATCHER_MAX_BLOCKS_PER_POLL;
+export const watcherPollWindowLimit = (mode: JAdapterMode, configuredRpcLimit?: string): number => {
+  if (mode === 'tron') return BLOCKCHAIN.J_WATCHER_TRON_MAX_BLOCKS_PER_POLL;
+  const limit = BLOCKCHAIN.J_WATCHER_MAX_BLOCKS_PER_POLL;
+  if (mode !== 'rpc' || configuredRpcLimit === undefined) return limit;
+  const blocks = /^\d+$/.test(configuredRpcLimit) ? Number(configuredRpcLimit) : NaN;
+  if (!Number.isSafeInteger(blocks) || blocks < 1 || blocks > limit)
+    throw new Error('J_WATCHER_RPC_MAX_BLOCKS_PER_POLL_INVALID');
+  return blocks;
+};
 
 export const J_WATCHER_IDLE_CANONICAL_AUDIT_MS = 30_000;
 

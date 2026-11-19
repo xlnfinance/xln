@@ -564,6 +564,11 @@ describe('JAdapter watcher ingress', () => {
     expect(nextWatcherPollWindow(512, true)).toBe(1024);
     expect(nextWatcherPollWindow(4096, true)).toBe(8191);
     expect(watcherPollWindowLimit('rpc')).toBe(8191);
+    const bounded = watcherPollWindowLimit('rpc', '31');
+    expect(resolveWatcherPollToBlock(1000, 2000, bounded)).toBe(1030);
+    expect(nextWatcherPollWindow(16, true, bounded)).toBe(31);
+    expect(() => watcherPollWindowLimit('rpc', '8192')).toThrow('J_WATCHER_RPC_MAX_BLOCKS_PER_POLL_INVALID');
+    expect(() => watcherPollWindowLimit('rpc', '0')).toThrow('J_WATCHER_RPC_MAX_BLOCKS_PER_POLL_INVALID');
     expect(watcherPollWindowLimit('tron')).toBe(255);
     expect(nextWatcherPollWindow(128, true, watcherPollWindowLimit('tron'))).toBe(255);
     expect(resolveWatcherPollToBlock(2, 1000, watcherPollWindowLimit('tron'))).toBe(256);

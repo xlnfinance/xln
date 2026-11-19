@@ -38,6 +38,8 @@ const FORK_FIELDS = [
   ['excessBlobGas', quantity],
   ['parentBeaconBlockRoot', hash32],
   ['requestsHash', hash32],
+  ['blockAccessListHash', hash32], // EIP-7928, after requestsHash in the canonical header.
+  ['slotNumber', quantity], // EIP-7843; omitting either field breaks block-hash authority.
 ] as const;
 
 /** keccak256(RLP(header)) of an RPC block object; throws on any malformed field. */

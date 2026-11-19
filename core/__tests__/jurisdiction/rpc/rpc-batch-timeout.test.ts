@@ -26,12 +26,20 @@ describe('RPC batch transport timeouts', () => {
     });
     const startedAt = performance.now();
     try {
-      await expect(sendRpcBatch(`http://127.0.0.1:${server.port}`, [{
-        id: 1,
-        jsonrpc: '2.0',
-        method: 'eth_chainId',
-        params: [],
-      }], 25)).rejects.toThrow('RPC_BATCH_TIMEOUT:25');
+      await expect(
+        sendRpcBatch(
+          `http://127.0.0.1:${server.port}`,
+          [
+            {
+              id: 1,
+              jsonrpc: '2.0',
+              method: 'eth_chainId',
+              params: [],
+            },
+          ],
+          25,
+        ),
+      ).rejects.toThrow('RPC_BATCH_TIMEOUT:25');
       expect(performance.now() - startedAt).toBeLessThan(1_000);
     } finally {
       // The provider stays silent through both timeout assertions; teardown owns its pending handler.
@@ -45,17 +53,24 @@ describe('RPC batch transport timeouts', () => {
     // the watcher poll (and the frame waiting on it) forever.
     const server = Bun.serve({
       port: 0,
-      fetch: () => new Response(new ReadableStream({ start: controller => controller.enqueue(new TextEncoder().encode('[')) }), {
-        headers: { 'content-type': 'application/json' },
-      }),
+      fetch: () =>
+        new Response(new ReadableStream({ start: controller => controller.enqueue(new TextEncoder().encode('[')) }), {
+          headers: { 'content-type': 'application/json' },
+        }),
     });
     try {
-      const failure = await sendRpcBatch(`http://127.0.0.1:${server.port}`, [{
-        id: 1,
-        jsonrpc: '2.0',
-        method: 'eth_chainId',
-        params: [],
-      }], 25).catch((error: unknown) => error);
+      const failure = await sendRpcBatch(
+        `http://127.0.0.1:${server.port}`,
+        [
+          {
+            id: 1,
+            jsonrpc: '2.0',
+            method: 'eth_chainId',
+            params: [],
+          },
+        ],
+        25,
+      ).catch((error: unknown) => error);
       expect(failure).toBeInstanceOf(RpcTransportUnavailableError);
       expect((failure as Error).message).toBe('RPC_BATCH_TIMEOUT:25');
     } finally {
@@ -69,31 +84,58 @@ describe('RPC batch transport timeouts', () => {
       fetch: () => Response.json([{ id: '1', result: '0x1' }]),
     });
     try {
-      await expect(sendRpcBatch(`http://127.0.0.1:${server.port}`, [{
-        id: 1,
-        jsonrpc: '2.0',
-        method: 'eth_chainId',
-        params: [],
-      }])).rejects.toThrow('RPC_BATCH_ITEM_ID_INVALID');
+      await expect(
+        sendRpcBatch(`http://127.0.0.1:${server.port}`, [
+          {
+            id: 1,
+            jsonrpc: '2.0',
+            method: 'eth_chainId',
+            params: [],
+          },
+        ]),
+      ).rejects.toThrow('RPC_BATCH_ITEM_ID_INVALID');
     } finally {
       await server.stop(true);
     }
   });
 
   test('keeps a successful JSON-RPC result free of a synthetic error', async () => {
+    let reply: unknown = [{ jsonrpc: '2.0', id: 1, result: { number: '0x1' } }];
     const server = Bun.serve({
       port: 0,
-      fetch: () => Response.json([{ jsonrpc: '2.0', id: 1, result: { number: '0x1' } }]),
+      fetch: () => Response.json(reply),
     });
     try {
-      const responses = await sendRpcBatch(`http://127.0.0.1:${server.port}`, [{
-        id: 1,
-        jsonrpc: '2.0',
-        method: 'eth_getBlockByNumber',
-        params: ['0x1', false],
-      }]);
+      const responses = await sendRpcBatch(`http://127.0.0.1:${server.port}`, [
+        {
+          id: 1,
+          jsonrpc: '2.0',
+          method: 'eth_getBlockByNumber',
+          params: ['0x1', false],
+        },
+      ]);
       expect(responses.get(1)).toEqual({ id: 1, result: { number: '0x1' } });
       expect(responses.get(1)?.error).toBeUndefined();
+      reply = [
+        {
+          jsonrpc: '2.0',
+          id: 1,
+          error: { code: 429, message: 'Your app has exceeded its compute units per second capacity.' },
+        },
+      ];
+      const throttled = await sendRpcBatch(`http://127.0.0.1:${server.port}`, [
+        { id: 1, jsonrpc: '2.0', method: 'eth_getBlockByNumber', params: ['0x1', false] },
+      ]);
+      expect(throttled.get(1)?.error).toEqual({
+        code: 429,
+        message: 'Your app has exceeded its compute units per second capacity.',
+      });
+      reply = [{ id: 1, error: { code: '429', message: 'Malformed error code' } }];
+      await expect(
+        sendRpcBatch(`http://127.0.0.1:${server.port}`, [
+          { id: 1, jsonrpc: '2.0', method: 'eth_blockNumber', params: [] },
+        ]),
+      ).rejects.toThrow('RPC_BATCH_ITEM_ERROR_CODE_INVALID');
     } finally {
       await server.stop(true);
     }

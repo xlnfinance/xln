@@ -189,6 +189,11 @@ export const runWatcherPoll = async (request: PollRequest): Promise<void> => {
   if (!watcherReplica) {
     throw new Error(`J_WATCHER_JURISDICTION_NOT_FOUND:poll:${services.chainId}:` + services.depositoryAddress);
   }
+  // Startup imports J before its owned Entities. With no local consumer there
+  // is no history to admit. Keep every cursor unchanged so the first Entity
+  // still authenticates its storage anchor or full required history normally.
+  if (![...session.env.state.eReplicas.values()].some(replica =>
+    isEntityReplicaRelevantToWatcher(session.env, replica, watcherReplica))) return;
   request.trace.step = `anchorStart:${safeToBlock}`;
   if (await startWatcherFromStorageAnchor({
     session,
@@ -234,7 +239,12 @@ export const runWatcherPoll = async (request: PollRequest): Promise<void> => {
         services.mode === 'tron'
           ? { commitment: 'tron-complete-receipts', nativeRpc: { chainId: services.chainId,
               rpcUrl: services.rpcUrl ?? '', solidifiedThroughHeight: safeHead } }
-          : { commitment: 'ethereum-trie' }, services.sendAuthenticatedBatch),
+          : {
+              commitment: 'ethereum-trie',
+              ...(services.headerBatchCalls === undefined ? {} : { headerBatchCalls: services.headerBatchCalls }),
+              ...(services.readReceiptBlockRange ? { readBlockRange: services.readReceiptBlockRange } : {}),
+              ...(services.receiptBatch ? { receiptBatch: services.receiptBatch } : {}),
+            }, services.sendAuthenticatedBatch),
     });
     if (!references || request.isCancelled() || isIngressPaused(session.env)) return;
     session.disputeReferences = references;
@@ -275,13 +285,22 @@ export const runWatcherPoll = async (request: PollRequest): Promise<void> => {
   });
   if (!committed) return;
   rememberScanProgress(session, services, toBlock);
+  if (services.pollWindowLimit !== undefined) {
+    rpcLog.info('watcher.authenticated_range', {
+      chainId: services.chainId,
+      fromBlock,
+      toBlock,
+      committedBeforeRange: committedCursor,
+      pollWindowLimit: services.pollWindowLimit,
+    });
+  }
   session.transientFailures = 0;
   // Retained RPC pressure must suppress both retry bursts and window regrowth.
   if (session.rpcCooldown.backoffMs === 0) {
     session.maxBlocksPerPoll = nextWatcherPollWindow(
       session.maxBlocksPerPoll,
       true,
-      watcherPollWindowLimit(services.mode),
+      services.pollWindowLimit ?? watcherPollWindowLimit(services.mode),
     );
   }
 };

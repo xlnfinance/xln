@@ -364,6 +364,32 @@ describe('authenticated J watcher receipts', () => {
     expect(methods).not.toContain('eth_getLogs');
   }, 20_000);
 
+  test('batch reads preserve receipt proofs and reject an omitted block', async () => {
+    const wallet = new ethers.Wallet(anvilPrivateKey, provider);
+    const token = await new ERC20Mock__factory(wallet).deploy('Batch Token', 'BRT', 18, 1000n);
+    const deployment = await token.deploymentTransaction()?.wait();
+    const transfer = await (await token.transfer('0x000000000000000000000000000000000000dEaD', 1n)).wait();
+    if (!deployment || !transfer) throw new Error('J_RECEIPT_TEST_BATCH_FIXTURE_MISSING');
+    const watched = [await token.getAddress()];
+    const scalar = (method: string, params: unknown[]) => provider.send(method, params);
+    const reference = await readAuthenticatedLogsForRange(scalar, deployment.blockNumber, transfer.blockNumber, watched);
+    const heights: number[][] = [];
+    const read = (omit: boolean) => readAuthenticatedLogsForRange(async (method, params) => {
+      if (method !== 'eth_getBlockByNumber') throw new Error('UNEXPECTED_RECEIPT_TRANSPORT');
+      return scalar(method, params);
+    }, deployment.blockNumber, transfer.blockNumber, watched, {
+      receiptBatch: { maxBlocks: 2, read: async blocks => {
+        heights.push([...blocks]);
+        const selected = omit ? blocks.slice(0, 1) : blocks;
+        return Promise.all(selected.map(block => scalar('eth_getBlockReceipts', [ethers.toQuantity(block)])));
+      } },
+    });
+    expect(await read(false)).toEqual(reference);
+    expect(reference).toHaveLength(2);
+    await expect(read(true)).rejects.toThrow('J_RECEIPT_BLOCK_BATCH_LENGTH_MISMATCH');
+    expect(heights).toEqual(Array.from({ length: 2 }, () => [deployment.blockNumber, transfer.blockNumber]));
+  }, 20_000);
+
   test('an RPC that zeroes the bloom to hide a log fails the header hash instead of skipping the block', async () => {
     const wallet = new ethers.Wallet(anvilPrivateKey, provider);
     const token = await new ERC20Mock__factory(wallet).deploy('Hidden Log Token', 'HLT', 18, 1000n);

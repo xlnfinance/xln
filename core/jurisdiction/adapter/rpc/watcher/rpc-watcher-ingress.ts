@@ -185,6 +185,9 @@ export const applyAuthenticatedWatcherRange = async (
       ...watchedTokens.map(token => token.address),
     ],
     {
+      ...(request.services.headerBatchCalls === undefined ? {} : { headerBatchCalls: request.services.headerBatchCalls }),
+      ...(request.services.readReceiptBlockRange ? { readBlockRange: request.services.readReceiptBlockRange } : {}),
+      ...(request.services.receiptBatch ? { receiptBatch: request.services.receiptBatch } : {}),
       commitment: request.services.mode === 'tron'
         ? 'tron-complete-receipts'
         : 'ethereum-trie',

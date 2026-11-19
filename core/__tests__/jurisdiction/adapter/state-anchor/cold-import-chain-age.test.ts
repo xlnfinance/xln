@@ -142,6 +142,11 @@ test('a cold import reads a chain-age-independent number of headers and folds th
     methodCounts.clear();
     const startedAt = performance.now();
     coldAdapter.startWatching(env);
+    // Production starts the J watcher before Hub/MM Entity bootstrap. While
+    // there is no local consumer, retain the cursor instead of scanning the
+    // entire deployment history and exhausting the public RPC before import.
+    await coldAdapter.pollNow!();
+    expect(methodCounts.get('eth_getBlockByNumber') ?? 0).toBeLessThanOrEqual(4);
     const state = () => {
       const replica = env.state.eReplicas.get(`${entityId}:${signerId}`);
       if (!replica) throw new Error(`COLD_IMPORT_REPLICA_MISSING:${entityId}`);

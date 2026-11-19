@@ -83,7 +83,7 @@ const createWatcherSession = (
     transientFailures: 0,
     lastTransientLogAtMs: 0,
     rpcCooldown: { backoffMs: 0, untilMs: 0, releaseWait: null },
-    maxBlocksPerPoll: watcherPollWindowLimit(services.mode),
+    maxBlocksPerPoll: services.pollWindowLimit ?? watcherPollWindowLimit(services.mode),
     txCounter: { value: 0, _seenLogs: { set: new Set<string>(), order: [] } },
     readWatchedErc20Tokens,
   };

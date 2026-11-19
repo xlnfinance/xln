@@ -12,6 +12,7 @@ import type {
 } from '../../watcher';
 import type { WatchedErc20Token } from '../../rpc-watcher-inputs';
 import type { JAdapterMode } from '../../types';
+import type { RpcBlockRangeReader, RpcReceiptBatch } from '../../receipt/reader';
 
 type RpcWatcherScanProgress = {
   scannedThroughHeight: number;
@@ -32,6 +33,10 @@ export type RpcWatcherServices = {
   chainId: number;
   rpcUrl?: string;
   watchPollMs?: number;
+  pollWindowLimit?: number;
+  headerBatchCalls?: number;
+  readReceiptBlockRange?: RpcBlockRangeReader;
+  receiptBatch?: RpcReceiptBatch;
   depositoryAddress: string;
   entityProviderAddress: string;
   getDepository(): Depository;

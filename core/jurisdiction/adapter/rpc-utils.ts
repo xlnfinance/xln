@@ -24,9 +24,12 @@ export const sendBatchInChunks = async (
   sendBatch: RpcBatchSend,
   calls: readonly RpcBatchCall[],
   concurrentChunks: 1 | 2 | 4 | 8,
+  batchCalls = MAX_RPC_BATCH_CALLS,
 ): Promise<unknown[]> => {
-  if (calls.length <= MAX_RPC_BATCH_CALLS) return sendBatch(calls);
-  const count = Math.ceil(calls.length / MAX_RPC_BATCH_CALLS);
+  if (!Number.isSafeInteger(batchCalls) || batchCalls < 1 || batchCalls > MAX_RPC_BATCH_CALLS)
+    throw new Error('RPC_BATCH_CALL_LIMIT_INVALID');
+  if (calls.length <= batchCalls) return sendBatch(calls);
+  const count = Math.ceil(calls.length / batchCalls);
   const results = new Array<PromiseSettledResult<unknown[]>>(count);
   let next = 0;
   let failed = false;
@@ -36,11 +39,11 @@ export const sendBatchInChunks = async (
   const worker = async (): Promise<void> => {
     while (!failed && next < count) {
       const index = next++;
-      const offset = index * MAX_RPC_BATCH_CALLS;
+      const offset = index * batchCalls;
       try {
         results[index] = {
           status: 'fulfilled',
-          value: await sendBatch(calls.slice(offset, offset + MAX_RPC_BATCH_CALLS)),
+          value: await sendBatch(calls.slice(offset, offset + batchCalls)),
         };
       } catch (reason) {
         results[index] = { status: 'rejected', reason };
@@ -69,7 +72,7 @@ export type RpcBatchRequest = {
 export type RpcBatchResponse = {
   id?: number;
   result?: unknown;
-  error?: { message?: string };
+  error?: { code?: number; message?: string };
 };
 
 const decodeRpcBatchResponse = (value: unknown): RpcBatchResponse => {
@@ -88,10 +91,20 @@ const decodeRpcBatchResponse = (value: unknown): RpcBatchResponse => {
   const errorRecord =
     error && typeof error === 'object' && !Array.isArray(error) ? (error as Record<string, unknown>) : undefined;
   const errorMessage = typeof errorRecord?.['message'] === 'string' ? errorRecord['message'] : undefined;
+  const errorCode = errorRecord?.['code'];
+  if (errorCode !== undefined && (typeof errorCode !== 'number' || !Number.isSafeInteger(errorCode)))
+    throw new Error('RPC_BATCH_ITEM_ERROR_CODE_INVALID');
   return {
     ...(id === undefined ? {} : { id: Number(id) }),
     ...(Object.hasOwn(item, 'result') ? { result: item['result'] } : {}),
-    ...(error === undefined ? {} : errorMessage === undefined ? { error: {} } : { error: { message: errorMessage } }),
+    ...(error === undefined
+      ? {}
+      : {
+          error: {
+            ...(errorCode === undefined ? {} : { code: errorCode }),
+            ...(errorMessage === undefined ? {} : { message: errorMessage }),
+          },
+        }),
   };
 };
 
