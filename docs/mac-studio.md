@@ -97,3 +97,54 @@ Before rebooting:
 - External model reviews (Codex, GLM via pi `zai-coding-cn`, Gemini/Kimi via OpenRouter) and
   the 3-AI quorum runner live in `~/agent-jobs/claude-ext-20261026/` (`quorum.sh`, `ask.ts`,
   `smoke-legs.sh`). Smoke-test every leg on a known answer before trusting a quorum.
+
+## Driving the Studio from a control Mac
+
+Set up a new control machine:
+
+- Copy the SSH material from the old one; it is not in git: `~/.ssh/macstudio_ed25519`,
+  `~/.ssh/macstudio.conf`, `~/.ssh/macstudio_known_hosts`, and the `Include` line for
+  `macstudio.conf` in `~/.ssh/config`. Check with `ssh mac-studio 'cd ~/xln && git log -1 --oneline'`.
+- Clone the repo for reading and editing only. Never run verification or `git push` from the
+  control Mac: the pre-push hook runs the full verify in the pushing checkout.
+- An assistant's memory directory does not travel between machines. Decisions that must survive
+  belong in [owner-profile.md](owner-profile.md), `AGENTS.md` or `todo.md`.
+
+Remote shell:
+
+- Every remote command needs the toolchain on `PATH` and a raised descriptor limit:
+  `export PATH=$HOME/.bun/bin:$HOME/.cargo/bin:$HOME/.foundry/bin:/opt/homebrew/bin:$PATH; ulimit -n 65536`.
+- The SSH session goes through a relay and drops under long output. Start anything over about a
+  minute detached and poll a marker file: `nohup script.sh >/dev/null 2>&1 &`, the script appends
+  `DONE` to its summary, the control Mac waits with
+  `until ssh mac-studio 'grep -q DONE file'; do sleep 30; done`.
+- Keep job scripts and logs in `~/agent-jobs/<job>-<date>/`, never in `/tmp`.
+
+Verify a change without touching `~/xln`:
+
+1. `git -C ~/xln worktree add --detach ~/xln-<job> <sha>`, then apply the patch there.
+2. A fresh worktree lacks two things outside git: copy `~/xln/jurisdictions/lib/forge-std` to the
+   same path (as `lib/forge-std`, not into `lib/` itself), and run `bun install --frozen-lockfile`
+   in the root, `frontend/` and `ui/`.
+3. Build the Rust binary before the unit tests, or the real-Rust tests fail:
+   `(cd rscore && cargo build -q --release -p xln-rscore-process --bin xlnrs)`.
+4. Run `bun run contracts:sync` after any Solidity change and commit the regenerated artifacts,
+   then `bun run check` (about 30 s), `bun run test:contracts:full` (about 50 s),
+   `(cd rscore && cargo test -q --workspace)`, each folder under `core/__tests__/` with
+   `bun test --timeout 180000` (about 10 min in total), and `bun test ui/src tests/frontend`.
+5. `bun run check` runs gates in parallel and stops at the first failure; the later `FAIL` lines
+   in its log are gates it killed, so read the first one.
+6. Test folders hold at most ten source files (`check:folder-width`); put a new test in a folder
+   with room.
+
+Land:
+
+1. Commit in the worktree with explicit paths and no `wip:` subject.
+2. `cd ~/xln && git merge --ff-only <sha> && git push origin main`. The hook takes about ten
+   minutes and prints `VERIFY_PASS:<sha>`. Run it detached.
+3. On the control Mac: `git fetch origin && git merge --ff-only origin/main`. `git pull` refuses
+   when any tracked file is modified.
+
+Looking at a page without a dev server: Playwright's headless Chromium is installed under
+`~/Library/Caches/ms-playwright/`; a ten-line script that opens a `file://` page and saves
+screenshots is enough to check layout in both colour schemes.

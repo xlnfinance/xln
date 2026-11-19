@@ -174,3 +174,28 @@ unsupported readiness claims.
 Percentages describe named checks for the current stage, not mainnet readiness.
 Report substantial results, new failures and real owner decisions; do not repeat
 status when nothing has changed.
+
+## Decisions 2026-11-14 and 2026-11-19
+
+- Mission: make 51% of all world value provable, not only fiat money. The denominator is M2
+  including credit plus company equity held as tokens. Counting accounts is rejected; the docs
+  still carry the earlier GDP wording until they are rewritten.
+- Users are everyone: nobody wants to lose money to an exchange hack, censorship or a
+  counterparty. There is no narrow launch segment. The product is about hubs and banks.
+- Pro mode is a plain wallet toggle, on by default. The protocol supports everything without
+  flags or modes. The raw account view and the collateral split stay visible to everyone; the
+  wallet shows one bar where width is dollars and colour is safety.
+- Custom transformers open everywhere, TS and Rust in full parity, with no Solidity change: a
+  clause enters an Account only after the counterparty explicitly accepts it, and the wallet
+  warns that custom code can block exit from that Account.
+- Dispute-proof replay is closed by the dispute epoch in the Account nonce.
+- A change lands after a green full Studio verify; the three-AI quorum is no longer required.
+- A redeployed testnet must not make the owner reset wallets by hand: valueless chains reset
+  their own state and keep the keys; real-funds chains never auto-reset.
+- Rust is the speed engine and must match TS.
+- The explainer film is a separate effort and stays out of the repository for now.
+- Communication: the owner has ADHD. Result first, short sections, at most three questions and
+  only important ones, a progress line every five minutes during long work, Russian replies.
+  Ask when confidence is below 90%; otherwise act.
+- Explainers for ordinary people must be about hubs and banks, obvious at a glance, with almost
+  no text. Abstract dots, queues of anonymous circles and dashboards were rejected.
