@@ -1,7 +1,8 @@
 # Dispute-proof replay after finalization
 
-Found by audit on 2026-11-14 at `da08764cc`, reproduced on Mac Studio. Not fixed: the fix changes
-contract behaviour and needs an owner decision.
+Found by audit on 2026-11-14 at `da08764cc`, reproduced on Mac Studio. Fixed in `4a10c6973` with
+option 2 below, the owner's choice of 2026-11-19, using 40 epoch bits instead of 32 and saturating
+at the safe bound instead of reverting. The text below describes the contract before the fix.
 
 ## What happens
 
@@ -53,7 +54,7 @@ Right pays 250 instead of 150. The test asserts Right keeps at least 850 and fai
    carries it. Requires the runtime to rotate the seed after every finalization; that lifecycle was
    not audited.
 
-Option 2 is the smallest. None is applied.
+Option 2 was applied.
 
 ## Counterexample
 

@@ -13,13 +13,6 @@ Testnet evidence never authorizes real-funds activation.
 
 ## Blockers, in order
 
-0. Dispute-proof replay after finalization (audit 2026-11-14): fixed by the dispute epoch in the
-   Account nonce (`ACCOUNT_NONCE_EPOCH_BITS = 40`), mirrored in TS and Rust, owner choice
-   2026-11-19. Pushed at the owner's request without the full verify: contract tests were green
-   (275), the updated watchtower and Rust expectations and `bun run check` on the final bytes were
-   not run. Run the full Studio verify before relying on it.
-   Evidence: [docs/evidence/dispute-replay-20261114](docs/evidence/dispute-replay-20261114/readme.md);
-   other audit findings: [docs/evidence/core-audit-20261114](docs/evidence/core-audit-20261114/readme.md).
 1. Done on `e838188fd`: full browser E2E 157/157 and `gate:release` 40/40 on one SHA
    ([evidence](docs/evidence/release-candidate-e838188f-20261027/result.json)). Keep it green
    on every later candidate.
@@ -61,6 +54,8 @@ Testnet evidence never authorizes real-funds activation.
   independently funded H1–H3 route stays executable ([launch design](docs/launch-design.md)).
 - MML v0 formula in `docs/intro.md`: unaffiliated obligations only; a hub-routed payment
   counts once, on the commercial edge.
+- Decide the open audit findings in [docs/evidence/core-audit-20261114](docs/evidence/core-audit-20261114/readme.md):
+  swap fill in a dispute, beneficiary HTLC timeout, HTLC expiry by height, and the unverified leads.
 - Owner: 10 conversations with OTC/MM/payout firms → at least 2 written intents.
 - React wallet: the keys-preserving reset of retired testnet state that the Svelte wallet has.
 - Custom transformer clause on one Account with explicit counterparty acceptance, TS and Rust

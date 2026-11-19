@@ -9,13 +9,9 @@ against the code; "reproduced" means a test demonstrates it.
 | Finding | Fix | Test |
 |---|---|---|
 | A peer could halt a Runtime by sending back our committed head with its own ACK Hanko while our successor was pending (untyped `DUPLICATE_ACK_CURRENT_FRAME_HANKO_INVALID`). | `4d59c8901`: typed `ACCOUNT_INPUT_FRAME_HANKO_INVALID` reject. | `core/__tests__/security/policy/peer-own-head-replay.test.ts` (red without the fix) |
+| Dispute-proof replay after finalization: a pre-dispute proof with a higher nonce was settled a second time against the emptied account ([evidence](../dispute-replay-20261114/readme.md)). | `4a10c6973`: finalization moves the Account nonce to the next dispute epoch, mirrored in TS and Rust. | `jurisdictions/test/dispute/Depository-part-2.ts`, "a pre-dispute proof with a higher nonce cannot be settled a second time after finalization" |
 | A hub restarted from a checkpoint halted on its first swap offer: the canonical J replica snapshot dropped `tokenRegistry`, which same-J matching reads (regression from `3cd8c5380`). | `4280df1eb`: the snapshot and its schema keep the registry. | `core/__tests__/jurisdiction/history/jreplica-token-registry-snapshot.test.ts` |
 
-## Reproduced, needs an owner decision
-
-| Finding | Evidence |
-|---|---|
-| Dispute-proof replay after finalization: a pre-dispute proof with a higher nonce is settled a second time against the emptied account. | [dispute-replay-20261114](../dispute-replay-20261114/readme.md) |
 
 ## Confirmed by reading, needs an owner decision
 
