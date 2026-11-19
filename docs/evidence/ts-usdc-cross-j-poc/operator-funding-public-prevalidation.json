@@ -175,7 +175,8 @@
   "observedAt": "2026-11-17T18:22:36.805Z",
   "ownerRestriction": {
     "effect": "Supersedes the earlier A reply. No public signing or broadcast is authorized.",
-    "ownerReply": "Пока только read-only проверка",
+    "ownerReplyTranslation": "Read-only verification only for now.",
+    "originalEvidenceSha256": "0458d3493f0ec213a080bbbde21df21b789dcd991741032843bc1b674f482dcb",
     "receivedAt": "2026-11-17T18:23:04.239Z"
   },
   "publicFinancialBroadcasts": 0,
