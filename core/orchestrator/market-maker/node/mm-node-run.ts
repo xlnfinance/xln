@@ -2443,6 +2443,7 @@ export const runMarketMakerNode = async (): Promise<void> => {
 
   const localSignerLabels = buildLocalMarketMakerSignerLabels();
   const env = await main(resolvedArgs.seed, {
+    requireRestore: process.argv.includes('--require-restore'),
     localSigners: localSignerLabels.map(label => ({ label })),
     trustedJurisdictionRpcBindings: resolveMeshJurisdictionRpcBindings(resolvedArgs.rpcUrl, resolveLocalApiUrl),
   });

@@ -9,7 +9,6 @@ import {
   buildDefaultEntitySwapPairs,
   getSwapPairOrientation,
   getSwapPairPolicyByBaseQuote,
-  getTokenIdsForJurisdiction,
   getTokenInfo,
   hasSwapPairPolicyForDimensions,
   isLiquidSwapToken,
@@ -73,7 +72,6 @@ import {
   BOOTSTRAP_POLL_MS,
   buildMarketMakerConsensusConfig,
   collectQueuedSwapOfferIds,
-  DEFAULT_ACCOUNT_TOKEN_IDS,
   deriveMarketMakerEntityId,
   getAccountReplica,
   getBootstrapCreditAmount,
@@ -83,7 +81,6 @@ import {
   hasPairMutualCredit,
   hasQueuedExtendCredit,
   hasQueuedOpenAccount,
-  HUB_REQUIRED_TOKEN_COUNT,
   isAccountWriteLaneIdle,
   planMarketMakerIdentityLabels,
   settleRuntimeFor,
@@ -96,7 +93,9 @@ import {
   resolveMeshJurisdictionConfig,
   resolveSecondaryJurisdictions,
   type ResolvedMeshJurisdictionConfig,
+  getMeshJurisdictionTokenIds,
 } from '../../mesh/mesh-jurisdictions';
+import { requiredHubTokenCount } from '../../hub/node/token-catalog';
 import { runtimeBacklogBlocksMarketMakerQuotes } from './mm-bootstrap-progress';
 import { parseConfiguredPeerIdentities, type ConfiguredPeerIdentity } from '../../mesh/hub-mesh-peers';
 
@@ -530,7 +529,7 @@ export const buildLocalMarketMakerSignerLabels = (): string[] => {
     const label = index === 0
       ? resolvedArgs.signerLabel
       : `${resolvedArgs.signerLabel}:${jurisdiction.name.trim()}`;
-    const tokenIds = normalizePositiveTokenIds(getTokenIdsForJurisdiction({
+    const tokenIds = normalizePositiveTokenIds(getMeshJurisdictionTokenIds({
       name: jurisdiction.name,
       chainId: jurisdiction.chainId,
     }));
@@ -668,7 +667,7 @@ export const waitForTokenCatalog = async (jadapter: JAdapter, rounds = 80): Prom
   for (let i = 0; i < rounds; i += 1) {
     try {
       const tokens = await jadapter.getTokenRegistry();
-      if (tokens.length >= HUB_REQUIRED_TOKEN_COUNT) return tokens;
+      if (tokens.length >= requiredHubTokenCount(jadapter.chainId)) return tokens;
       lastReadError = null;
     } catch (error) {
       lastReadError = error;
@@ -740,14 +739,18 @@ export const waitForReplicaReady = async (env: RuntimeReplica, entityId: string,
 };
 
 const assertMarketMakerJAdapterBinding = (
+  env: RuntimeReplica,
   name: string,
   replica: JReplica,
   jadapter: JAdapter,
   rpcUrl: string,
 ): void => {
-  const expectedRpc = replica.rpcs?.length === 1
-    ? new URL(replica.rpcs[0]!).toString()
-    : '';
+  // Recovery binds a live RPC capability without rewriting the committed
+  // JReplica. Requiring its historical URL rejects an authorized relocation.
+  const trustedRpc = env.infrastructure?.trustedJurisdictionRpcUrls
+    ?.get(getJurisdictionIdentityRef(replica).toLowerCase());
+  const boundRpc = trustedRpc ?? (replica.rpcs?.length === 1 ? replica.rpcs[0]! : '');
+  const expectedRpc = boundRpc ? new URL(boundRpc).toString() : '';
   const actualRpc = new URL(rpcUrl).toString();
   const actualChainId = requireJurisdictionChainId(jadapter.chainId, 'MM_JADAPTER_CHAIN_ID_INVALID');
   if (Number(replica.chainId) !== actualChainId || expectedRpc !== actualRpc) {
@@ -772,7 +775,7 @@ export const ensureJurisdictionReplica = (env: RuntimeReplica, jadapter: JAdapte
   if (!activeName) throw new Error('MM_JURISDICTION_REPLICA_MISSING:active');
   const replica = env.state.jReplicas?.get(activeName);
   if (!replica) throw new Error(`MM_JURISDICTION_REPLICA_MISSING:${activeName}`);
-  assertMarketMakerJAdapterBinding(activeName, replica, jadapter, rpcUrl);
+  assertMarketMakerJAdapterBinding(env, activeName, replica, jadapter, rpcUrl);
   attachLiveJAdapter(env, activeName, jadapter);
 };
 
@@ -1073,25 +1076,24 @@ const isWithinPairBand = (anchorTicks: bigint, priceTicks: bigint): boolean => {
 export const marketMakerContextKey = (context: Pick<MarketMakerEntityContext, 'entityId'>): string =>
   normalizeEntityRef(context.entityId);
 
-/** Every jurisdiction token set already carries the three default tokens. */
+/** Quote only assets in this jurisdiction's admitted registry. */
 export const buildMarketMakerTokenIdsByContext = (
   contexts: readonly MarketMakerEntityContext[],
 ): Map<string, number[]> => new Map(contexts.map(context => [
   marketMakerContextKey(context),
-  normalizePositiveTokenIds(getTokenIdsForJurisdiction({
+  normalizePositiveTokenIds(getMeshJurisdictionTokenIds({
     name: context.jurisdictionName,
     chainId: context.chainId,
   })),
 ]));
 
-// Health can be read while contexts are still being created, before the token
-// map is published; that window reports the default token set.
+// Health before context publication has no executable token universe yet.
 export const getMarketMakerTokenIds = (
   tokenIdsByContext: MarketMakerTokenIdsByContext,
   context: MarketMakerEntityContext,
 ): number[] => {
   const ids = tokenIdsByContext.get(marketMakerContextKey(context));
-  return ids && ids.length >= HUB_REQUIRED_TOKEN_COUNT ? ids : [...DEFAULT_ACCOUNT_TOKEN_IDS];
+  return ids ?? [];
 };
 
 /** Offers this side proposed and that still await their Account frame. */

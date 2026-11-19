@@ -38,12 +38,16 @@ export const planMarketMakerIdentityLabels = (
   signerLabel: string,
   profileName: string,
   tokenIds: readonly number[],
-): readonly MarketMakerIdentityLabelPlan[] =>
-  buildDefaultEntitySwapPairs(tokenIds).map((_pair, samePairIndex) => Object.freeze({
+): readonly MarketMakerIdentityLabelPlan[] => {
+  if (tokenIds.length === 0) throw new Error('MARKET_MAKER_TOKEN_REGISTRY_EMPTY');
+  // A single registered token still owns the base Entity for cross-J markets.
+  const count = Math.max(1, buildDefaultEntitySwapPairs(tokenIds).length);
+  return Array.from({ length: count }, (_unused, samePairIndex) => Object.freeze({
     samePairIndex,
     signerLabel: samePairIndex === 0 ? signerLabel : `${signerLabel}:pair:${samePairIndex + 1}`,
     profileName: samePairIndex === 0 ? profileName : `${profileName} Pair ${samePairIndex + 1}`,
   }));
+};
 export const BOOTSTRAP_POLL_MS = Math.max(10, Number(process.env['BOOTSTRAP_POLL_MS'] || '50'));
 const RUNTIME_SETTLE_POLL_MS = Math.max(5, Number(process.env['RUNTIME_SETTLE_POLL_MS'] || '10'));
 

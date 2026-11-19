@@ -14,7 +14,6 @@ import type { CrossJurisdictionSwapRoute } from '../../../types/cross-jurisdicti
 import type { RuntimeReplica } from '../../../runtime/types';
 import type { SwapOffer } from '../../../types/account';
 import {
-HUB_REQUIRED_TOKEN_COUNT,
 getAccountReplica,
 getBootstrapCreditAmount,
 getCreditGrantedByEntity,
@@ -178,7 +177,7 @@ const buildExpectedMarketMakerCrossRouteGroups = (
   for (const sourceContext of crossContexts) {
     const sourceJurisdictionRef = sourceContext.jurisdictionRef;
     const sourceTokenIds = getMarketMakerTokenIds(tokenIdsByContext, sourceContext);
-    if (!sourceJurisdictionRef || sourceTokenIds.length < HUB_REQUIRED_TOKEN_COUNT) continue;
+    if (!sourceJurisdictionRef || sourceTokenIds.length === 0) continue;
     const sourceHubs = visibleHubs.filter(profile => sameJurisdiction(sourceContext, profile));
     if (sourceHubs.length === 0) continue;
     for (const targetContext of crossContexts) {
@@ -191,7 +190,7 @@ const buildExpectedMarketMakerCrossRouteGroups = (
         continue;
       }
       const targetTokenIds = getMarketMakerTokenIds(tokenIdsByContext, targetContext);
-      if (targetTokenIds.length < HUB_REQUIRED_TOKEN_COUNT) continue;
+      if (targetTokenIds.length === 0) continue;
       const targetHubs = visibleHubs.filter(profile => sameJurisdiction(targetContext, profile));
       if (targetHubs.length === 0) continue;
 
@@ -265,7 +264,7 @@ export const buildMarketMakerCrossPlanSummary = (
   for (const sourceContext of crossContexts) {
     const sourceJurisdictionRef = sourceContext.jurisdictionRef;
     const sourceTokenIds = getMarketMakerTokenIds(tokenIdsByContext, sourceContext);
-    if (!sourceJurisdictionRef || sourceTokenIds.length < HUB_REQUIRED_TOKEN_COUNT) continue;
+    if (!sourceJurisdictionRef || sourceTokenIds.length === 0) continue;
     const sourceHubs = visibleHubs.filter(profile => sameJurisdiction(sourceContext, profile));
     if (sourceHubs.length === 0) continue;
     for (const targetContext of crossContexts) {
@@ -278,7 +277,7 @@ export const buildMarketMakerCrossPlanSummary = (
         continue;
       }
       const targetTokenIds = getMarketMakerTokenIds(tokenIdsByContext, targetContext);
-      if (targetTokenIds.length < HUB_REQUIRED_TOKEN_COUNT) continue;
+      if (targetTokenIds.length === 0) continue;
       const targetHubs = visibleHubs.filter(profile => sameJurisdiction(targetContext, profile));
       if (targetHubs.length === 0) continue;
       const targetByBaseName = new Map(targetHubs.map(hub => [hubRoleName(hub), hub] as const));
@@ -848,8 +847,8 @@ export const maintainMarketMakerCrossQuotes = async (
   if (
     routedSourceHubs.length === 0 ||
     routedTargetHubs.length === 0 ||
-    sourceTokenIds.length < HUB_REQUIRED_TOKEN_COUNT ||
-    targetTokenIds.length < HUB_REQUIRED_TOKEN_COUNT ||
+    sourceTokenIds.length === 0 ||
+    targetTokenIds.length === 0 ||
     sourceContext.entityId === targetContext.entityId ||
     sameJurisdiction(sourceContext, targetContext)
   ) {
@@ -884,6 +883,13 @@ export const maintainMarketMakerCrossQuotes = async (
 
   return maintainSteadyCrossQuotes(maintenanceContext, { maxOffersPerAccount, maxNewOffersTotal });
 };
+
+const hasRequiredCrossDepth = (cross: MarketMakerHealth['cross']): boolean =>
+  !cross.applicable || (
+    cross.expectedRoutes > 0 &&
+    cross.routes.length >= cross.expectedRoutes &&
+    cross.routes.every(route => route.depthReady)
+  );
 
 export const getMarketMakerHealth = (
   env: RuntimeReplica,
@@ -933,7 +939,7 @@ export const getMarketMakerHealth = (
     ),
     0,
   );
-  if (!mmEntityId || hubEntityIds.length === 0 || expectedOffersPerHub <= 0) {
+  if (!mmEntityId || hubEntityIds.length === 0 || (expectedOffersPerHub <= 0 && !cross.applicable)) {
     return {
       enabled: false,
       ok: false,
@@ -964,6 +970,11 @@ export const getMarketMakerHealth = (
       0,
     );
     const expectedHubOffers = expectedOffersByHub.get(hubEntityId) || 0;
+    // Cross-J-only venues still require committed bilateral Accounts. An absent
+    // same-J pair adds no quote obligation; it must not disable Cross-J startup.
+    const accountsReady = contextsForHub.every(context =>
+      context.entityId && hasCommittedAccountState(getAccountReplica(env, context.entityId, hubEntityId)),
+    ) && blockers.length === 0;
     const pairHealth = pairs.map(({ pair, samePairIndex }) => {
       const context = contextsForHub.find(candidate => candidate.samePairIndex === samePairIndex);
       const account = context?.entityId
@@ -989,8 +1000,8 @@ export const getMarketMakerHealth = (
     return {
       hubEntityId,
       offers,
-      ready: expectedHubOffers > 0 && pairHealth.every((pair) => pair.ready),
-      depthReady: expectedHubOffers > 0 && offers === expectedHubOffers && pairHealth.every((pair) => pair.depthReady),
+      ready: accountsReady && pairHealth.every((pair) => pair.ready),
+      depthReady: accountsReady && offers === expectedHubOffers && pairHealth.every((pair) => pair.depthReady),
       blockers,
       pairs: pairHealth,
     };
@@ -1018,15 +1029,9 @@ export const getMarketMakerHealth = (
   });
 
   const hubsDepthReady = hubs.length > 0 && hubs.every((entry) => entry.depthReady);
-  const crossDepthReady = !cross.applicable || (
-    cross.expectedRoutes > 0 &&
-    cross.routes.length >= cross.expectedRoutes &&
-    cross.routes.every((route) => route.depthReady)
-  );
-
   return {
     enabled: true,
-    ok: hubsDepthReady && crossDepthReady,
+    ok: hubsDepthReady && hasRequiredCrossDepth(cross),
     entityId: mmEntityId,
     connectivity,
     expectedOffersPerHub,
@@ -1036,37 +1041,14 @@ export const getMarketMakerHealth = (
   };
 };
 
-export const isMarketMakerDepthComplete = (health: MarketMakerHealth | null): boolean => {
-  if (!health?.enabled || !health.ok) return false;
-  if (health.hubs.length === 0 || !health.hubs.every((hub) => hub.depthReady)) return false;
-  if (!health.cross.applicable) return true;
-  return (
-    health.cross.expectedRoutes > 0 &&
-    health.cross.routes.length >= health.cross.expectedRoutes &&
-    health.cross.routes.every((route) => route.depthReady)
-  );
-};
+export const isMarketMakerDepthComplete = (health: MarketMakerHealth | null): boolean =>
+  Boolean(health?.ok && isMarketMakerFullDepthComplete(health));
 
-export const isMarketMakerFullDepthComplete = (health: MarketMakerHealth | null): boolean => {
-  if (!health?.enabled) return false;
-  if (health.hubs.length === 0 || !health.hubs.every((hub) => hub.depthReady)) return false;
-  if (!health.cross.applicable) return true;
-  return (
-    health.cross.expectedRoutes > 0 &&
-    health.cross.routes.length >= health.cross.expectedRoutes &&
-    health.cross.routes.every((route) => route.depthReady)
-  );
-};
+export const isMarketMakerFullDepthComplete = (health: MarketMakerHealth | null): boolean =>
+  Boolean(health && isMarketMakerSameDepthComplete(health) && hasRequiredCrossDepth(health.cross));
 
-export const isMarketMakerCrossDepthComplete = (health: MarketMakerHealth | null): boolean => {
-  if (!health?.enabled) return false;
-  if (!health.cross.applicable) return true;
-  return (
-    health.cross.expectedRoutes > 0 &&
-    health.cross.routes.length >= health.cross.expectedRoutes &&
-    health.cross.routes.every((route) => route.depthReady)
-  );
-};
+export const isMarketMakerCrossDepthComplete = (health: MarketMakerHealth | null): boolean =>
+  Boolean(health?.enabled && hasRequiredCrossDepth(health.cross));
 
 export const isMarketMakerSameDepthComplete = (health: MarketMakerHealth | null): boolean =>
   Boolean(health?.enabled && health.hubs.length > 0 && health.hubs.every((hub) => hub.depthReady));

@@ -9,7 +9,12 @@ import {
 } from '../../../orchestrator/market-maker/node/mm-node-core';
 import { planMarketMakerIdentityLabels } from '../../../orchestrator/mesh/mesh-common';
 import type { MarketMakerEntityContext } from '../../../orchestrator/market-maker/node/mm-node-core';
-import { getMarketMakerHealth } from '../../../orchestrator/market-maker/node/mm-node-health';
+import {
+  buildDeferredMarketMakerCrossHealth,
+  getMarketMakerHealth,
+  isMarketMakerDepthComplete,
+  isMarketMakerSameDepthComplete,
+} from '../../../orchestrator/market-maker/node/mm-node-health';
 import { buildDefaultEntitySwapPairs } from '../../../account/utils';
 import { PersistentAccountStateMap } from '../../../account/state/persistent-state-map';
 import { createEmptyEnv } from '../../../runtime';
@@ -70,6 +75,34 @@ const commitShardLadders = (
 };
 
 describe('market-maker Account sharding', () => {
+  test('Cross-J-only startup requires committed Accounts but no same-J offers', () => {
+    const env = createEmptyEnv('cross-only-readiness');
+    const maker = context(entity('11'), 0);
+    const health = () => getMarketMakerHealth(
+      env, maker.entityId, [HUB], [1], undefined, buildDeferredMarketMakerCrossHealth(true), [maker],
+    );
+    expect(health().enabled).toBeTrue();
+    expect(isMarketMakerSameDepthComplete(health())).toBeFalse();
+    commitShardLadders(env, HUB, [maker], [1]);
+    expect(health().expectedOffersPerHub).toBe(0);
+    expect(isMarketMakerSameDepthComplete(health())).toBeTrue();
+    expect(isMarketMakerDepthComplete(health())).toBeFalse();
+    expect(health().ok).toBeFalse(); // A deferred Cross-J book is not ready.
+    const account = [...env.state.eReplicas.values()][0]!.state.accounts.get(HUB)!;
+    account.status = 'disputed';
+    expect(isMarketMakerSameDepthComplete(health())).toBeFalse();
+  });
+
+  test('no configured market cannot become trading-ready from an empty quote set', () => {
+    const env = createEmptyEnv('no-market-readiness');
+    const maker = context(entity('11'), 0);
+    commitShardLadders(env, HUB, [maker], [1]);
+    const health = getMarketMakerHealth(env, maker.entityId, [HUB], [1]);
+    expect(health.enabled).toBeFalse();
+    expect(isMarketMakerDepthComplete(health)).toBeFalse();
+    expect(isMarketMakerSameDepthComplete(health)).toBeFalse();
+  });
+
   test('assigns one complete 10x2 ladder to each bilateral Account', () => {
     const pairs = buildDefaultEntitySwapPairs(TOKENS);
     const byShard = pairs.map((pair, pairIndex) => ({
@@ -106,7 +139,8 @@ describe('market-maker Account sharding', () => {
       [{ entityId: entity('11'), signerId: SIGNER, entityTxs: [tx('one')] }],
       [{ entityId: entity('11'), signerId: SIGNER, entityTxs: [tx('two')] }],
     ]);
-    expect(merged?.entityTxs?.map(item => item.data.offerId)).toEqual(['one', 'two']);
+    expect(merged?.entityTxs?.map(item => item.type === 'placeSwapOffer' ? item.data.offerId : item.type))
+      .toEqual(['one', 'two']);
   });
 
   test('pair shard initiates its requested Account regardless of id ordering', () => {
@@ -128,6 +162,14 @@ describe('market-maker Account sharding', () => {
       { samePairIndex: 1, signerLabel: 'MM:pair:2', profileName: 'Maker Pair 2' },
       { samePairIndex: 2, signerLabel: 'MM:pair:3', profileName: 'Maker Pair 3' },
     ]);
+  });
+
+  test('one registered token retains its cross-j MM identity and creates no same-j pair', () => {
+    expect(planMarketMakerIdentityLabels('MM', 'Maker', [1])).toEqual([
+      { samePairIndex: 0, signerLabel: 'MM', profileName: 'Maker' },
+    ]);
+    expect(buildMarketMakerOfferSpecs([HUB], [1])).toEqual([]);
+    expect(() => planMarketMakerIdentityLabels('MM', 'Maker', [])).toThrow('MARKET_MAKER_TOKEN_REGISTRY_EMPTY');
   });
 
   test('health requires and aggregates every pair Account', () => {

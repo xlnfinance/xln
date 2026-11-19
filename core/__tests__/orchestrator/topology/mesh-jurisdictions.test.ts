@@ -7,6 +7,7 @@ import {
   resetMeshJurisdictionsCache,
   resolveMeshJurisdictionConfig,
   resolveSecondaryJurisdictions,
+  getMeshJurisdictionTokenIds,
 } from '../../../orchestrator/mesh/mesh-jurisdictions';
 
 const writeJurisdictions = (payload: Record<string, unknown>): string => {
@@ -160,4 +161,31 @@ test('selected secondary jurisdiction must have the complete deployed stack', ()
       contracts: { depository: `0x${'11'.repeat(20)}`, entityProvider: `0x${'22'.repeat(20)}` },
     }),
   }), () => expect(() => resolveSecondaryJurisdictions('/rpc')).toThrow('MESH_JURISDICTION_INCOMPLETE'));
+});
+
+test('published stack metadata cannot enter the exact importJ contract binding', () => {
+  const primary = stack('Ethereum Sepolia', '/rpc', `0x${'11'.repeat(20)}`, `0x${'22'.repeat(20)}`);
+  const secondary = stack('Arbitrum Sepolia', '/rpc2', `0x${'33'.repeat(20)}`, `0x${'44'.repeat(20)}`);
+  withJurisdictions(jurisdictionsDocument({
+    primary: { ...primary, contracts: { ...primary.contracts, hankoVerifier: `0x${'55'.repeat(20)}` } },
+    rpc2: { ...secondary, contracts: { ...secondary.contracts, hankoVerifier: `0x${'66'.repeat(20)}` } },
+  }), () => {
+    const imported = [resolveMeshJurisdictionConfig('/rpc'), ...resolveSecondaryJurisdictions('/rpc')];
+    expect(imported).toHaveLength(2);
+    for (const jurisdiction of imported) expect(Object.keys(jurisdiction.contracts).sort())
+      .toEqual(['account', 'deltaTransformer', 'depository', 'entityProvider']);
+  });
+});
+
+test('public mesh assets come from the admitted registry without adding development tokens', () => {
+  const entry = stack('Ethereum Sepolia', '/rpc', `0x${'11'.repeat(20)}`, `0x${'22'.repeat(20)}`, {
+    chainId: 11155111, tokens: { USDC: { tokenId: 1 } },
+  });
+  withJurisdictions(jurisdictionsDocument({ primary: entry }), () => {
+    expect(getMeshJurisdictionTokenIds({ name: entry.name, chainId: 11155111 })).toEqual([1]);
+    expect(() => getMeshJurisdictionTokenIds({ name: 'Unadmitted', chainId: 11155111 })).toThrow();
+  });
+  withJurisdictions(jurisdictionsDocument({ primary: { ...entry, tokens: {} } }), () => {
+    expect(() => getMeshJurisdictionTokenIds({ name: entry.name, chainId: 11155111 })).toThrow('MESH_TOKEN_REGISTRY_INVALID');
+  });
 });

@@ -1576,6 +1576,22 @@ const main = async (): Promise<void> => {
 
   await runAuthorityCheckpointRestart();
   await runProductionSwapLoadSmoke();
+  if (process.argv.includes('--source-account-funding') || process.argv.includes('--cross-j-swap') || process.argv.includes('--external-payout') || process.argv.includes('--interrupted-recovery') || process.argv.includes('--partial-recovery') || process.argv.includes('--partial-clear-recovery')) {
+    recordStage('source-account-funding:start');
+    await new Promise<void>((done, reject) => {
+      const child = spawn(process.execPath, [
+        (process.argv.includes('--partial-recovery') || process.argv.includes('--partial-clear-recovery')) ? 'core/scenarios/usdc-poc/recovery/partial-run.ts'
+          : process.argv.includes('--interrupted-recovery') ? 'core/scenarios/usdc-poc/recovery/run.ts' : 'core/scenarios/usdc-poc/source-funding.ts',
+        '--api-base', `http://127.0.0.1:${apiPort}`, '--work-dir', workDir,
+        ...(process.argv.includes('--cross-j-swap') ? ['--cross-j-swap'] : []),
+        ...(process.argv.includes('--external-payout') ? ['--external-payout'] : []),
+        ...(process.argv.includes('--partial-clear-recovery') ? ['--clear-remainder'] : []),
+      ], { cwd: repoRoot, env: inheritedProcessEnv, stdio: 'inherit' });
+      child.once('error', reject);
+      child.once('exit', code => code === 0 ? done() : reject(new Error(`USDC_POC_SOURCE_FUNDING_FAILED:${code}`)));
+    });
+    recordStage('source-account-funding:complete');
+  }
   const walletTests = process.env['XLN_LOCAL_PROD_SMOKE_WALLET_TESTS'];
   if (walletTests) await runWalletBrowserGate({
     tests: walletTests, repoRoot, workDir, rpcPort, apiPort,

@@ -1,9 +1,9 @@
-import { getTokenIdsForJurisdiction } from '../../../account/utils';
+import { getMeshJurisdictionTokenIds } from '../../mesh/mesh-jurisdictions';
 import { DEV_CHAIN_IDS } from '../../../jurisdiction/adapter/chain-ids';
 import { deployMissingDefaultTokens } from '../../../jurisdiction/adapter/operations/dev-token-deployment';
 import type { JAdapter, JTokenInfo } from '../../../jurisdiction/adapter/types';
 import { defaultTokensForJurisdiction } from '../../../jurisdiction/machine/config/default-tokens';
-import { DEFAULT_ACCOUNT_TOKEN_IDS, HUB_REQUIRED_TOKEN_COUNT, sleep } from '../../mesh/mesh-common';
+import { HUB_REQUIRED_TOKEN_COUNT, sleep } from '../../mesh/mesh-common';
 import type { HubBootstrapEntry } from './hub-node-types';
 
 /** Real networks use their registered assets; development defaults are not a deployment requirement. */
@@ -27,13 +27,11 @@ const normalizePositiveTokenIds = (tokenIds: readonly number[]): number[] =>
 export const tokenIdsForHubJurisdiction = (
   hub: Pick<HubBootstrapEntry, 'jurisdictionName' | 'chainId'>,
 ): number[] => {
-  const jurisdictionTokenIds = normalizePositiveTokenIds(getTokenIdsForJurisdiction({
+  const jurisdictionTokenIds = normalizePositiveTokenIds(getMeshJurisdictionTokenIds({
     name: hub.jurisdictionName,
-    chainId: hub.chainId ?? null,
+    chainId: hub.chainId ?? 0,
   }));
-  return jurisdictionTokenIds.length >= HUB_REQUIRED_TOKEN_COUNT
-    ? jurisdictionTokenIds
-    : [...DEFAULT_ACCOUNT_TOKEN_IDS];
+  return jurisdictionTokenIds;
 };
 
 export const tokenCatalogForHubJurisdiction = (

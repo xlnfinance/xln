@@ -177,7 +177,7 @@ export const decodeEntitySummaries = (value: unknown): RuntimeAdapterEntitySumma
     requireExactBoundaryKeys(
       entity,
       ['entityId', 'label', 'height'],
-      ['runtimeId', 'signerId', 'isHub', 'jurisdiction'],
+      ['runtimeId', 'signerId', 'isHub', 'jurisdiction', 'swapTakerFeeBps'],
       `PRODUCTION_SWAP_LOAD_ENTITY_FIELDS_INVALID:${index}`,
     );
     const decoded: RuntimeAdapterEntitySummary = {
@@ -192,6 +192,11 @@ export const decodeEntitySummaries = (value: unknown): RuntimeAdapterEntitySumma
     if (entity['isHub'] !== undefined) {
       if (typeof entity['isHub'] !== 'boolean') throw new Error(`PRODUCTION_SWAP_LOAD_IS_HUB_INVALID:${index}`);
       decoded.isHub = entity['isHub'];
+    }
+    if (entity['swapTakerFeeBps'] !== undefined) {
+      const fee = requireBoundaryInteger(entity['swapTakerFeeBps'], `PRODUCTION_SWAP_LOAD_SWAP_FEE_INVALID:${index}`);
+      if (fee > 10_000) throw new Error(`PRODUCTION_SWAP_LOAD_SWAP_FEE_INVALID:${index}`);
+      decoded.swapTakerFeeBps = fee;
     }
     if (entity['jurisdiction'] !== undefined) decoded.jurisdiction = decodeJurisdiction(entity['jurisdiction'], index);
     return decoded;

@@ -2,6 +2,8 @@ import { clearJurisdictionsCache, loadJurisdictions } from '../../jurisdiction/a
 import { getJurisdictionIdentityRef } from '../../jurisdiction/machine/jurisdiction-runtime';
 import { isLoopbackUrl, normalizeLoopbackUrl, toPublicRpcUrl } from '../../network/p2p/loopback-url';
 import { isRecord } from '../../support/boundary-guards';
+import { DEV_CHAIN_IDS } from '../../jurisdiction/adapter/chain-ids';
+import { getTokenIdsForJurisdiction } from '../../account/utils';
 
 type MeshJurisdictionConfig = {
   name: string;
@@ -55,8 +57,33 @@ const sameMeshRpc = (left: unknown, right: unknown): boolean => {
 const isPrimaryJurisdiction = (entry: unknown): boolean =>
   isRecord(entry) && entry['primary'] === true;
 
+// Catalog publication includes auxiliary verifier metadata. importJ owns only
+// these four bindings; copying the catalog object makes the first WAL invalid.
+const runtimeJurisdictionConfig = (entry: ResolvedMeshJurisdictionConfig): ResolvedMeshJurisdictionConfig => ({
+  ...entry,
+  contracts: { account: entry.contracts.account, depository: entry.contracts.depository,
+    entityProvider: entry.contracts.entityProvider, deltaTransformer: entry.contracts.deltaTransformer },
+});
+
 export const resetMeshJurisdictionsCache = (): void => {
   clearJurisdictionsCache();
+};
+
+/** Public operators use the admitted registry; development assets stay on dev chains. */
+export const getMeshJurisdictionTokenIds = (identity: { name: string; chainId: number }): number[] => {
+  if (DEV_CHAIN_IDS.has(identity.chainId)) return getTokenIdsForJurisdiction(identity);
+  const entries = Object.values(loadJurisdictions().jurisdictions)
+    .filter(entry => entry.chainId === identity.chainId && entry.name === identity.name);
+  if (entries.length !== 1) throw new Error(`MESH_TOKEN_JURISDICTION_AMBIGUOUS:${identity.name}`);
+  const entry = entries[0];
+  if (!isRecord(entry) || !isRecord(entry['tokens'])) throw new Error(`MESH_TOKEN_REGISTRY_REQUIRED:${identity.name}`);
+  const ids = Object.values(entry['tokens']).map(token => {
+    if (!isRecord(token) || !Number.isSafeInteger(token['tokenId']) || Number(token['tokenId']) <= 0)
+      throw new Error(`MESH_TOKEN_ID_INVALID:${identity.name}`);
+    return Number(token['tokenId']);
+  });
+  if (ids.length === 0 || new Set(ids).size !== ids.length) throw new Error(`MESH_TOKEN_REGISTRY_INVALID:${identity.name}`);
+  return ids.sort((left, right) => left - right);
 };
 
 export const resolveMeshJurisdictionConfig = (
@@ -77,7 +104,7 @@ export const resolveMeshJurisdictionConfig = (
     throw new Error('JURISDICTION_NOT_FOUND');
   }
   return {
-    ...selected,
+    ...runtimeJurisdictionConfig(selected),
     rpc: rpcUrlOverride || selected.rpc,
   };
 };
@@ -124,7 +151,7 @@ export const resolveSecondaryJurisdictions = (
   for (const [key, jurisdiction] of Object.entries(data.jurisdictions ?? {})) {
     if (!isSecondaryJurisdictionConfig(key, jurisdiction, primaryRpc)) continue;
     if (!hasRequiredContracts(jurisdiction)) throw new TypeError(`MESH_JURISDICTION_INCOMPLETE:${key}`);
-    entries.push(jurisdiction);
+    entries.push(runtimeJurisdictionConfig(jurisdiction));
   }
   return entries;
 };

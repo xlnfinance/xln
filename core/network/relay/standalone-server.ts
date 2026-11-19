@@ -22,6 +22,7 @@ type StandaloneRelayOptions = {
   serverId: string;
   audience?: string;
   serverRuntimeId?: string;
+  httpHandler?: (request: Request) => Response | Promise<Response>;
 };
 
 export type StandaloneRelayServer = {
@@ -55,6 +56,7 @@ export const startStandaloneRelayServer = (options: StandaloneRelayOptions): Sta
     maxRequestBodySize: 1024 * 1024,
     fetch(request) {
       if (request.headers.get('upgrade') !== 'websocket') {
+        if (options.httpHandler) return options.httpHandler(request);
         return new Response('XLN relay websocket endpoint', { status: 200 });
       }
       if (serverRef?.upgrade(request)) return undefined;

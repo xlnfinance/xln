@@ -31,6 +31,15 @@
     "jurisdictions/hardhat.config.ts",
     "jurisdictions/tasks/*.ts",
     "jurisdictions/scripts/usdc-reserve-roundtrip.ts",
+    "jurisdictions/scripts/usdc-cross-j-preflight/index.ts",
+    "jurisdictions/scripts/usdc-cross-j-preflight/operators/local-operators.ts",
+    "jurisdictions/scripts/usdc-cross-j-preflight/operators/transport.ts",
+    "jurisdictions/scripts/usdc-cross-j-preflight/operators/gateway.ts",
+    "jurisdictions/scripts/usdc-cross-j-preflight/operators/session/index.ts",
+    "jurisdictions/scripts/usdc-cross-j-preflight/operators/session/progress.ts",
+    "jurisdictions/scripts/usdc-cross-j-preflight/operators/session/user.ts",
+    "jurisdictions/scripts/usdc-cross-j-preflight/execution/index.ts",
+    "jurisdictions/scripts/usdc-cross-j-preflight/funding/index.ts",
     "jurisdictions/test/**/*.{ts,mjs}"
   ],
   "project": [
@@ -42,6 +51,7 @@
     "jurisdictions/scripts/deploy-stack.cjs",
     "jurisdictions/scripts/deployment/**/*.{ts,cjs}",
     "jurisdictions/scripts/usdc-reserve-roundtrip/**/*.ts",
+    "jurisdictions/scripts/usdc-cross-j-preflight/**/*.ts",
     "jurisdictions/test/**/*.{ts,mjs}"
   ],
   "ignore": ["frontend/**"],

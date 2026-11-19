@@ -1074,6 +1074,7 @@ const createHubStatusHandler =
           entityId: live.bootstrap?.entityId ?? null,
           hubEntities: live.hubBootstraps,
           runtimeId: live.env.runtimeId,
+          deliveryReady: live.externalIngressReady,
           apiUrl,
           relayUrl: resolvedArgs.relayUrl,
           directWsUrl,
@@ -1430,6 +1431,7 @@ const run = async (): Promise<void> => {
   const brainVaultOwner = createHubBrainVaultOwner();
   await brainVaultOwner.prewarm(resolvedArgs.seed);
   const env = await main(resolvedArgs.seed, {
+    requireRestore: process.argv.includes('--require-restore'),
     localSigners: localSignerLabels.map(label => ({ label })),
     trustedJurisdictionRpcBindings: resolveMeshJurisdictionRpcBindings(resolvedArgs.rpcUrl, resolveLocalApiUrl),
   });

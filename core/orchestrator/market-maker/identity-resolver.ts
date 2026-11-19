@@ -1,12 +1,11 @@
 import { deriveSignerAddressSync } from '../../account/crypto';
-import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../../account/config/defaults';
-import { getTokenIdsForJurisdiction } from '../../account/utils';
 import {
   requireJurisdictionBlockTimeMs,
   resetMeshJurisdictionsCache,
   resolveMeshJurisdictionConfig,
   resolveSecondaryJurisdictions,
   type ResolvedMeshJurisdictionConfig,
+  getMeshJurisdictionTokenIds,
 } from '../mesh/mesh-jurisdictions';
 import {
   deriveMarketMakerEntityId,
@@ -30,7 +29,6 @@ type IdentityResolverDeps = {
   args: Pick<Args, 'host' | 'rpcUrl' | 'rpcUrls'>;
   marketMakerChild: Pick<MarketMakerChild, 'apiPort' | 'name' | 'seed' | 'signerLabel'>;
   hubChildren: readonly Pick<HubChild, 'name' | 'seed' | 'signerLabel'>[];
-  requiredTokenCount: number;
 };
 
 export const createMarketMakerIdentityResolver = (deps: IdentityResolverDeps) => {
@@ -84,13 +82,10 @@ export const createMarketMakerIdentityResolver = (deps: IdentityResolverDeps) =>
     signerLabel: string,
     name: string,
   ): ManagedPeerIdentity[] => {
-    const configuredTokenIds = getTokenIdsForJurisdiction({
+    const tokenIds = getMeshJurisdictionTokenIds({
       name: jurisdiction.name,
       chainId: jurisdiction.chainId,
     });
-    const tokenIds = configuredTokenIds.length >= deps.requiredTokenCount
-      ? configuredTokenIds
-      : [...DEFAULT_ACCOUNT_TOKEN_IDS];
     return planMarketMakerIdentityLabels(signerLabel, name, tokenIds).map(plan =>
       buildIdentity(jurisdiction, plan.signerLabel, plan.profileName));
   };

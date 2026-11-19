@@ -19,6 +19,8 @@ export type RuntimeLocalSigner = Readonly<{
 }>;
 
 export type RuntimeCreationOptions = Readonly<{
+  /** A funded host must never replace a missing committed Runtime with a fresh one. */
+  requireRestore?: boolean;
   trustedJurisdictionRpcBindings?: readonly TrustedJurisdictionRpcBinding[];
   localSigners?: readonly RuntimeLocalSigner[];
   /** Cache warmup only; omitted numeric signers remain available lazily. */
@@ -116,6 +118,7 @@ export const bootstrapRuntime = async (
     deps,
   );
   const env = restored.env;
+  if (options?.requireRestore && !restored.restored) throw new Error('RUNTIME_RESTORE_REQUIRED');
   attachEventEmitters(env);
   if (!restored.restored && !runtimeRestoreDisabled()) {
     await deps.loadGossipProfiles(env);

@@ -731,7 +731,6 @@ const {
   args,
   marketMakerChild,
   hubChildren,
-  requiredTokenCount: HUB_REQUIRED_TOKEN_COUNT,
 });
 
 const { publishNativeHubProfile, driveH1Bootstrap } = createNativeH1Bootstrap({

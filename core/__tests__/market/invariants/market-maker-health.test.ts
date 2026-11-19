@@ -588,6 +588,14 @@ test('three-jurisdiction cross depth keeps every MM Account inside the cross-j p
   expect(plan.expectedOffersPerRoute).toBe(Math.floor(LIMITS.MAX_ACCOUNT_CROSS_J_SWAP_OFFERS / 4));
 });
 
+test('single-token registries retain both cross-j directions', () => {
+  const { contexts, visibleHubs } = buildBootstrapTopology();
+  const tokens = new Map(contexts.map(context => [context.entityId, [1]]));
+  const plan = buildMarketMakerCrossPlanSummary(contexts, visibleHubs, tokens);
+  expect(plan.expectedRoutes).toBe(2);
+  expect(plan.expectedJobs).toBeGreaterThan(0);
+});
+
 test('both cross directions of one venue price off one mid, so the bids never cross the own asks', () => {
   // 3000 quote per base: 1e8 / 30_000_000 is not an integer at the 10_000 tick scale.
   const policyMidTicks = 30_000_000n;

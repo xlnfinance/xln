@@ -34,6 +34,8 @@ export type JurisdictionTransport =
   | { mode: 'tron'; tronFullHost: string; tronSolidityHost?: string };
 
 type JurisdictionConfig = {
+  /** Storage-safe catalog metadata; consumers decode the fields they admit. */
+  tokens?: unknown;
   name: string;
   chainId: number;
   blockTimeMs: number;
@@ -210,6 +212,7 @@ const decodeJurisdiction = (
     explorer: requireText(entry['explorer'], `${code}_EXPLORER`),
     currency: requireString(entry['currency'], `${code}_CURRENCY`),
     status: requireString(entry['status'], `${code}_STATUS`),
+    ...(entry['tokens'] === undefined ? {} : { tokens: entry['tokens'] }),
     ...(entry['primary'] === undefined
       ? {}
       : { primary: requireBoolean(entry['primary'], `${code}_PRIMARY`) }),
