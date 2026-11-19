@@ -877,13 +877,12 @@ contract Depository is ReentrancyGuardLite, IDepositoryDelegateErrorAbi {
       params.finalNonce != eventInitialNonce ||
       finalProofbodyHash != params.initialProofbodyHash ||
       params.proposerIsLeft != initialProposerIsLeft;
-    if (adoptsSignedBranch) {
-      if (params.finalNonce >= JS_SAFE_NONCE_MAX) revert E10();
-      account.nonce = params.finalNonce;
-    } else {
-      if (account.nonce >= JS_SAFE_NONCE_MAX) revert E10();
-      account.nonce += 1;
-    }
+    // Either way the account leaves this dispute epoch. Saturating at the safe
+    // bound instead of reverting keeps finalization, and so the exit, always
+    // possible; a saturated account accepts no further dispute.
+    uint256 settledNonce = adoptsSignedBranch ? params.finalNonce : account.nonce;
+    uint256 nextEpoch = ((settledNonce >> ACCOUNT_NONCE_EPOCH_BITS) + 1) << ACCOUNT_NONCE_EPOCH_BITS;
+    account.nonce = nextEpoch < JS_SAFE_NONCE_MAX ? nextEpoch : JS_SAFE_NONCE_MAX;
 
     _emitDisputeFinalized(entityId, params, eventInitialNonce, finalProofbodyHash, bodyEmitted);
   }

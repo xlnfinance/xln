@@ -41,6 +41,8 @@ import type { JurisdictionEvent } from '../../../../types/jurisdiction-events';
 // settlements forgive the head (cursor advance) and then the last entry (reset).
 // Every step's fold of DebtCreated/DebtEnforced/DebtForgiven equals storage,
 // the previous block's does not.
+// Depository finalization stores the next dispute epoch base (ACCOUNT_NONCE_EPOCH_BITS = 40).
+const NEXT_DISPUTE_EPOCH = 1n << 40n;
 const CHAIN_ID = 31_337;
 
 const freePort = (): Promise<number> =>
@@ -571,8 +573,8 @@ test('same creditor, index 0 and amount after a queue reset: the retired DebtCre
   expect(BigInt(await jAdapter.depository._debtIndex(debtor.entityId, tokenId))).toBe(0n);
   expect(BigInt(await jAdapter.depository.inActiveDebts(creditor.entityId))).toBe(0n);
 
-  // The same account disputes again above the nonce the timeout finalize stored (1 + 1).
-  const finalizeSecond = await startShortfallDispute(jAdapter, CHAIN_ID, debtor, creditor, -120n, 'a8', BigInt(tokenId), 3n);
+  // Finalization moved the account to the next dispute epoch; the same account disputes again above its base.
+  const finalizeSecond = await startShortfallDispute(jAdapter, CHAIN_ID, debtor, creditor, -120n, 'a8', BigInt(tokenId), NEXT_DISPUTE_EPOCH + 1n);
   await provider.send('evm_increaseTime', [120]);
   await provider.send('evm_mine', []);
   await finalizeSecond();
@@ -624,9 +626,9 @@ test('same creditor, index 0 and amount recreated in the SAME block: the retired
       chainId: CHAIN_ID, depository, debtor, creditor, offdelta: -120n, seedByte, tokenId: BigInt(tokenId),
       disputeNonce, creditorBatchNonce, debtorBatchNonce,
     });
-  // The accepted close consumes one nonce (1 + 1); the second dispute starts above it.
+  // The accepted close moves the account to the next dispute epoch; the second dispute starts above its base.
   const first = shortfall('b7', 1n, creditorNonce, debtorNonce);
-  const second = shortfall('b8', 3n, first.start.nextNonce, first.accept.nextNonce);
+  const second = shortfall('b8', NEXT_DISPUTE_EPOCH + 1n, first.start.nextNonce, first.accept.nextNonce);
 
   // One block: create 120 at index 0, fund and enforce it (queue deleted, index
   // reset), then recreate 120 at index 0 for the same creditor.

@@ -60,6 +60,9 @@ type TestActor = {
   privateKey: string;
 };
 
+// Finalization moves the Account nonce to the next dispute epoch base (ACCOUNT_NONCE_EPOCH_BITS).
+const nextNonceEpoch = (nonce: bigint): bigint => ((nonce >> 40n) + 1n) << 40n;
+
 function lazyActor(signer: HardhatEthersSigner, signerIndex: number): TestActor {
   return {
     signer,
@@ -918,7 +921,7 @@ describe('Depository', () => {
     expect(await depository._reserves(left.entityId, independentTokenId)).to.equal(7n);
     expect(await depository._reserves(recipient, independentTokenId)).to.equal(0n);
 
-    const incomingSettlementNonce = 3n;
+    const incomingSettlementNonce = nextNonceEpoch(finalNonce) + 1n;
     const incomingSettlementDiffs = [
       {
         tokenId,
@@ -933,7 +936,7 @@ describe('Depository', () => {
       await cooperativeUpdateHash(depository, acctKey, incomingSettlementNonce, incomingSettlementDiffs),
       right.privateKey,
     );
-    const blockedSettlementNonce = 4n;
+    const blockedSettlementNonce = incomingSettlementNonce + 1n;
     const blockedSettlementDiffs = [
       {
         tokenId,
@@ -981,7 +984,7 @@ describe('Depository', () => {
     )
       .to.be.revertedWithCustomError(depository, 'E3');
 
-    expect((await depository._accounts(acctKey)).nonce).to.equal(finalNonce);
+    expect((await depository._accounts(acctKey)).nonce).to.equal(nextNonceEpoch(finalNonce));
     expect(await depository._reserves(left.entityId, tokenId)).to.equal(100n);
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(100n);
     expect(decodeUint768(await depository.debtOutstanding(left.entityId, tokenId))).to.equal(200n);
@@ -1069,9 +1072,59 @@ describe('Depository', () => {
       .processBatch(afterTimeout.encodedBatch, afterTimeout.hankoData, afterTimeout.nonce);
 
     const account = await depository._accounts(acctKey);
-    expect(account.nonce).to.equal(2n);
+    expect(account.nonce).to.equal(nextNonceEpoch(disputeNonce));
     expect(account.disputeHash).to.equal(ethers.ZeroHash);
     expect(account.disputeTimeout).to.equal(0n);
+  });
+
+  // Finalization empties collateral and ondelta. Before the dispute epoch a proof signed
+  // earlier with a higher nonce still opened a new dispute and settled its whole offdelta
+  // against the emptied account (audit 2026-11-14: the victim paid 250 instead of 150).
+  it('a pre-dispute proof with a higher nonce cannot be settled a second time after finalization', async function () {
+    const { depository } = await loadFixture(deployFixture);
+    const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
+    const tokenId = 1n;
+    await mintListedReserve(depository, left.entityId, tokenId, 300n);
+    await mintListedReserve(depository, right.entityId, tokenId, 1_000n);
+    const fundBatch = emptyBatch({
+      reserveToCollateral: [{ tokenId, receivingEntity: left.entityId, pairs: [{ entity: right.entityId, amount: 300n }] }],
+    });
+    const fund = await signDepositoryBatch(depository, left.entityId, left.privateKey, fundBatch);
+    await depository.connect(left.signer).processBatch(fund.encodedBatch, fund.hankoData, fund.nonce);
+    const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
+
+    // While the account was live Right signed two states: it owes Left 100 at nonce 1 and 150 at nonce 3.
+    const runDispute = async (nonce: bigint, offdelta: bigint): Promise<void> => {
+      const body = proofBody([offdelta], [tokenId]);
+      const bodyHash = proofBodyHash(body);
+      const sig = signEntityHash(right.entityId, await disputeProofHash(depository, acctKey, nonce, bodyHash), right.privateKey);
+      const startBatch = emptyBatch({
+        disputeStarts: [{
+          counterentity: right.entityId, nonce, proofbodyHash: bodyHash, initialProofbody: body, watchSeed: TEST_WATCH_SEED, sig,
+          starterInitialArguments: '0x', starterCounterArguments: '0x', starterCounterProofCommitment: ethers.ZeroHash,
+        }],
+      });
+      const start = await signDepositoryBatch(depository, left.entityId, left.privateKey, startBatch);
+      await depository.connect(left.signer).processBatch(start.encodedBatch, start.hankoData, start.nonce);
+      await advancePastDisputeTimeout(depository, left.entityId, right.entityId);
+      const finalizeBatch = emptyBatch({
+        disputeFinalizations: [{
+          counterentity: right.entityId, initialNonce: nonce, finalNonce: nonce, initialProofbodyHash: bodyHash, finalProofbody: body,
+          starterArguments: '0x', otherArguments: '0x', sig: '0x', startedByLeft: true, cooperative: false,
+        }],
+      });
+      const finalize = await signDepositoryBatch(depository, left.entityId, left.privateKey, finalizeBatch);
+      await depository.connect(left.signer).processBatch(finalize.encodedBatch, finalize.hankoData, finalize.nonce);
+    };
+
+    await runDispute(1n, 100n);
+    expect(await depository._reserves(left.entityId, tokenId)).to.equal(400n);
+    expect(await depository._reserves(right.entityId, tokenId)).to.equal(900n);
+
+    // The newest state Right ever signed says it owes 150 in total. Replaying it must not take more.
+    await expect(runDispute(3n, 150n)).to.be.revertedWithCustomError(depository, 'E2');
+    expect(await depository._reserves(right.entityId, tokenId)).to.equal(900n);
+    expect((await depository._accounts(acctKey)).nonce).to.equal(nextNonceEpoch(1n));
   });
 
   it('rejects historical cooperative signatures as a dispute bypass', async function () {

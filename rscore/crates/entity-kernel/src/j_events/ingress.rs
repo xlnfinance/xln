@@ -1974,13 +1974,15 @@ fn apply_dispute_finalized(
         && active.and_then(|active| object_bool(active, "initialProposerIsLeft"))
             == Some(primary.proposer_is_left)
         && final_hash == initial_hash;
-    let event_j_nonce = if exact_initial_unilateral {
+    // Mirror of Depository._disputeFinalizeInternal: finalization moves the Account
+    // nonce to the next dispute epoch base (ACCOUNT_NONCE_EPOCH_BITS = 40), saturating
+    // at the safe bound, so no proof signed before it can open another dispute.
+    let settled_nonce = if exact_initial_unilateral {
         initial_nonce
-            .checked_add(1)
-            .ok_or_else(|| invalid("J_EVENT_DISPUTE_FINAL_NONCE_OVERFLOW"))?
     } else {
         final_nonce
     };
+    let event_j_nonce = (((settled_nonce >> 40) + 1) << 40).min(MAX_SAFE_INTEGER);
     let finalized_j_nonce = view.j_nonce.max(event_j_nonce);
     let finalized_token_ids = final_body
         .token_ids
@@ -3679,7 +3681,7 @@ mod tests {
             [(
                 account,
                 AccountEnvelopeMutation::ApplyDisputeFinality(AccountDisputeFinality {
-                    finalized_j_nonce: 3,
+                    finalized_j_nonce: 1_099_511_627_776,
                     finalized_token_ids,
                 })
             )] if account == &counterparty.as_hex() && finalized_token_ids == &[TokenId::new(1).expect("token")]

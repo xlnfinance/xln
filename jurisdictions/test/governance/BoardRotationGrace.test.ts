@@ -554,7 +554,7 @@ describe('EntityProvider board rotation grace', function () {
       historicalFinal.hanko,
       1n,
     )).to.emit(depository, 'DisputeFinalized');
-    expect((await depository._accounts(historicalAccountKey)).nonce).to.equal(2n);
+    expect((await depository._accounts(historicalAccountKey)).nonce).to.equal(1n << 40n);
   });
 
   it('rejects previous-board watchtower authority while accepting the current board', async function () {

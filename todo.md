@@ -13,12 +13,13 @@ Testnet evidence never authorizes real-funds activation.
 
 ## Blockers, in order
 
-0. Dispute-proof replay after finalization (audit 2026-11-14, reproduced). `Depository` zeroes
-   collateral and ondelta but only advances the nonce, so a proof signed before the dispute
-   with a higher nonce opens a second dispute and settles its whole offdelta from reserves.
-   Evidence and counterexample: [docs/evidence/dispute-replay-20261114](docs/evidence/dispute-replay-20261114/readme.md).
-   The other audit findings, with status, are in [docs/evidence/core-audit-20261114](docs/evidence/core-audit-20261114/readme.md).
-   Needs an owner decision on the contract fix; no real funds before it lands.
+0. Dispute-proof replay after finalization (audit 2026-11-14): fixed by the dispute epoch in the
+   Account nonce (`ACCOUNT_NONCE_EPOCH_BITS = 40`), mirrored in TS and Rust, owner choice
+   2026-11-19. Pushed at the owner's request without the full verify: contract tests were green
+   (275), the updated watchtower and Rust expectations and `bun run check` on the final bytes were
+   not run. Run the full Studio verify before relying on it.
+   Evidence: [docs/evidence/dispute-replay-20261114](docs/evidence/dispute-replay-20261114/readme.md);
+   other audit findings: [docs/evidence/core-audit-20261114](docs/evidence/core-audit-20261114/readme.md).
 1. Done on `e838188fd`: full browser E2E 157/157 and `gate:release` 40/40 on one SHA
    ([evidence](docs/evidence/release-candidate-e838188f-20261027/result.json)). Keep it green
    on every later candidate.

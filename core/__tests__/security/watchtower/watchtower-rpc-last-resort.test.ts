@@ -553,7 +553,7 @@ describe('watchtower rpc last-resort integration', () => {
 
     const finalizedAccount = await depository._accounts(accountKey);
     const collateralAfter = await depository._collaterals(accountKey, tokenId);
-    expect(finalizedAccount.nonce).toBe(finalNonce);
+    expect(finalizedAccount.nonce).toBe(1n << 40n);
     expect(finalizedAccount.disputeHash).toBe(ethers.ZeroHash);
     expect(collateralAfter.collateral).toBe(0n);
     expect(decodeInt512(collateralAfter.ondelta)).toBe(0n);
@@ -807,7 +807,7 @@ describe('watchtower rpc last-resort integration', () => {
     )).wait();
 
     const disputeAccount = await depository._accounts(accountKey);
-    expect(disputeAccount.nonce).toBe(userFinalNonce);
+    expect(disputeAccount.nonce).toBe(1n << 40n);
     expect(disputeAccount.disputeHash).toBe(ethers.ZeroHash);
 
     const sweepResult = await runWatchtowerSweep(towerServer.store, {

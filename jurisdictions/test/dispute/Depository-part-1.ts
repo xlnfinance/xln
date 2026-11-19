@@ -36,6 +36,9 @@ type TestActor = {
   entityId: string;
   privateKey: string;
 };
+// Finalization moves the Account nonce to the next dispute epoch base (ACCOUNT_NONCE_EPOCH_BITS).
+const nextNonceEpoch = (nonce: bigint): bigint => ((nonce >> 40n) + 1n) << 40n;
+
 function lazyActor(signer: HardhatEthersSigner, signerIndex: number): TestActor {
   return {
     signer,
@@ -1730,7 +1733,7 @@ describe('Depository', () => {
 
     const finalizedAccount = await depository._accounts(acctKey);
     const collateralAfter = await depository._collaterals(acctKey, tokenId);
-    expect(finalizedAccount.nonce).to.equal(finalNonce);
+    expect(finalizedAccount.nonce).to.equal(nextNonceEpoch(finalNonce));
     expect(finalizedAccount.disputeHash).to.equal(ethers.ZeroHash);
     expect(finalizedAccount.disputeTimeout).to.equal(0n);
     expect(collateralAfter.collateral).to.equal(0n);
@@ -1856,7 +1859,7 @@ describe('Depository', () => {
     await depository.connect(right.signer).processBatch(finalize.encodedBatch, finalize.hankoData, finalize.nonce);
 
     const afterDispute = await depository._collaterals(acctKey, tokenId);
-    expect((await depository._accounts(acctKey)).nonce).to.equal(finalNonce);
+    expect((await depository._accounts(acctKey)).nonce).to.equal(nextNonceEpoch(finalNonce));
     expect(afterDispute.collateral).to.equal(0n);
     expect(decodeInt512(afterDispute.ondelta)).to.equal(0n);
     expect(await depository._reserves(left.entityId, tokenId)).to.equal(950n);
@@ -2037,7 +2040,7 @@ describe('Depository', () => {
       await depository.connect(right.signer).processBatch(final.encodedBatch, final.hankoData, final.nonce);
       expect(
         (await depository._accounts(await accountKeyFor(depository, left.entityId, right.entityId))).nonce,
-      ).to.equal(finalNonce);
+      ).to.equal(nextNonceEpoch(finalNonce));
     }
 
     {
@@ -2979,7 +2982,7 @@ describe('Depository', () => {
 
     const finalizedAccount = await depository._accounts(acctKey);
     const collateralAfter = await depository._collaterals(acctKey, tokenId);
-    expect(finalizedAccount.nonce).to.equal(finalNonce);
+    expect(finalizedAccount.nonce).to.equal(nextNonceEpoch(finalNonce));
     expect(finalizedAccount.disputeHash).to.equal(ethers.ZeroHash);
     expect(collateralAfter.collateral).to.equal(0n);
     expect(decodeInt512(collateralAfter.ondelta)).to.equal(0n);

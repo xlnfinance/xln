@@ -118,10 +118,12 @@ import { retireDisputedLendingClaims } from '../../lendbook/lifecycle';
 const jEventLog = createStructuredLogger('j.event');
 const normalizeSignerId = (value: unknown): string => String(value || '').trim().toLowerCase();
 
-const incrementAccountNonce = (nonce: number, code: string): number => {
-  if (nonce >= Number.MAX_SAFE_INTEGER) throw new Error(`${code}:${nonce}`);
-  return nonce + 1;
-};
+// Mirror of Depository._disputeFinalizeInternal: finalization moves the Account
+// nonce to the next dispute epoch base (ACCOUNT_NONCE_EPOCH_BITS = 40), saturating
+// at the safe bound, so no proof signed before it can open another dispute.
+const ACCOUNT_NONCE_EPOCH = 2 ** 40;
+const nextAccountNonceEpoch = (settledNonce: number): number =>
+  Math.min((Math.floor(settledNonce / ACCOUNT_NONCE_EPOCH) + 1) * ACCOUNT_NONCE_EPOCH, Number.MAX_SAFE_INTEGER);
 
 const invalidateSettlementIntentAfterDisputeFinality = (
   state: EntityState,
@@ -1220,7 +1222,7 @@ const resolveFinalizationEvidence = (
   const finalProofMatchesInitial =
     finalProofbodyHash.toLowerCase() === String(data.initialProofbodyHash || '').toLowerCase();
   const active = account.activeDispute;
-  let eventJNonce = initialNonce;
+  let settledNonce = initialNonce;
   if (primary) {
     const finalNonce = requireBoundaryUint(
       primary.finalNonce,
@@ -1240,15 +1242,9 @@ const resolveFinalizationEvidence = (
     // (nonce, proposer role, body hash) identity. Signature presence alone is
     // insufficient: a registered counter-proof may be executed with empty sig,
     // and equal-nonce LEFT must still replace an initial RIGHT branch.
-    eventJNonce = exactInitialUnilateral
-      ? incrementAccountNonce(initialNonce, 'J_EVENT_DISPUTE_FINAL_NONCE_OVERFLOW')
-      : finalNonce;
-  } else if (finalProofMatchesInitial) {
-    eventJNonce = incrementAccountNonce(
-      initialNonce,
-      'J_EVENT_DISPUTE_FINAL_NONCE_OVERFLOW',
-    );
+    settledNonce = exactInitialUnilateral ? initialNonce : finalNonce;
   }
+  const eventJNonce = nextAccountNonceEpoch(settledNonce);
   return {
     evidence,
     finalizedJNonce: Math.max(Number(account.state.jNonce ?? 0), eventJNonce),

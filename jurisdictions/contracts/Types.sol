@@ -27,6 +27,13 @@ error E10(); // BatchTooLarge
 // This bound does not apply to money or other true uint256 quantities.
 uint256 constant JS_SAFE_NONCE_MAX = 9007199254740991;
 
+// The high bits of an Account nonce are its dispute epoch. Finalization empties
+// collateral and ondelta, so it moves the stored nonce to the next epoch base:
+// every proof signed before it, including one in-flight frame ahead, is at or
+// below that base and can never open another dispute. 2^40 nonces per epoch
+// leaves 2^13 epochs under the JavaScript-safe bound.
+uint256 constant ACCOUNT_NONCE_EPOCH_BITS = 40;
+
 // Asset custody uses uint256. Individual signed movements carry a sign and
 // that same magnitude; cumulative offsets and settlement arithmetic are wider.
 // There is no monetary policy ceiling below these representations.
