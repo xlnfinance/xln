@@ -33,6 +33,28 @@ clean-commit proof and durable signed Cross-J trace. The original funded
 stores remain tracked in [11](issues/11-separate-operator-funding.md) and
 [12](issues/12-public-rpc-capacity-and-funded-catchup.md).
 
+## Scope after the accepted demo
+
+- **Accepted public result.** Tickets 05 and 06 record the observed one-USDC
+  journey, with five successful receipts, both Cross-J legs settled, zero
+  source remainder, and a 0.899801 USDC external payout. That evidence is bound
+  to the candidate recorded for the public run.
+- **CLI for one authorized run.** The locally verified CLI from
+  [16](issues/16-supervised-one-usdc-cli-run.md) runs on an already funded
+  stand. It rechecks the signed tariff and backing before approval, reconciles
+  from the original WAL and receipts after interruption, and verifies the signed
+  Cross-J evidence. With a valid grant, resuming the same run preserves the
+  original nonce slots and avoids duplicate financial effects.
+- **Remaining public proof.** [15](issues/15-clean-candidate-public-proof.md)
+  covers one public run bound to a verified clean SHA, with its receipts and
+  self-contained signed Cross-J trace. Refresh preflight for that exact
+  candidate and obtain separate spending authority before submission.
+- **Deferred work.** Keep further `status` diagnostics, including the nonce
+  conflict in [17](issues/17-read-only-usdc-run-status.md), in the backlog. The
+  original funded stand restore in 12 and the five-run public funding and gas
+  plan in 14 have separate deliverables. Ticket 15 can proceed independently
+  of all three.
+
 ## Accepted operating model
 
 - One dedicated user vault owns one TS Runtime and distinct per-jurisdiction

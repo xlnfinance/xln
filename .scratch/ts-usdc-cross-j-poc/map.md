@@ -78,11 +78,19 @@ confirmed the complete journey and a payout of 0.899801 USDC on Arbitrum
 Sepolia. The working-tree digest, five-slot authority and WAL replay are
 retained in the [public evidence](../../docs/evidence/ts-usdc-cross-j-poc/fresh-ubkyjm-journey-executed.json).
 
+The [post-demo scope](spec.md#scope-after-the-accepted-demo) keeps the verified
+one-run CLI from ticket 16 and focuses remaining PoC work on ticket 15. The
+nonce-conflict diagnostic in ticket 17 stays in the backlog.
+
 - [14](issues/14-five-run-and-recovery-gas-plan.md) owns the five-run plan and
   cumulative recovery gas. The selected capital baseline is a 1-USDC source
   Hub buffer, 5 USDC of target Hub reserve and five 1-USDC user deposits.
 - [15](issues/15-clean-candidate-public-proof.md) owns public proof on a clean
   committed candidate and the self-contained signed Cross-J trace.
+- [16](issues/16-supervised-one-usdc-cli-run.md) owns the supervised CLI run
+  on a funded stand and the payout and backing check before the first approval.
+- [17](issues/17-read-only-usdc-run-status.md) owns read-only run inspection
+  from exact receipts and the original WAL after interruption or expiry.
 - The original stand's [six funding receipts](../../docs/evidence/ts-usdc-cross-j-poc/local-evidence.md#operator-funding-publicjson)
   remain under [11](issues/11-separate-operator-funding.md). It has a confirmed
   1/5-USDC reserve allocation and 0.001/0.0001-ETH signer topups. The owner paused
@@ -122,6 +130,8 @@ and the explicit owner decisions above.
 | [13](issues/13-public-report-exact-nonce-receipts.md)     | Exact nonce-based public receipt reporting                         | Complete locally        |
 | [14](issues/14-five-run-and-recovery-gas-plan.md)         | Five-run and recovery gas budget                                   | 11, open                |
 | [15](issues/15-clean-candidate-public-proof.md)           | Clean committed public proof and signed Cross-J trace              | 04, 05 and 06, open     |
+| [16](issues/16-supervised-one-usdc-cli-run.md)            | Supervised one-USDC CLI run with pre-approval checks               | Complete locally        |
+| [17](issues/17-read-only-usdc-run-status.md)              | Read-only status for interrupted or completed runs                 | P3 deferred             |
 
 Ticket 12 uses the existing funding receipts under the original Runtime
 identities. Following the single-run closure, its outstanding observation
