@@ -1,5 +1,6 @@
 import { createStructuredLogger } from '../../support/logger';
 import type { RuntimeInput, RuntimeReplica } from '../types';
+import type { FrameLogEntry } from '../../types/logging';
 import { ensureRuntimeInfrastructure } from '../envelope/replica-envelope';
 
 const runtimeLog = createStructuredLogger('runtime');
@@ -31,10 +32,11 @@ export const notifyRuntimeStateChanged = (env: RuntimeReplica): void => {
 export const notifyRuntimeFrameCommitted = (
   env: RuntimeReplica,
   runtimeInput: RuntimeInput,
+  events: readonly FrameLogEntry[],
 ): void => {
   const callbacks = ensureRuntimeInfrastructure(env).runtimeFrameCommitCallbacks;
   if (!callbacks || callbacks.size === 0) return;
-  const frame = { height: env.state.height, runtimeInput };
+  const frame = { height: env.state.height, runtimeInput, events };
   for (const callback of callbacks) {
     try {
       callback(frame);

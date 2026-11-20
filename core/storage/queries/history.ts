@@ -1,12 +1,15 @@
-import { assertTypeScriptStorageFrame } from '../read/integrity/native-authority';
+import { assertStorageFrameHash, assertTypeScriptStorageFrame } from '../read/integrity/native-authority';
 import {
   buildRuntimeActivityEvents,
   dedupeRuntimeActivityEvents,
 } from '../../api/public/activity-history';
 import { findAccountByCounterparty } from '../../account/state/account-lookup';
+import { computeFrameHash } from '../../account/consensus/frame/hash';
+import { verifyCanonicalHanko } from '../../hanko/claims';
+import { HankoValidationError } from '../../hanko/codec';
 import { getEntityReplicaById } from '../../entity/replica/replica-lookup';
 import type { RuntimeReplica, RoutedEntityInput } from '../../runtime/types';
-import type { AccountAckFrame, AccountFrame, AccountInput, AccountTx } from '../../types/account';
+import type { AccountAckFrame, AccountFrame, AccountFrameProposal, AccountInput, AccountTx } from '../../types/account';
 import type { FrameLogEntry } from '../../types/logging';
 import type {
   PersistedActivityJournal,
@@ -80,9 +83,29 @@ type PersistedAccountFrameRecord = Readonly<{
   accountHeight: number;
   source: 'ackCommit' | 'counterpartyCommit';
   frame: AccountFrame;
+  certificate?: Readonly<{ localFrameHanko: string; peerFrameHanko: string }>;
   runtimeHeight: number;
   timestamp: number;
 }>;
+
+type AccountHistoryOptions = {
+  maxRuntimeHeight?: number;
+  maxAccountHeight?: number;
+  /** The PoC uses self-authenticating lazy Entity IDs. Registered boards
+   * need the historical registry authority and cannot use this mode. */
+  requireLazyCertificate?: boolean;
+};
+
+const verifyLazyFrameHanko = (hanko: string | undefined, digest: string, entityId: string): boolean => {
+  if (!hanko) return false;
+  try {
+    verifyCanonicalHanko({ hanko, digest, expectedTargetEntityId: entityId });
+    return true;
+  } catch (error) {
+    if (error instanceof HankoValidationError) return false;
+    throw error;
+  }
+};
 
 const normalize = (value: string): string => String(value || '').trim().toLowerCase();
 
@@ -108,10 +131,8 @@ const accountInputSide = (
   return null;
 };
 
-const proposalOf = (input: AccountInput): AccountFrame | null =>
-  input.kind === 'ack_frame'
-    ? input.proposal.frame
-    : null;
+const proposalOf = (input: AccountInput): AccountFrameProposal | null =>
+  input.kind === 'ack_frame' ? input.proposal : null;
 
 const ackOf = (input: AccountInput): AccountAckFrame | null =>
   input.kind === 'ack'
@@ -141,7 +162,7 @@ const readAccountFrameHistoryRecords = async (
   entityId: string,
   counterpartyId: string,
   limit = 50,
-  opts?: { maxRuntimeHeight?: number; maxAccountHeight?: number },
+  opts?: AccountHistoryOptions,
 ): Promise<PersistedAccountFrameRecord[]> => {
   const latest = await deps.resolvePersistedLatestHeight(env);
   const maxRuntimeHeight = Math.min(
@@ -154,24 +175,35 @@ const readAccountFrameHistoryRecords = async (
     ? Math.max(0, Number(opts?.maxAccountHeight))
     : Number.MAX_SAFE_INTEGER;
   const boundedLimit = Math.max(1, Math.min(10_000, Math.floor(Number(limit || 50))));
-  const proposals = new Map<string, {
-    identity: string;
-    frame: AccountFrame;
-    source: PersistedAccountFrameRecord['source'];
-  }>();
+  const proposals = new Map<
+    string,
+    {
+      identity: string;
+      proposal: AccountFrameProposal;
+      source: PersistedAccountFrameRecord['source'];
+    }
+  >();
+  type AckEvidence = { runtimeHeight: number; timestamp: number; frameHanko?: string };
   // A frame commits only when the other side acknowledges it: the owner's
   // proposal needs the peer's ACK, the peer's proposal needs the owner's ACK.
   // A peer's ACK of its own proposal is no commit evidence.
   const acknowledgements = {
-    owner: new Map<string, { runtimeHeight: number; timestamp: number }>(),
-    peer: new Map<string, { runtimeHeight: number; timestamp: number }>(),
+    owner: new Map<string, AckEvidence>(),
+    peer: new Map<string, AckEvidence>(),
   };
 
   // One bounded sequential WAL scan. No per-Account queries and no eager fan-out.
   const walDb = deps.getRuntimeWalDb(env);
+  let previousHash: string | undefined;
   for (let runtimeHeight = 1; runtimeHeight <= maxRuntimeHeight; runtimeHeight += 1) {
     const runtimeFrame = await readStorageFrameRecord(walDb, runtimeHeight);
-    if (!runtimeFrame) continue;
+    if (!runtimeFrame) {
+      if (previousHash) throw new Error(`STORAGE_VERIFY_FRAME_MISSING: height=${runtimeHeight}`);
+      continue;
+    }
+    if (previousHash && runtimeFrame.prevFrameHash !== previousHash)
+      throw new Error(`STORAGE_VERIFY_FRAME_CHAIN_BROKEN: height=${runtimeHeight}`);
+    previousHash = assertStorageFrameHash(runtimeFrame);
     // Account proposals/ACKs are in Runtime inputs and verified ordered outputs.
     // Entity contexts and checkpoint Runtime trees cannot contribute history.
     const runtimeOutputs = await readRuntimeOutputRows(walDb, runtimeHeight, {
@@ -185,38 +217,63 @@ const readAccountFrameHistoryRecords = async (
     for (const { envelope, input } of inputs) {
       const side = accountInputSide(envelope, input, entityId, counterpartyId);
       if (!side) continue;
+      const sender = side === 'owner' ? normalize(entityId) : normalize(counterpartyId);
       const ack = ackOf(input);
-      if (ack && ack.height <= maxAccountHeight) {
+      if (
+        ack &&
+        ack.height <= maxAccountHeight &&
+        (!opts?.requireLazyCertificate || verifyLazyFrameHanko(ack.frameHanko, ack.frameHash, sender))
+      ) {
         const identity = accountFrameIdentity(ack.height, ack.frameHash);
         if (!acknowledgements[side].has(identity)) {
-          acknowledgements[side].set(identity, { runtimeHeight, timestamp: runtimeFrame.timestamp });
+          acknowledgements[side].set(identity, {
+            runtimeHeight,
+            timestamp: runtimeFrame.timestamp,
+            ...(ack.frameHanko ? { frameHanko: ack.frameHanko } : {}),
+          });
         }
       }
-      const frame = proposalOf(input);
-      if (!frame || frame.height > maxAccountHeight) continue;
+      const proposal = proposalOf(input);
+      if (!proposal || proposal.frame.height > maxAccountHeight) continue;
+      const { frame } = proposal;
+      if (
+        opts?.requireLazyCertificate &&
+        (computeFrameHash(frame) !== frame.stateHash ||
+          !verifyLazyFrameHanko(proposal.frameHanko, frame.stateHash, sender))
+      )
+        continue;
       const identity = accountFrameIdentity(frame.height, frame.stateHash);
       if (!proposals.has(`${side}:${identity}`)) {
         proposals.set(`${side}:${identity}`, {
           identity,
-          frame: structuredClone(frame),
+          proposal: structuredClone(proposal),
           source: side === 'owner' ? 'ackCommit' : 'counterpartyCommit',
         });
       }
     }
   }
-  const records = Array.from(proposals.values()).flatMap(({ identity, ...proposal }) => {
-    const committed = (proposal.source === 'ackCommit' ? acknowledgements.peer : acknowledgements.owner)
-      .get(identity);
-    return committed ? [{
-      kind: 'accountFrame' as const,
-      entityId: normalize(entityId),
-      counterpartyId: normalize(counterpartyId),
-      accountHeight: proposal.frame.height,
-      source: proposal.source,
-      frame: proposal.frame,
-      runtimeHeight: committed.runtimeHeight,
-      timestamp: committed.timestamp,
-    }] : [];
+  const records = Array.from(proposals.values()).flatMap(({ identity, proposal, source }) => {
+    const ownProposal = source === 'ackCommit';
+    const committed = (ownProposal ? acknowledgements.peer : acknowledgements.owner).get(identity);
+    const localFrameHanko = ownProposal ? proposal.frameHanko : committed?.frameHanko;
+    const peerFrameHanko = ownProposal ? committed?.frameHanko : proposal.frameHanko;
+    return committed
+      ? [
+          {
+            kind: 'accountFrame' as const,
+            entityId: normalize(entityId),
+            counterpartyId: normalize(counterpartyId),
+            accountHeight: proposal.frame.height,
+            source,
+            frame: proposal.frame,
+            ...(opts?.requireLazyCertificate && localFrameHanko && peerFrameHanko
+              ? { certificate: { localFrameHanko, peerFrameHanko } }
+              : {}),
+            runtimeHeight: committed.runtimeHeight,
+            timestamp: committed.timestamp,
+          },
+        ]
+      : [];
   });
   return records.slice(-boundedLimit);
 };
@@ -546,7 +603,7 @@ export const createPersistenceHistoryQueries = (deps: PersistenceQueryDeps) => {
       entityId: string,
       counterpartyId: string,
       limit = 50,
-      opts?: { maxRuntimeHeight?: number; maxAccountHeight?: number },
+      opts?: AccountHistoryOptions,
     ) => readAccountFrameHistoryRecords(deps, env, entityId, counterpartyId, limit, opts),
     readPersistedAccountSwapHistoryPage: (
       env: RuntimeReplica,

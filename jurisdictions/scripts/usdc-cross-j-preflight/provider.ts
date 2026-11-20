@@ -57,14 +57,27 @@ export class PreflightProvider extends JsonRpcProvider {
   }
 }
 
-export const preflightProvider = (url: string, chainId: number): PreflightProvider => {
+export const preflightProvider = (url: string, chainId: number, singleObservation = false): PreflightProvider => {
   const request = new FetchRequest(url);
   request.timeout = requestTimeoutMs;
-  return new PreflightProvider(request, chainId, { cacheTimeout: -1 });
+  if (singleObservation) request.retryFunc = async () => false;
+  // An observation verifies eth_chainId explicitly. Avoid ethers' background
+  // network bootstrap retries so unavailable RPCs remain ordinary evidence gaps.
+  return new PreflightProvider(request, chainId, {
+    cacheTimeout: -1,
+    ...(singleObservation ? { staticNetwork: true } : {}),
+  });
 };
 
 export const runtimeRpc = (chain: { chainId: number; env: string }): string => {
   const value = process.env[`POC_RUNTIME_${chain.chainId}_RPC`] ?? process.env[chain.env];
-  if (!value) throw new Error(`USDC_PREFLIGHT_RPC_ENV_REQUIRED:${chain.env}`);
+  if (!value) throw new RpcEnvironmentError(chain.env);
   return value;
 };
+
+export class RpcEnvironmentError extends Error {
+  readonly code = 'USDC_PREFLIGHT_RPC_ENV_REQUIRED';
+  constructor(env: string) {
+    super(`USDC_PREFLIGHT_RPC_ENV_REQUIRED:${env}`);
+  }
+}

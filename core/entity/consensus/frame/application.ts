@@ -8,6 +8,7 @@ import { haltRuntimeFailure } from "../../../protocol/errors/failure-taxonomy";
 import { accountInputAck, accountInputProposal, accountInputReferenceHeight } from '../../../account/consensus/flush';
 import { proposeAccountFrame } from '../../../account/consensus/proposal/propose';
 import { isProposedAccountFrame } from '../../../account/consensus/result';
+import { ACCOUNT_TX_REJECTION_CODES } from '../../../account/tx/apply-types';
 import { getAccountJClaimNodeStore } from '../../account/account-j-claim-node-store';
 import {
   assertCanonicalSettlementWorkspace,
@@ -588,6 +589,19 @@ const proposeAccountFrameCandidate = async (
   }
   if ('accountChanged' in proposal && proposal.accountChanged) {
     recordFrameAccountChange(storageChanges, state.entityId, accountKey);
+  }
+  for (const dropped of 'proposalDroppedTransactions' in proposal ? proposal.proposalDroppedTransactions : []) {
+    if (dropped.disposition === 'removed' && dropped.code === ACCOUNT_TX_REJECTION_CODES.collateralPolicyVersion) {
+      context.candidateEffects.push({
+        kind: 'runtimeEvent',
+        eventName: dropped.code,
+        data: {
+          entityId: state.entityId,
+          counterpartyId: accountKey,
+          txDigest: dropped.txDigest,
+        },
+      });
+    }
   }
   if (isProposedAccountFrame(proposal) && proposal.hashesToSign) {
     collectedHashes.push(...proposal.hashesToSign);

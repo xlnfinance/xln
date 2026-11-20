@@ -22,7 +22,9 @@ export const openExecutionWriters = async (
 ): Promise<ReadonlyMap<number, ExecutionWriter>> => {
   const journeyPath = readCliOption(args, '--authority-file', '');
   const c2rPath = readCliOption(args, '--source-c2r-authority-file', '');
+  const runId = readCliOption(args, '--run-id', '');
   if (journeyPath && c2rPath) throw new Error('USDC_EXECUTION_GATEWAY_AUTHORITIES_CONFLICT');
+  if (runId && !journeyPath) throw new Error('USDC_EXECUTION_GATEWAY_RUN_AUTHORITY_REQUIRED');
   const writers = new Map<number, ExecutionWriter>();
   if (!journeyPath && !c2rPath) return writers;
   const authority = journeyPath ? readAuthority(journeyPath) : readSourceC2RAuthority(c2rPath);
@@ -34,6 +36,8 @@ export const openExecutionWriters = async (
   const digest = authorityDigest(authority);
   if ('runIds' in authority) {
     requireCurrentAuthority(authority, catalogPath);
+    const runIndex = runId ? authority.runIds.indexOf(runId) : undefined;
+    if (runIndex === -1) throw new Error('USDC_EXECUTION_RUN_NOT_AUTHORIZED');
     for (const network of networks) {
       const chain = authority.chains.find(value => value.chainId === network.chainId)!;
       const connection = connect(network);
@@ -44,7 +48,7 @@ export const openExecutionWriters = async (
           requireCurrentAuthority(authority, catalogPath);
           return digest;
         },
-        submit: raw => submitAuthorizedWire(authority, catalogPath, connection, chain, raw),
+        submit: raw => submitAuthorizedWire(authority, catalogPath, connection, chain, raw, runIndex),
         close: () => connection.current.destroy(),
       });
     }

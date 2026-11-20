@@ -20,7 +20,7 @@ export interface JAdapterConfig {
   mode: JAdapterMode;
   chainId: number;
   replacementMinimumBumpBps?: number;
-  /** Absolute automatic EVM fee ceiling in wei; default is 4x initial max fee. */
+  /** Absolute automatic EVM fee ceiling in wei. Zero preserves the original signed wire. */
   evmFeeCeilingWei?: string;
   rpcUrl?: string;                    // Required for anvil/rpc
   tronFullHost?: string;              // Required for TRON writes; defaults from rpcUrl

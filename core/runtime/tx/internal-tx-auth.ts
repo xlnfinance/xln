@@ -6,6 +6,7 @@ import { assertJImportResultRuntimeTxAuthorized } from '../j-submit/jurisdiction
 import { assertNumberedRegistrationTxAuthorized } from '../registration/numbered/numbered-registration-auth';
 import { assertGovernanceResultRuntimeTxAuthorized } from '../registration/governance-submit-state';
 import { assertCheckpointBarrierRuntimeTxAuthorized } from '../checkpoint/barrier';
+import { assertEvmWalletApprovalAuthorized } from '../j-submit/evm/wallet-approval';
 import type { RuntimeInput, RuntimeTx } from '../types';
 
 /**
@@ -20,6 +21,7 @@ export const assertRuntimeTxCapabilitiesAuthorized = (
   replay = false,
 ): void => {
   assertCheckpointBarrierRuntimeTxAuthorized(tx, replay);
+  assertEvmWalletApprovalAuthorized(tx, replay);
   assertJSubmitRuntimeTxAuthorized(tx, replay);
   assertJAuthorityRuntimeTxAuthorized(tx, replay);
   assertJImportResultRuntimeTxAuthorized(tx, replay);

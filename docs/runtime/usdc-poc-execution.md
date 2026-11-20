@@ -6,11 +6,14 @@ sequential deposits of exactly 1,000,000 source USDC units. Each completed run
 must pay at least 850,000 units to the user's target signer EOA, with no source
 remainder and a source-to-payout difference no greater than 150,000 units.
 After source collateral is committed, the CLI prices the selected quote under
-the destination Hub tariff in the signed Account frame. It requires at least
-850,000 units after the tariff before it submits a new Cross-J intent. An
-unacceptable quote stops the run with source collateral intact. The same rule
-checks the effective tariff again when requesting cover. Recovery of an already
-accepted cover still uses the committed amounts.
+the destination Hub tariff for the next Account frame. It requires at least
+850,000 units under every tariff already signed that can apply through the
+execution grant deadline, and checks backing for the largest possible payout.
+An unacceptable quote stops the run with source collateral intact. Before
+requesting cover, the CLI verifies the effective signed tariff and backing again.
+If Account commits a tariff-version rejection for the exact request digest,
+the CLI verifies the new terms and retries once after confirming there is no
+outstanding request or cover. An accepted cover keeps its committed amounts.
 
 This implementation does not authorize public spending. Operator funding is
 [ticket 11](../../.scratch/ts-usdc-cross-j-poc/issues/11-separate-operator-funding.md).
@@ -98,6 +101,54 @@ another HEAD, expired authority or a mismatched catalog reject before broadcast.
 
 ## Start operators and execute one run
 
+For an already funded stand, stop the previous session and create `stand.json`
+with the preparation directory and the three existing WAL store paths. Paths
+are relative to the descriptor. The optional `apiBase`, `hubPort`, `mmPort`, and
+`startupTimeoutMs` fields use the session defaults when omitted.
+
+```json
+{
+  "directory": ".",
+  "stores": { "hub": "hub/runtime", "mm": "mm/runtime", "user": "user/runtime" }
+}
+```
+
+After the exact authority receives owner approval, run under the protected RPC
+environment:
+
+```sh
+bun jurisdictions/scripts/usdc-cross-j-preflight/execution/index.ts run \
+  --stand "$POC_STAND" --authority-file "$POC_AUTHORITY" --run-id "$POC_RUN_ID" \
+  --output "$POC_RUN_REPORT"
+```
+
+This invocation owns the gateway and supervisor and restores the selected Hub/MM
+stores. It checks the signed payout economics, backing, balances, and nonce
+slots before the first approval. After estimating approval gas it verifies the
+same maker quote, the signed tariff and backing at a fresh chain point, then
+records those checks with the approved wire. It checks the quote and backing
+again before Cross-J. Quote expiry uses the later of the committed Hub timestamp
+and current wall time.
+The archive must agree with the current RPC on the block hash used for reserve
+and balance reads. If execution stops after opening the user Runtime, the
+report records the last confirmed slot and both observed Runtime positions.
+The target position includes its claim, collateral and withdrawal state at
+the reported user Runtime frame. Each slot can report a confirmed receipt, a
+revert, pending evidence, no observed transaction,
+or an unavailable observation. Known signed transaction hashes remain visible
+while their receipts are unavailable. Use the original authority, run ID,
+and stores with a new output path to continue while the authority is valid.
+
+Before submitting the first approval, the CLI commits the exact signed
+transaction in the user Runtime WAL. The checkpoint retains the latest
+approval wire for that wallet on each chain. After restart, a recorded hash
+with no verified receipt stops the run, even when the RPC shows a free nonce.
+The preflight JSON under `execution-reports/<authorityDigest>/<runId>/`
+is keyed by the signed hash and supplies report evidence. If that file is
+absent, a verified approval receipt can still be reconciled with `preflight: null`.
+
+### Explicit session supervision
+
 After the exact campaign receives owner approval, stop Hub/MM before replacing
 their relay/gateway. Restore their existing stores under the approved gateway:
 
@@ -115,11 +166,10 @@ same stand workflow. An independently supervised approved gateway can use
 `--external-gateway`. Do not run the default session user and the financial CLI
 against the same store concurrently.
 
-For a prepared catalog that contains deployment metadata, start the
-approved gateway as a separate supervised child with the original catalog
-path. The gateway checks the catalog digest before listening. The Runtime
-supervisor uses its own decoded copy and points to that running gateway.
-Run both children under the same stand lease.
+For an independently managed gateway, start it as a separate supervised child
+with the original catalog path. The gateway checks the catalog digest before
+listening. The Runtime supervisor uses its decoded catalog copy and points to
+that running gateway. Run both children under the same stand lease.
 
 ```sh
 XLN_JURISDICTIONS_PATH="$POC_DIRECTORY/jurisdictions.json" \
@@ -161,8 +211,10 @@ one-USDC approval, one E2R and one R2C per run. The target user and target Hub
 each reserve N slots for exit and cover respectively. For every payer,
 `slots * gasLimit * maxFeePerGasWei <= totalFeeLimitWei` must hold. These finite
 windows reserve worst-case fees for the whole campaign, including consumed
-slots. Replacement at the same nonce cannot replenish the cumulative allowance.
-Unused fee reservation is conservative; it is not an extra spendable allowance.
+slots. The authorized operator session and financial runner set the automatic
+EVM fee ceiling to zero. The Runtime observes existing signed siblings and
+can retry the original wire. A different hash at the same nonce requires
+separate approval.
 
 The gateway validates actual signed type-2 transactions, chain, sender, nonce,
 fees, value, token/contract, exact operation/recipient/amount and current on-chain
@@ -179,13 +231,65 @@ history and validated against the same grant. The report uses only the five
 receipts for the selected run ID. It checks the Depository's Entity, batch hash
 and Entity nonce against the signed calls, attributes both USDC transfers to
 their receipts and reconciles payer ETH and recipient USDC balances at the
-receipt blocks. Reconstructing a completed run after later runs uses the same
+receipt blocks. The completion report reads the original Cross-J intent
+and both bilateral close certificates from the retained user WAL. Each
+certificate verifies the proposal and the opposite party's ACK against the
+recomputed Account frame hash and the PoC's self-authenticating Entity IDs.
+Reconstructing a completed run after later runs uses the same
 five hashes and needs no additional debit or range query for receipt logs.
+
+The stop report reads the verified materialized user WAL for positions and
+retained transaction attempts. It requests the Hub's committed cover hashes
+through authenticated inspection. Its read-only gateway path queries known
+hashes on the current RPC. `knownHashes` also shows signed attempts the chain
+has yet to observe. A missing frame within the retained WAL is a storage error.
 
 Expired authority blocks new submission until the exact remaining obligation is
 reviewed. A cancelled/expired partial route is reported as unfinished. It is not
 a completed PoC. Never regenerate a campaign to hide an interrupted position,
 renew a consumed allowance or reuse an old run ID under new nonce windows.
+
+## Inspect a stopped or completed run
+
+Use the original manifest, stand descriptor, and run ID. Load the same
+protected RPC environment used by the gateway. The gateway and operators can
+remain stopped, and an expired grant can still be inspected.
+
+```sh
+bun jurisdictions/scripts/usdc-cross-j-preflight/execution/index.ts status \
+  --stand "$POC_STAND" --authority-file "$POC_AUTHORITY" --run-id "$POC_RUN_ID"
+```
+
+Add `--json` for the same fields in XLN JSON, including exact atomic-unit amounts.
+The command pins a current block on each chain, verifies the original anchors,
+and checks all five authorized nonce slots. It queries a signed attempt's
+known hash directly and verifies the payer's nonce at the approved anchor.
+If the current RPC cannot read that historical nonce, the archive verifies it
+against the same chain anchor. The stopped user and Hub WALs supply hash hints
+for live and retired attempts, within a three-second history scan per store.
+An incomplete scan is reported. For a consumed nonce without a usable hash,
+the command uses the configured archive within the same observation. A missing
+or lagging archive can leave a consumed slot unresolved. The command returns
+without waiting for archive or watcher catch-up.
+
+The WAL section shows one verified user Runtime frame and separate source and
+target views. A confirmed receipt can precede its Runtime observation.
+`watcher-behind` means the WAL's finalized J-height is below the receipt block.
+`watcher-at-or-past-block` describes the height reached. The balances, route
+legs, and settlement fields show the committed effects. If the owning process
+still holds the user store or a runtime store directory is missing, the receipt
+checks continue. A missing user store leaves WAL progress unknown. Corrupt
+storage fails the command with its underlying error. The command opens the
+materialized state on a temporary copy and removes it afterward.
+The execution CLI materializes each committed user
+frame. When an older store has a WAL tail after its materialized frame,
+`walHeights` reports both heights and current Runtime progress stays unknown.
+Receipt and payout verification can still succeed independently.
+
+`complete: true` requires five verified successful receipts, both legs settled
+with zero remainder, and the matching external USDC transfer. Authority expiry
+is reported separately. Status signs and submits zero transactions and leaves
+the original WAL and manifest untouched.
 
 ## Local verification
 

@@ -35,6 +35,7 @@ for (const chain of networks) {
   const archive = process.env[chain.env];
   if (!archive) throw new Error(`USDC_EXECUTION_HISTORY_RPC_REQUIRED:${chain.env}`);
   providers.set(chain.path, preflightProvider(runtimeRpc(chain), chain.chainId));
+  providers.set('/current' + chain.path, providers.get(chain.path)!);
   providers.set('/history' + chain.path, preflightProvider(archive, chain.chainId));
 }
 const executionWriters = await openExecutionWriters(process.argv.slice(2), apiBase, catalogPath, providers);
@@ -179,6 +180,7 @@ const relay = startStandaloneRelayServer({
   audience: apiBase.replace('http', 'ws') + '/relay',
   httpHandler: async request => {
     const path = new URL(request.url).pathname;
+    const observation = path.startsWith('/current/');
     const provider = providers.get(path);
     if (!provider || request.method !== 'POST') return new Response('USDC PoC read-only gateway', { status: 404 });
     const payload = await request.json();
@@ -214,9 +216,14 @@ const relay = startStandaloneRelayServer({
                 // Deployment receipts and fixed-block state need archive capability;
                 // bulk headers use the explicitly selected current RPC. Header roots
                 // still authenticate every receipt and proof returned by the archive.
-                const reader = !currentHeaderMethods.has(call['method'])
-                  ? providers.get(path.startsWith('/history') ? path : '/history' + path)!
-                  : provider;
+                const liveNonce =
+                  chain &&
+                  call.method === 'eth_getTransactionCount' &&
+                  (call.params[1] === 'latest' || call.params[1] === 'pending');
+                const reader =
+                  !observation && !liveNonce && !currentHeaderMethods.has(call['method'])
+                    ? providers.get(path.startsWith('/history') ? path : '/history' + path)!
+                    : provider;
                 if (paceRead && call.method === 'eth_getBlockReceipts') {
                   const receiptChain = chain ?? networks.find(value => '/history' + value.path === path)!;
                   return await readPacedReceipt(call, process.env[receiptChain.env]!, receiptChain.chainId, request.signal, paceRead);
@@ -250,7 +257,7 @@ const relay = startStandaloneRelayServer({
 const close = () => {
   stopParentWatch();
   relay.close();
-  for (const provider of providers.values()) provider.destroy();
+  for (const provider of new Set(providers.values())) provider.destroy();
   for (const writer of executionWriters.values()) writer.close();
   process.exit(0);
 };

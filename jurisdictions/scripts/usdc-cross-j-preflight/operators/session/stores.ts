@@ -12,15 +12,25 @@ const library =
 if (!library) throw new Error('USDC_SESSION_LOCK_PLATFORM_UNSUPPORTED');
 const native = dlopen(library, { flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 } });
 
+export class SessionStoreBusyError extends Error {
+  readonly code = 'USDC_SESSION_STORE_BUSY';
+  constructor(role: string) {
+    super(`USDC_SESSION_STORE_BUSY:${role}`);
+  }
+}
+
 /** Host ownership only, never recovery state. Never unlink this inode; the
  * kernel releases its descriptor lock on exit, including SIGKILL. */
-export const acquireStoreOwnership = (stores: readonly (readonly [string, string])[]): (() => void) => {
+export const acquireStoreOwnership = (
+  stores: readonly (readonly [string, string])[],
+  readOnly = false,
+): (() => void) => {
   const descriptors: number[] = [];
   try {
     for (const [role, path] of stores) {
-      const fd = openSync(join(path, '.poc-owner.lock'), 'a', 0o600);
+      const fd = openSync(join(path, '.poc-owner.lock'), readOnly ? 'r' : 'a', 0o600);
       descriptors.push(fd);
-      if (native.symbols.flock(fd, 2 | 4) !== 0) throw new Error(`USDC_SESSION_STORE_BUSY:${role}`);
+      if (native.symbols.flock(fd, 2 | 4) !== 0) throw new SessionStoreBusyError(role);
     }
   } catch (error) {
     for (const fd of descriptors.reverse()) closeSync(fd);

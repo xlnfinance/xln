@@ -49,6 +49,12 @@ export interface RuntimeInput {
   queuedAt?: number | undefined; // When first queued into runtime mempool (ms)
 }
 
+export type RuntimeFrameCommitObservation = Readonly<{
+  height: number;
+  runtimeInput: RuntimeInput;
+  events: readonly FrameLogEntry[];
+}>;
+
 /**
  * Post-WAL operational counters derived only from committed Runtime events.
  * They are observability, never consensus State or replay authority.
@@ -350,6 +356,11 @@ export type RuntimeTx =
       data: { jurisdictionName: string; attemptId: string; rawTransaction: string; feeAuthorization?: EvmFeeAuthorization };
     }
   | {
+      /** Local wallet preparation, committed before the owner submits the exact bytes. */
+      type: 'recordEvmWalletApproval';
+      data: { rawTransaction: string };
+    }
+  | {
       type: 'replaceJPreparedTransaction';
       data: { jurisdictionName: string; attemptId: string; previousTransactionHash: string; rawTransaction: string; evidence: TronExpiryEvidence | EvmFeeEvidence };
     }
@@ -590,7 +601,7 @@ interface RuntimeInfrastructure {
   envChangeCallbacks?: Set<(state: RuntimeReplica) => void>;
   /** Terminal lifecycle notification, independent of an uncommitted financial frame. */
   runtimeHaltCallbacks?: Set<() => void>;
-  runtimeFrameCommitCallbacks?: Set<(frame: { height: number; runtimeInput: RuntimeInput }) => void>;
+  runtimeFrameCommitCallbacks?: Set<(frame: RuntimeFrameCommitObservation) => void>;
   storageDb?: Level<Buffer, Buffer> | null | undefined;
   storageDbOpenPromise?: Promise<boolean> | null | undefined;
   /** Namespace opened once for this process; later frames must not re-check. */
@@ -719,6 +730,8 @@ interface RuntimeInfrastructure {
   ) => Promise<void>) | null;
   /** Already committed J side effects awaiting a durable result RuntimeTx. */
   pendingCommittedJOutbox?: JInput[];
+  /** Latest exact approval wire per chain for this Runtime's EVM wallet. */
+  evmWalletApprovals?: Map<string, string>;
   /**
    * Inbound entity inputs admitted behind the j-catchup fence: their count is charged
    * against mempool capacity; released in arrival order when it opens.

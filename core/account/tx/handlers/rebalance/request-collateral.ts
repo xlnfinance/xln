@@ -22,8 +22,8 @@ import { commitDeltaDraft, createDeltaDraft, getOffdeltaRepresentationError } fr
 import { isLeftEntity } from '../../../../protocol/identity/entity-id';
 import { deriveDelta } from '../../../utils';
 import { deriveTransferOffdeltaChange } from '../../../../protocol/transform/delta-movement';
-import type { ApplyAccountTxResult } from '../../apply-types';
-import { accountTxApplied, accountTxValidationRejected } from '../../apply-result';
+import { ACCOUNT_TX_REJECTION_CODES, type ApplyAccountTxRejected, type ApplyAccountTxResult } from '../../apply-types';
+import { accountTxApplied, accountTxRejected, accountTxValidationRejected } from '../../apply-result';
 
 import { effectiveRebalanceTerms } from '../../../config/term-notice';
 
@@ -34,24 +34,38 @@ type RequestCollateralTx = Extract<AccountTx, { type: 'request_collateral' }>;
 // must not debit a fee and create a request the hub never agreed to serve.
 const validateCollateralRequest = (
   account: AccountReplica, data: RequestCollateralTx['data'], requesterIsLeft: boolean, timestamp: number,
-): string | undefined => {
-  if (data.amount <= 0n) return 'request_collateral: amount must be > 0';
-  if (data.feeAmount < 0n) return 'request_collateral: feeAmount must be >= 0';
+): ApplyAccountTxRejected | undefined => {
+  if (data.amount <= 0n) return accountTxValidationRejected('request_collateral: amount must be > 0', []);
+  if (data.feeAmount < 0n) return accountTxValidationRejected('request_collateral: feeAmount must be >= 0', []);
   if (!Number.isFinite(data.policyVersion) || data.policyVersion < 1) {
-    return `request_collateral: invalid policyVersion ${data.policyVersion}`;
+    return accountTxValidationRejected(`request_collateral: invalid policyVersion ${data.policyVersion}`, []);
   }
   if (!account.state.deltas.has(data.tokenId)) {
-    return `request_collateral: no delta for token ${data.tokenId}`;
+    return accountTxValidationRejected(`request_collateral: no delta for token ${data.tokenId}`, []);
   }
   const snapshot = account.state.rebalanceFeePolicies?.get(data.tokenId)?.[requesterIsLeft ? 'right' : 'left'];
-  if (!snapshot) return `request_collateral: hub has no committed fee policy for token ${data.tokenId}`;
+  if (!snapshot)
+    return accountTxValidationRejected(
+      `request_collateral: hub has no committed fee policy for token ${data.tokenId}`,
+      [],
+    );
   const policy = effectiveRebalanceTerms(snapshot, timestamp);
   if (data.policyVersion !== policy.policyVersion) {
-    return `request_collateral: policyVersion ${data.policyVersion} does not match hub policy v${policy.policyVersion}`;
+    return accountTxRejected(
+      {
+        kind: 'collateral_policy_version_mismatch',
+        code: ACCOUNT_TX_REJECTION_CODES.collateralPolicyVersion,
+        message: `request_collateral: policyVersion ${data.policyVersion} does not match hub policy v${policy.policyVersion}`,
+      },
+      [],
+    );
   }
   const requiredFee = rebalanceFeeFor(policy, data.amount);
   if (data.feeAmount < requiredFee) {
-    return `request_collateral: feeAmount ${data.feeAmount} below hub policy fee ${requiredFee}`;
+    return accountTxValidationRejected(
+      `request_collateral: feeAmount ${data.feeAmount} below hub policy fee ${requiredFee}`,
+      [],
+    );
   }
   return undefined;
 };
@@ -86,7 +100,7 @@ export function handleRequestCollateral(
   const { tokenId, amount, feeTokenId, feeAmount } = accountTx.data;
 
   const validationError = validateCollateralRequest(account, accountTx.data, byLeft, currentTimestamp);
-  if (validationError) return accountTxValidationRejected(validationError, []);
+  if (validationError) return validationError;
 
   const existingRequest = account.state.requestedRebalance.get(tokenId) ?? 0n;
   if (existingRequest > 0n) {

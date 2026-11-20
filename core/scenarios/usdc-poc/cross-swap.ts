@@ -1,27 +1,32 @@
 import * as runtime from '../../runtime';
 import { deriveDelta, isLeftEntity } from '../../account/utils';
 import { requantizeRemainingSwapAtPriceForDimensions } from '../../swapbook/types';
+import { isCrossJurisdictionRouteExpired } from '../../extensions/cross-j';
 import { getCrossJurisdictionRouteRemainingAmounts } from '../../extensions/cross-j/orderbook';
 import { decodeEntitySummaries, selectLocalHubIdentity } from '../../scripts/operations/hlt/boundary/worker-boundary';
-import { decodeCommittedCrossRoutes } from '../../scripts/operations/hlt/cross/cross-boundary';
+import { decodeCommittedCrossRouteSnapshot } from '../../scripts/operations/hlt/cross/cross-boundary';
 import type { CrossJurisdictionSwapRoute } from '../../types/cross-jurisdiction';
 import { connectPocHub, verifyHubCommit } from './hub-proof';
 import { openPocAccount, userReplica, waitFor, type PocUser } from './user';
 import { targetUser } from './journey/context';
-import { requirePayoutTerms } from './journey/payout-terms';
+import { readPocPayoutTimestamp, requirePayoutTerms } from './journey/payout-terms';
 
 const sourceAmount = 1_000_000n;
 
-const selectQuote = (
+export const selectPocMakerQuote = (
   routes: CrossJurisdictionSwapRoute[],
   sourceHub: string,
   targetHub: string,
   partialLiquidity: boolean,
+  hubTimestamp: number,
+  wallTimestamp: number,
 ) => {
+  const observedAt = Math.max(hubTimestamp, wallTimestamp);
   const candidates = routes.filter(
     route =>
       (partialLiquidity ? route.orderId.startsWith('poc-mm-') : route.orderId.startsWith('mmx-')) &&
       (route.status === 'resting' || route.status === 'partially_filled') &&
+      !isCrossJurisdictionRouteExpired(route, observedAt) &&
       route.source.counterpartyEntityId === targetHub &&
       route.target.entityId === sourceHub &&
       route.source.tokenId === 1 &&
@@ -81,6 +86,73 @@ const closedProof = (route: CrossJurisdictionSwapRoute) => ({
   settledAt: route.settledAt,
 });
 
+const readCrossQuote = async (user: PocUser, sourceHub: string, apiBase: string, workDir: string, partial: boolean) => {
+  const adapter = await connectPocHub(workDir, 'H1', undefined, user.hubConnection);
+  try {
+    const target = targetUser(user, apiBase);
+    const entities = decodeEntitySummaries(await adapter.read<unknown>('entities'));
+    const targetHub = selectLocalHubIdentity(entities, adapter.runtimeId, target.jurisdiction.chainId).entityId;
+    const { routes, timestamp } = decodeCommittedCrossRouteSnapshot(await adapter.read<unknown>(`entity/${sourceHub}`));
+    return {
+      target,
+      targetHub,
+      hubTimestamp: timestamp,
+      ...selectPocMakerQuote(routes, sourceHub, targetHub, partial, timestamp, Date.now()),
+    };
+  } finally {
+    adapter.disconnect();
+  }
+};
+
+export const inspectCrossPayout = async (user: PocUser, sourceHub: string, apiBase: string, validThrough: number) => {
+  const { maker, quote, target, targetHub, hubTimestamp } = await readCrossQuote(user, sourceHub, apiBase, '', false);
+  const proof = await verifyHubCommit(target, targetHub, '');
+  const { account } = accountView(target, targetHub);
+  if (
+    account.currentFrame.stateHash !== proof.stateHash ||
+    maker.expiresAt === undefined ||
+    isCrossJurisdictionRouteExpired(maker, Math.max(hubTimestamp, Date.now()))
+  )
+    throw new Error('USDC_POC_QUOTE_OR_TARIFF_CHANGED');
+  const { fee, net, policy, backingRequired } = requirePayoutTerms(
+    account,
+    isLeftEntity(target.entityId, targetHub),
+    quote.effectiveWant,
+    readPocPayoutTimestamp(user.env.state.timestamp),
+    validThrough,
+  );
+  return {
+    makerOrderId: maker.orderId,
+    makerRouteHash: maker.routeHash,
+    priceTicks: maker.priceTicks,
+    expiresAt: maker.expiresAt,
+    hubTimestamp,
+    targetHub,
+    gross: quote.effectiveWant,
+    fee,
+    net,
+    backingRequired,
+    policyVersion: policy.policyVersion,
+    proof,
+  };
+};
+
+export const requireUnchangedPocMakerQuote = async (
+  user: PocUser,
+  sourceHub: string,
+  apiBase: string,
+  expected: Pick<Awaited<ReturnType<typeof inspectCrossPayout>>, 'makerRouteHash' | 'targetHub' | 'gross'>,
+  workDir = '',
+) => {
+  const live = await readCrossQuote(user, sourceHub, apiBase, workDir, false);
+  if (
+    live.maker.routeHash !== expected.makerRouteHash ||
+    live.targetHub !== expected.targetHub ||
+    live.quote.effectiveWant !== expected.gross
+  )
+    throw new Error('USDC_POC_QUOTE_OR_TARIFF_CHANGED');
+};
+
 export const executeCrossSwap = async (
   user: PocUser,
   sourceHub: string,
@@ -88,46 +160,69 @@ export const executeCrossSwap = async (
   workDir: string,
   partialLiquidity = false,
   expiresInMs = 120_000,
+  payoutGuard?: Readonly<{ validThrough: number; verifyBacking: (amount: bigint) => Promise<void> }>,
 ) => {
-  const adapter = await connectPocHub(workDir, 'H1', undefined, user.hubConnection);
-  try {
-    const target = targetUser(user, apiBase);
-    const targetJ = target.jurisdiction;
-    const entities = decodeEntitySummaries(await adapter.read<unknown>('entities'));
-    const targetHub = selectLocalHubIdentity(entities, adapter.runtimeId, targetJ.chainId).entityId;
-    const routes = decodeCommittedCrossRoutes(await adapter.read<unknown>(`entity/${sourceHub}`));
-    const { maker, quote, priceTicks } = selectQuote(routes, sourceHub, targetHub, partialLiquidity);
-    console.log(
-      `USDC_POC_MM_QUOTE:${maker.orderId}:source=${sourceAmount}:gross=${quote.effectiveWant}:price=${maker.priceTicks}`,
-    );
-    await openPocAccount(target, apiBase, targetHub, quote.effectiveWant);
-    await runtime.ensureGossipProfiles(user.env, [sourceHub, targetHub]);
-    const { account, view: inbound } = accountView(target, targetHub);
-    if (inbound.peerCreditLimit !== quote.effectiveWant || inbound.inCapacity < quote.effectiveWant) {
-      throw new Error('USDC_POC_TARGET_CREDIT_INVALID');
-    }
-    // A valid Cross-J fill can still leave a claim below the payout floor after the signed Hub fee.
-    requirePayoutTerms(account, isLeftEntity(target.entityId, targetHub), quote.effectiveWant);
-    const { route } = await runtime.submitCrossJurisdictionSwap(user.env, {
-      orderId: user.orderId,
-      sourceUserEntityId: user.entityId,
-      sourceHubEntityId: sourceHub,
-      targetHubEntityId: targetHub,
-      targetUserEntityId: target.entityId,
-      sourceTokenId: 1,
-      targetTokenId: 1,
-      sourceAmount,
-      targetAmount: quote.effectiveWant,
-      priceTicks,
-      expiresInMs,
-    });
-    await waitFor('cross-j-full-execution', () =>
-      Boolean(requireClosedRoute(user, route.orderId) && requireClosedRoute(target, route.orderId)),
-    );
-    return await verifySwap(user, target, sourceHub, targetHub, route, maker, workDir);
-  } finally {
-    adapter.disconnect();
+  const { maker, quote, priceTicks, target, targetHub } = await readCrossQuote(
+    user,
+    sourceHub,
+    apiBase,
+    workDir,
+    partialLiquidity,
+  );
+  console.log(
+    `USDC_POC_MM_QUOTE:${maker.orderId}:source=${sourceAmount}:gross=${quote.effectiveWant}:price=${maker.priceTicks}`,
+  );
+  await openPocAccount(target, apiBase, targetHub, quote.effectiveWant);
+  await runtime.ensureGossipProfiles(user.env, [sourceHub, targetHub]);
+  const { account, view: inbound } = accountView(target, targetHub);
+  if (inbound.peerCreditLimit !== quote.effectiveWant || inbound.inCapacity < quote.effectiveWant) {
+    throw new Error('USDC_POC_TARGET_CREDIT_INVALID');
   }
+  // A valid Cross-J fill can still leave a claim below the payout floor after the signed Hub fee.
+  const { backingRequired } = requirePayoutTerms(
+    account,
+    isLeftEntity(target.entityId, targetHub),
+    quote.effectiveWant,
+    readPocPayoutTimestamp(user.env.state.timestamp),
+    payoutGuard?.validThrough,
+  );
+  if (payoutGuard) {
+    await payoutGuard.verifyBacking(backingRequired);
+    await requireUnchangedPocMakerQuote(
+      user,
+      sourceHub,
+      apiBase,
+      {
+        makerRouteHash: maker.routeHash,
+        targetHub,
+        gross: quote.effectiveWant,
+      },
+      workDir,
+    );
+    if (Date.now() >= payoutGuard.validThrough) throw new Error('USDC_POC_CROSS_J_PAYOUT_GUARD_EXPIRED');
+  }
+  if (
+    isCrossJurisdictionRouteExpired(maker, Date.now()) ||
+    userReplica(target).state.accounts.get(targetHub)?.currentFrame.stateHash !== account.currentFrame.stateHash
+  )
+    throw new Error('USDC_POC_QUOTE_OR_TARIFF_CHANGED');
+  const { route } = await runtime.submitCrossJurisdictionSwap(user.env, {
+    orderId: user.orderId,
+    sourceUserEntityId: user.entityId,
+    sourceHubEntityId: sourceHub,
+    targetHubEntityId: targetHub,
+    targetUserEntityId: target.entityId,
+    sourceTokenId: 1,
+    targetTokenId: 1,
+    sourceAmount,
+    targetAmount: quote.effectiveWant,
+    priceTicks,
+    expiresInMs,
+  });
+  await waitFor('cross-j-full-execution', () =>
+    Boolean(requireClosedRoute(user, route.orderId) && requireClosedRoute(target, route.orderId)),
+  );
+  return await verifySwap(user, target, sourceHub, targetHub, route, maker, workDir);
 };
 
 const verifySwap = async (

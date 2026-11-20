@@ -54,10 +54,12 @@ const selectProposalWindow = (
   return [...source];
 };
 
-const validateProposalTimestamp = (timestamp: number): void => {
+export const resolveAccountProposalTimestamp = (entityTimestamp: number, previousTimestamp: number): number => {
+  const timestamp = Math.max(entityTimestamp, previousTimestamp);
   if (!Number.isSafeInteger(timestamp) || timestamp < 0) {
     throw new Error(`ACCOUNT_PROPOSAL_ENTITY_TIMESTAMP_INVALID:${String(timestamp)}`);
   }
+  return timestamp;
 };
 
 const rejectUnavailableProposal = (
@@ -127,8 +129,7 @@ export const prepareProposalAdmission = (
   // bilateral watermark — clamp to the watermark (receiver-side skew checks
   // in incoming-preflight still reject hostile peer skew).
   const previousFrameTimestamp = account.currentFrame?.timestamp ?? 0;
-  const frameTimestamp = Math.max(entityFrameTimestamp, previousFrameTimestamp);
-  validateProposalTimestamp(frameTimestamp);
+  const frameTimestamp = resolveAccountProposalTimestamp(entityFrameTimestamp, previousFrameTimestamp);
   return {
     ok: true,
     myEntityId,

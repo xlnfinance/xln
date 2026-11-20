@@ -2,6 +2,7 @@ import { proxyCreditOfficer } from '../../credit-officer/proxy';
 import { isAbsolute } from 'node:path';
 import type { createExternalWalletApi } from '../../../api/public/external-wallet-api';
 import { handleGossipProfilesSendReady } from '../../../api/server/control/gossip-send-ready';
+import { handleEvmAttemptInspection } from '../../../api/server/control/runtime/evm-attempts';
 import { handleGossipProfileVerification } from '../../../api/server/control/gossip/profile-verification';
 import { requiresLocalNodeOperator } from '../../../api/server/control/node-http-access';
 import type { StackManagerController } from '../../../api/server/control/stack-manager';
@@ -318,13 +319,19 @@ type HubControlDependencies = {
   isBootstrapComplete: () => boolean;
 };
 
+const readHubControl = (request: Request, url: URL, env: RuntimeReplica): Promise<Response> | Response | null => {
+  if (url.pathname === '/api/control/evm-attempts') return handleEvmAttemptInspection(request, url, env);
+  if (url.pathname === '/api/control/performance/op-counters') {
+    return new Response(safeStringify({ counters: snapshotOpCounters() }), { headers: JSON_HEADERS });
+  }
+  return null;
+};
+
 export const createHubControlRequestHandler = (
   dependencies: HubControlDependencies,
 ): ((request: Request, url: URL) => Promise<Response | null>) =>
   async (request, url) => {
-    if (request.method === 'GET' && url.pathname === '/api/control/performance/op-counters') {
-      return new Response(safeStringify({ counters: snapshotOpCounters() }), { headers: JSON_HEADERS });
-    }
+    if (request.method === 'GET') return readHubControl(request, url, dependencies.state);
     if (request.method !== 'POST') return null;
     if (BOOTSTRAP_FENCED_CONTROL_PATHS.has(url.pathname) && !dependencies.isBootstrapComplete()) {
       return refuseQuiesceDuringBootstrap();

@@ -1,5 +1,6 @@
 import { applyNumberedRegistrationReplacement } from '../registration/numbered/numbered-registration-replacement';
 import { applyRecordJPreparedTransaction } from '../j-submit/prepared-transaction';
+import { applyEvmWalletApproval } from '../j-submit/evm/wallet-approval';
 import { engineAccountValueHash } from '../../entity/state/engine-leaf/leaf-cache';
 import { buildDefaultEntitySwapPairs, getTokenIdsForJurisdiction } from '../../account/utils';
 import { applyRuntimeStorageChanges } from '../observability/env-events';
@@ -149,6 +150,10 @@ export const applyRuntimeTx = async (
     return applyRetryJSubmitRuntimeTx(env, runtimeTx);
   }
   if (runtimeTx.type === 'recordJPreparedTransaction' || runtimeTx.type === 'replaceJPreparedTransaction') return applyRecordJPreparedTransaction(env, runtimeTx);
+  if (runtimeTx.type === 'recordEvmWalletApproval') {
+    applyEvmWalletApproval(env, runtimeTx);
+    return [];
+  }
   if (runtimeTx.type === 'recordJSubmitResult') {
     applyRecordJSubmitResultRuntimeTx(env, runtimeTx);
     return [];

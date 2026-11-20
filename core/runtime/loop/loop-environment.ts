@@ -8,7 +8,7 @@ import {
 import { resolveRuntimeMinFrameDelayMs } from '../config/frame-cadence.ts';
 import { safeStringify } from '../../protocol/serialization';
 import { ensureRuntimeInfrastructure } from '../envelope/replica-envelope.ts';
-import type { RuntimeReplica, RuntimeInput } from '../types.ts';
+import type { RuntimeReplica, RuntimeFrameCommitObservation } from '../types.ts';
 import {
   getRuntimeCommandReadiness,
   inferRuntimeLifecyclePhase,
@@ -112,7 +112,7 @@ export const registerRuntimePublishedCallback = (
 
 export const registerRuntimeFrameCommitCallback = (
   env: RuntimeReplica,
-  callback: (frame: { height: number; runtimeInput: RuntimeInput }) => void,
+  callback: (frame: RuntimeFrameCommitObservation) => void,
 ): (() => void) => {
   const state = ensureRuntimeInfrastructure(env);
   state.runtimeFrameCommitCallbacks ??= new Set();

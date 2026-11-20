@@ -19,14 +19,14 @@ test('Cross-J payout pricing includes the signed Hub fee at the exact minimum', 
     [1, { right: announcedRebalancePolicy(undefined, terms) }],
   ]);
 
-  expect(() => requirePayoutTerms(account, true, 950_000n)).toThrow('net=849905');
-  expect(() => requirePayoutTerms(account, true, 950_094n)).toThrow('net=849999');
-  expect(requirePayoutTerms(account, true, 950_095n).net).toBe(850_000n);
-  expect(requirePayoutTerms(account, true, 999_900n)).toMatchObject({ fee: 100_099n, net: 899_801n });
-  expect(() => requirePayoutTerms(account, false, 999_900n)).toThrow('USDC_POC_SIGNED_TARIFF_MISSING');
+  expect(() => requirePayoutTerms(account, true, 950_000n, 1)).toThrow('net=849905');
+  expect(() => requirePayoutTerms(account, true, 950_094n, 1)).toThrow('net=849999');
+  expect(requirePayoutTerms(account, true, 950_095n, 1).net).toBe(850_000n);
+  expect(requirePayoutTerms(account, true, 999_900n, 1)).toMatchObject({ fee: 100_099n, net: 899_801n });
+  expect(() => requirePayoutTerms(account, false, 999_900n, 1)).toThrow('USDC_POC_SIGNED_TARIFF_MISSING');
 });
 
-test('the committed Account frame selects the active tariff on the Hub side', () => {
+test('pricing rejects a signed increase effective at the next Account frame or during the authorized payout window', () => {
   const account = makeAccount(entity('22'), entity('11'));
   const active = announcedRebalancePolicy(undefined, terms);
   const scheduled = announcedRebalancePolicy(active, {
@@ -40,7 +40,9 @@ test('the committed Account frame selects the active tariff on the Hub side', ()
   ]);
 
   account.currentFrame.timestamp = scheduled.effectiveAt - 1;
-  expect(requirePayoutTerms(account, false, 999_900n).policy.policyVersion).toBe(1);
-  account.currentFrame.timestamp = scheduled.effectiveAt;
-  expect(() => requirePayoutTerms(account, false, 999_900n)).toThrow('net=799801');
+  expect(requirePayoutTerms(account, false, 999_900n, scheduled.effectiveAt - 1).policy.policyVersion).toBe(1);
+  expect(() => requirePayoutTerms(account, false, 999_900n, scheduled.effectiveAt)).toThrow('net=799801');
+  expect(() => requirePayoutTerms(account, false, 999_900n, scheduled.effectiveAt - 1, scheduled.effectiveAt)).toThrow(
+    'net=799801',
+  );
 });

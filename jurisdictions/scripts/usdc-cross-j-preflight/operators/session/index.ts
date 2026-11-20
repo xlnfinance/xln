@@ -31,9 +31,8 @@ process.once('SIGTERM', stop);
 process.once('SIGINT', stop);
 try {
   await assertCommittedSessionStores(config);
-  const catalog = decodeJurisdictionsData(
-    JSON.parse(readFileSync(join(config.directory, 'jurisdictions.json'), 'utf8')),
-  );
+  const originalCatalogPath = join(config.directory, 'jurisdictions.json');
+  const catalog = decodeJurisdictionsData(JSON.parse(readFileSync(originalCatalogPath, 'utf8')));
   const runs = join(config.directory, 'sessions');
   mkdirSync(runs, { recursive: true, mode: 0o700 });
   const runDirectory = mkdtempSync(join(runs, 'restore-'));
@@ -51,6 +50,7 @@ try {
     XLN_ACCOUNT_EXECUTION_WORKERS: '1',
     XLN_LOG_LEVEL: 'info',
     XLN_STORAGE_SYNC_WRITES: '1',
+    ...(config.authorityFile ? { XLN_EVM_FEE_CEILING_WEI: '0' } : {}),
     XLN_J_WATCHER_RPC_MAX_BLOCKS_PER_POLL: process.env['XLN_J_WATCHER_RPC_MAX_BLOCKS_PER_POLL'],
     XLN_J_WATCHER_RPC_MAX_BLOCKS_PER_POLL_11155111: process.env['XLN_J_WATCHER_RPC_MAX_BLOCKS_PER_POLL_11155111'],
     XLN_J_WATCHER_RPC_MAX_BLOCKS_PER_POLL_421614: process.env['XLN_J_WATCHER_RPC_MAX_BLOCKS_PER_POLL_421614'],
@@ -65,9 +65,15 @@ try {
       runDirectory,
       'gateway',
       'jurisdictions/scripts/usdc-cross-j-preflight/operators/gateway.ts',
-      ['--api-base', config.apiBase, ...(config.authorityFile ? ['--authority-file', config.authorityFile] : [])],
+      [
+        '--api-base',
+        config.apiBase,
+        ...(config.authorityFile ? ['--authority-file', config.authorityFile] : []),
+        ...(config.runId ? ['--run-id', config.runId] : []),
+      ],
       {
         ...baseEnv,
+        XLN_JURISDICTIONS_PATH: originalCatalogPath,
         ETH_SEPOLIA_RPC: process.env['ETH_SEPOLIA_RPC'],
         ARB_SEPOLIA_RPC: process.env['ARB_SEPOLIA_RPC'],
         POC_RUNTIME_11155111_RPC: process.env['POC_RUNTIME_11155111_RPC'],

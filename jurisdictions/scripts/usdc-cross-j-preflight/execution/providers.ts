@@ -30,6 +30,12 @@ export const connectExecutionProviders = (apiBase: string, chainId: number): Exe
   historical: preflightProvider(historicalRpc(apiBase, chainId), chainId),
 });
 
+export const connectGatewayObservation = (apiBase: string, chainId: number): JsonRpcProvider => {
+  const chain = networks.find(value => value.chainId === chainId);
+  if (!chain) throw new Error('USDC_EXECUTION_CHAIN_UNSUPPORTED');
+  return preflightProvider(apiBase + '/current' + chain.path, chainId, true);
+};
+
 /** An archive may trail the live RPC. Wait for a fixed observed fact, never a
  * moving live head, and never retry another endpoint after a read failure. */
 export const waitForHistory = async (label: string, ready: () => Promise<boolean>): Promise<void> => {

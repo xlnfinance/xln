@@ -1,4 +1,5 @@
 import { validateEvmFeeAuthorization } from '../j-submit/evm/evm-fee-authorization';
+import { decodeEvmWalletApproval } from '../j-submit/evm/wallet-approval';
 import { validateDisputeReferences } from '../../jurisdiction/adapter/events/dispute/reference-state';
 import { validateRuntimeAdapterCommandMarker } from '../command/frontier';
 import { normalizeJurisdictionImportRequest } from '../j-submit/jurisdiction-import-request';
@@ -314,9 +315,13 @@ const validateRuntimeTxData = (type: string, value: unknown, code: string): void
     const data = requireBoundaryRecord(value, code);
     requireExactBoundaryKeys(data, ['jurisdictionName', 'attemptId', 'rawTransaction'], ['feeAuthorization'], `${code}_FIELDS`);
     if (data['feeAuthorization'] !== undefined) validateEvmFeeAuthorization(data['feeAuthorization']);
-    for (const field of ['jurisdictionName', 'attemptId', 'rawTransaction']) requireString(data[field], `${code}_${field}`);
-  }
-  else if (type === 'recordJSubmitResult') validateJSubmit(value, code, true);
+    for (const field of ['jurisdictionName', 'attemptId', 'rawTransaction'])
+      requireString(data[field], `${code}_${field}`);
+  } else if (type === 'recordEvmWalletApproval') {
+    const data = requireBoundaryRecord(value, code);
+    requireExactBoundaryKeys(data, ['rawTransaction'], [], `${code}_FIELDS`);
+    decodeEvmWalletApproval(data['rawTransaction'], code);
+  } else if (type === 'recordJSubmitResult') validateJSubmit(value, code, true);
   else if (type === 'retryEntityProviderAction') validateEntityProviderSubmit(value, code, false);
   else if (type === 'recordEntityProviderActionSubmitResult') validateEntityProviderSubmit(value, code, true);
   else if (type === 'recordGovernanceJSubmitResult') validateGovernanceSubmitResult(value, code);

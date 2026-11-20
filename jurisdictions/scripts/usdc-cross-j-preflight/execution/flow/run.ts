@@ -1,4 +1,3 @@
-import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Contract, JsonRpcProvider } from 'ethers';
 import * as runtime from '../../../../../core/runtime';
@@ -10,16 +9,13 @@ import {
   waitFor,
   type PocUser,
 } from '../../../../../core/scenarios/usdc-poc/user';
-import { runOrderId, targetUser } from '../../../../../core/scenarios/usdc-poc/journey/context';
+import { runOrderId } from '../../../../../core/scenarios/usdc-poc/journey/context';
 import { ensureSourceCollateral } from '../../../../../core/scenarios/usdc-poc/journey/ingress';
 import { executeCrossSwap, resumeCrossSwap } from '../../../../../core/scenarios/usdc-poc/cross-swap';
-import { executeExternalPayout } from '../../../../../core/scenarios/usdc-poc/external-payout';
-import { resumePayout } from '../../../../../core/scenarios/usdc-poc/recovery/payout';
 import { runtimeProof } from '../../../../../core/scenarios/usdc-poc/recovery/evidence';
 import { drainJWatcherBacklog } from '../../../../../core/jurisdiction/adapter/operations/backlog-drain';
 import { deriveRuntimeAdapterCapabilityToken } from '../../../../../core/api/runtime-adapter/security/auth';
-import { safeStringify } from '../../../../../core/protocol/serialization';
-import { readExistingIdentities, readVaultSeed } from '../../identities';
+import { readVaultSeed } from '../../identities';
 import { acquireStoreOwnership } from '../../operators/session/stores';
 import { assertRestoredSession } from '../../operators/session/inspect';
 import {
@@ -27,27 +23,26 @@ import {
   readAuthority,
   requireCurrentAuthority,
   payerSlots,
+  verifyExecutionBindings,
   type ExecutionAuthority,
 } from '../authority';
 import { verifyExecutionChain, verifyConsumedPayerSlots } from '../submission';
 import { readNonceReceipt } from '../nonce-receipt';
-import { ensureSourceApproval } from './approval';
-import { reportCompletedRun } from './receipt-report';
+import { reconcileSourceApproval, submitSourceApproval } from './approval';
+import { reportCompletedRun, reportStoppedRun } from './receipt-report';
 import type { ExecutionConfig } from '../config';
-import { connectExecutionProviders, historicalRpc, type ExecutionProviders } from '../providers';
-
-const verifyBindings = (config: ExecutionConfig, authority: ExecutionAuthority): void => {
-  const identities = readExistingIdentities(config.directory);
-  if (authority.apiBase !== config.apiBase) throw new Error('USDC_EXECUTION_API_BINDING_MISMATCH');
-  for (const chain of authority.chains)
-    for (const role of ['user', 'hub'] as const) {
-      const own = identities.find(value => value.role === role)!.chains.find(value => value.chainId === chain.chainId)!;
-      const entity = role === 'user' ? chain.userEntity : chain.hubEntity;
-      const signer = role === 'user' ? chain.userSigner : chain.hubSigner;
-      if (own.entityId !== entity || own.signerId !== signer)
-        throw new Error('USDC_EXECUTION_IDENTITY_BINDING_MISMATCH');
-    }
-};
+import { connectExecutionProviders, type ExecutionProviders } from '../providers';
+import { preflightFreshRun, requireTargetBacking, refreshApprovalBacking } from './preflight';
+import { finishPayout } from './payout';
+import {
+  reasonText,
+  runReportEvidence,
+  throwAfter,
+  withCleanup,
+  writeReport,
+  type FreshPreflight,
+  type RecordApprovalAttempt,
+} from './run-report';
 
 const verifyPayerBudgets = async (
   authority: ExecutionAuthority,
@@ -77,7 +72,7 @@ const openUser = async (config: ExecutionConfig, authority: ExecutionAuthority):
     wsUrl: config.hubUrl,
     runtimeId: authority.chains[0]!.hubSigner,
     get authKey() {
-      return deriveRuntimeAdapterCapabilityToken(seed, 'inspect', Math.min(authority.expiresAt, Date.now() + 600_000), {
+      return deriveRuntimeAdapterCapabilityToken(seed, 'inspect', Date.now() + 600_000, {
         audience: 'poc-usdc',
       });
     },
@@ -159,17 +154,40 @@ const finishFinancialFlow = async (
   authority: ExecutionAuthority,
   runIndex: number,
   providers: readonly ExecutionProviders[],
-): Promise<void> => {
+  requireAuthority: () => void,
+  preflight: FreshPreflight | null,
+  recordApproval: RecordApprovalAttempt,
+) => {
   const source = authority.chains[0]!,
     targetChain = authority.chains[1]!;
   const exit = targetChain.payers.find(payer => payer.role === 'target-user')!;
   if (await readNonceReceipt(providers[1]!, targetChain, exit, exit.firstNonce + runIndex)) return;
   await openPocAccount(user, authority.apiBase, source.hubEntity);
+  const guard = {
+    validThrough: authority.expiresAt,
+    async verifyBacking(amount: bigint) {
+      await requireTargetBacking(targetChain, providers[1]!, amount);
+      requireAuthority();
+    },
+  };
   let route = userReplica(user).state.crossJurisdictionSwaps?.get(user.orderId);
   if (!route) {
-    await ensureSourceApproval(user, authority, providers[0]!, source, runIndex);
+    if (preflight) {
+      let confirmedPreflight = preflight;
+      await submitSourceApproval(
+        user,
+        authority,
+        providers[0]!.current,
+        runIndex,
+        async () => {
+          confirmedPreflight = await refreshApprovalBacking(user, authority, providers[1]!, preflight);
+          requireAuthority();
+        },
+        hash => recordApproval(hash, confirmedPreflight),
+      );
+    }
     await ensureSourceCollateral(user, source.hubEntity, source.token);
-    await executeCrossSwap(user, source.hubEntity, authority.apiBase, '');
+    await executeCrossSwap(user, source.hubEntity, authority.apiBase, '', false, 120_000, guard);
     route = userReplica(user).state.crossJurisdictionSwaps?.get(user.orderId);
   } else if (route.status !== 'settled') {
     if (route.status === 'cancelled' || route.status === 'expired')
@@ -177,42 +195,60 @@ const finishFinancialFlow = async (
     await resumeCrossSwap(user, source.hubEntity, authority.apiBase, '');
   }
   if (!route) throw new Error('USDC_EXECUTION_ROUTE_MISSING');
-  await finishPayout(user, authority, runIndex, providers[1]!);
+  await finishPayout(user, authority, runIndex, providers[1]!, guard);
 };
 
-const finishPayout = async (
+const executeAndReport = async (
   user: PocUser,
+  config: ExecutionConfig,
   authority: ExecutionAuthority,
   runIndex: number,
-  provider: ExecutionProviders,
-): Promise<void> => {
-  const chain = authority.chains[1]!;
-  const target = targetUser(user, authority.apiBase);
-  const account = userReplica(target).state.accounts.get(chain.hubEntity);
-  if (!account) throw new Error('USDC_EXECUTION_TARGET_ACCOUNT_MISSING');
-  const coverStarted =
-    account.state.requestedRebalanceFeeState.size > 0 ||
-    account.state.requestedRebalance.size > 0 ||
-    account.state.deltas.get(1)!.collateral > 0n ||
-    Boolean(account.state.settlementWorkspace) ||
-    (userReplica(target).state.settlementContinuations?.size ?? 0) > 0 ||
-    Boolean(userReplica(target).state.jBatchState?.sentBatch);
-  if (!coverStarted) {
-    const swap = await resumeCrossSwap(user, authority.chains[0]!.hubEntity, authority.apiBase, '');
-    await executeExternalPayout(user, authority.chains[0]!.hubEntity, swap, authority.apiBase, '');
-    return;
-  }
-  const hub = chain.payers.find(payer => payer.role === 'target-hub')!;
-  const cover = await readNonceReceipt(provider, chain, hub, hub.firstNonce + runIndex);
-  const { targetContracts } = await import('../../../../../core/scenarios/usdc-poc/target-evidence');
-  const contracts = await targetContracts(target, historicalRpc(authority.apiBase, chain.chainId));
+  providers: readonly ExecutionProviders[],
+  requireAuthority: () => void,
+  observeRestored?: (user: PocUser) => void,
+) => {
+  const evidence = runReportEvidence(config, authority);
+  let preflight: FreshPreflight | null = null;
   try {
-    const baseline = cover
-      ? await contracts.token.balanceOf(target.signerId, { blockTag: cover.receipt.blockNumber - 1 })
-      : await contracts.token.balanceOf(target.signerId);
-    await resumePayout(user, authority.apiBase, '', baseline);
-  } finally {
-    contracts.provider.destroy();
+    const restored = runtimeProof(user);
+    await requirePreviousRun(user, authority, runIndex, providers[1]!);
+    await requireRunIdentity(user, authority, runIndex, providers[0]!);
+    await requireSourcePrincipal(user, authority, providers[0]!.current);
+    if (observeRestored) observeRestored(user);
+    await activateUser(user, config);
+    const approved = await reconcileSourceApproval(authority, providers[0]!, runIndex, user.env);
+    if (!approved) preflight = await preflightFreshRun(user, authority, providers, runIndex);
+    requireAuthority();
+    await finishFinancialFlow(
+      user,
+      authority,
+      runIndex,
+      providers,
+      requireAuthority,
+      preflight,
+      evidence.recordApproval,
+    );
+    const result = await reportCompletedRun(user, authority, runIndex, providers[0]!, providers[1]!);
+    writeReport(config.output, {
+      ...result,
+      ...evidence.binding,
+      restored,
+      runtime: runtimeProof(user),
+      preflight: evidence.preflightFor(result.ingress.receipts[0]!.hash),
+    });
+    console.log(`USDC_EXECUTION_RUN_COMPLETE:${config.runId}:paid=${result.paid}`);
+  } catch (error) {
+    await throwAfter(error, async () => {
+      const progress = await reportStoppedRun(user, authority, runIndex, providers);
+      const approval = progress.slots[0]?.hash;
+      writeReport(config.output, {
+        ...evidence.binding,
+        ...progress,
+        status: 'stopped',
+        reason: reasonText(error),
+        preflight: approval ? (evidence.preflightFor(approval) ?? preflight) : preflight,
+      });
+    });
   }
 };
 
@@ -220,41 +256,35 @@ const finishPayout = async (
  * Observers are ephemeral; Runtime WAL and chain evidence still decide recovery. */
 export const executeRun = async (config: ExecutionConfig, observeRestored?: (user: PocUser) => void): Promise<void> => {
   const authority = readAuthority(config.authorityPath);
-  requireCurrentAuthority(authority, join(config.directory, 'jurisdictions.json'));
+  const requireAuthority = () => requireCurrentAuthority(authority, join(config.directory, 'jurisdictions.json'));
+  requireAuthority();
   const runIndex = authority.runIds.indexOf(config.runId);
   if (runIndex < 0) throw new Error('USDC_EXECUTION_RUN_NOT_AUTHORIZED');
-  verifyBindings(config, authority);
+  verifyExecutionBindings(config.directory, config.apiBase, authority);
   const release = acquireStoreOwnership([['user', config.store]]);
   const providers = authority.chains.map(chain => connectExecutionProviders(config.apiBase, chain.chainId));
-  try {
-    await verifyPayerBudgets(authority, providers);
-    const user = await openUser(config, authority);
-    try {
-      const restored = runtimeProof(user);
-      await requirePreviousRun(user, authority, runIndex, providers[1]!);
-      await requireRunIdentity(user, authority, runIndex, providers[0]!);
-      await requireSourcePrincipal(user, authority, providers[0]!.current);
-      if (observeRestored) observeRestored(user);
-      await activateUser(user, config);
-      await finishFinancialFlow(user, authority, runIndex, providers);
-      const result = await reportCompletedRun(user, authority, runIndex, providers[0]!, providers[1]!);
-      writeFileSync(
-        config.output,
-        safeStringify(
-          { ...result, restored, authorityDigest: authorityDigest(authority), runtime: runtimeProof(user) },
-          2,
-        ),
-        { mode: 0o600, flag: 'wx' },
+  const priorDeadline = process.env['USDC_POC_STAGE_DEADLINE_MS'];
+  process.env['USDC_POC_STAGE_DEADLINE_MS'] = String(authority.expiresAt);
+  await withCleanup(
+    async () => {
+      await verifyPayerBudgets(authority, providers);
+      const user = await openUser(config, authority);
+      // Keep the PoC's committed user state inspectable after any interruption.
+      // Storage cadence is host policy, outside the replayed frame state.
+      user.env.runtimeConfig.storage = { ...user.env.runtimeConfig.storage, materializePeriodFrames: 1 };
+      await withCleanup(
+        () => executeAndReport(user, config, authority, runIndex, providers, requireAuthority, observeRestored),
+        () => closeUser(user),
       );
-      console.log(`USDC_EXECUTION_RUN_COMPLETE:${config.runId}:paid=${result.paid}`);
-    } finally {
-      await closeUser(user);
-    }
-  } finally {
-    for (const provider of providers) {
-      provider.current.destroy();
-      provider.historical.destroy();
-    }
-    release();
-  }
+    },
+    () => {
+      if (priorDeadline === undefined) delete process.env['USDC_POC_STAGE_DEADLINE_MS'];
+      else process.env['USDC_POC_STAGE_DEADLINE_MS'] = priorDeadline;
+      for (const provider of providers) {
+        provider.current.destroy();
+        provider.historical.destroy();
+      }
+      release();
+    },
+  );
 };

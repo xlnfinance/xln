@@ -86,9 +86,12 @@ export const submitAuthorizedWire = async (
   providers: ExecutionProviders,
   chain: ChainAuthority,
   raw: string,
+  runIndex?: number,
 ): Promise<string> => {
   requireCurrentAuthority(authority, catalogPath);
   const validated = validateAuthorizedWire(authority, chain, raw);
+  if (runIndex !== undefined && validated.runIndex !== runIndex)
+    throw new Error('USDC_EXECUTION_GATEWAY_RUN_SLOT_MISMATCH');
   await verifyExecutionChain(providers, chain);
   const provider = providers.current;
   if (validated.batch) await verifyBatchHanko(provider, chain, validated.batch);
@@ -97,11 +100,15 @@ export const submitAuthorizedWire = async (
   if (existing) return hash;
   const confirmedNonce = await provider.getTransactionCount(validated.payer.address, 'latest');
   if (confirmedNonce > validated.transaction.nonce) throw new Error('USDC_EXECUTION_NONCE_ALREADY_CONSUMED');
+  const pendingNonce = await provider.getTransactionCount(validated.payer.address, 'pending');
+  if (confirmedNonce !== validated.transaction.nonce || pendingNonce !== confirmedNonce)
+    throw new Error('USDC_EXECUTION_NONCE_UNRESOLVED');
   if (
     (await provider.getBalance(validated.payer.address)) <
     validated.transaction.gasLimit * validated.transaction.maxFeePerGas!
   )
     throw new Error('USDC_EXECUTION_PAYER_NATIVE_INSUFFICIENT');
+  requireCurrentAuthority(authority, catalogPath);
   const accepted = await broadcastPreparedRpcTransaction({ mode: 'rpc', chainId: chain.chainId }, provider, raw);
   if (accepted !== hash) throw new Error('USDC_EXECUTION_BROADCAST_HASH_MISMATCH');
   return accepted;

@@ -576,6 +576,10 @@ const submitPreparedJBatch = async (adapter: JAdapter, raw: string, siblings: st
     if (!receipt) {
       const pending = adapter.mode === 'tron' ? null : await readPreparedWire(() => adapter.provider.getTransaction(txHash));
       if (pending) return notMined;
+      // A fixed-fee host can observe previously prepared siblings, but it
+      // cannot broadcast a different wire under the original nonce grant.
+      if (adapter.mode !== 'tron' && adapter.evmFeeCeilingWei === '0' && siblings.length > 0)
+        return preparedWireFailure(txHash, 'EVM_REPLACEMENT_NOT_AUTHORIZED');
       const hash = await adapter.broadcastPreparedTransaction(raw);
       if (hash.toLowerCase() !== txHash.toLowerCase()) return preparedWireFailure(txHash, 'J_PREPARED_BROADCAST_HASH_MISMATCH');
       // This runs under the Runtime frame writer: read once, never wait for

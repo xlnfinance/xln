@@ -374,6 +374,42 @@ test('market age alone does not replace a sufficiently priced transaction', asyn
   expect(queued[0]).toMatchObject({ type: 'recordJSubmitResult', data: { outcome: 'transientFailure' } });
 });
 
+test('a fixed-fee host submits only the original wire and observes previously signed siblings', async () => {
+  const sent: string[] = [];
+  const { env, jOutbox, raw } = await preparedAttempt(
+    {
+      getTransactionReceipt: async () => null,
+      getTransaction: async () => null,
+    },
+    {
+      evmFeeCeilingWei: '0',
+      broadcastPreparedTransaction: async (wire: string) => {
+        sent.push(wire);
+        return ethers.keccak256(wire);
+      },
+    },
+  );
+  env.state.timestamp += 180_000;
+  const [retry] = await submit(env, jOutbox);
+  expect(retry).toMatchObject({ type: 'recordJSubmitResult', data: { outcome: 'transientFailure' } });
+  expect(sent).toEqual([raw]);
+
+  const batch = jOutbox[0]!.jTxs[0]!;
+  if (batch.type !== 'batch' || !batch.data.runtimeSubmitAttempt) throw new Error('prepared fixture missing');
+  const bumped = ethers.Transaction.from(raw);
+  bumped.signature = null;
+  bumped.maxFeePerGas = 4n;
+  bumped.maxPriorityFeePerGas = 2n;
+  batch.data.runtimeSubmitAttempt.competingTransactions = [raw];
+  batch.data.runtimeSubmitAttempt.rawTransaction = await payer.signTransaction(bumped);
+  const [blocked] = await submit(env, jOutbox);
+  expect(blocked).toMatchObject({
+    type: 'recordJSubmitResult',
+    data: { outcome: 'terminalFailure', message: 'EVM_REPLACEMENT_NOT_AUTHORIZED' },
+  });
+  expect(sent).toEqual([raw]);
+});
+
 test('successive fee bumps retain original and intermediate hashes in the current WAL schema', async () => {
   const { env, jOutbox, attempt, raw } = await canonicalAttempt();
   env.state.timestamp += 180000;

@@ -15,16 +15,21 @@ export const assertTypeScriptStorageNamespaces = async (db: RuntimeDbLike): Prom
   }
 };
 
-/** Preserve the original frame's hash domain; never strip native metadata and
- * then certify the surviving TS projection as an equivalent recovery source.
- */
-export const assertTypeScriptStorageFrame = (frame: RuntimeFrame): void => {
-  if (frame.accountAuthorityCheckpoints === undefined) return;
+export const assertStorageFrameHash = (frame: RuntimeFrame): string => {
   const expected = computeStorageFrameHash(frame);
   if (frame.frameHash !== expected) {
     throw new Error(
       `STORAGE_VERIFY_FRAME_HASH_MISMATCH: height=${frame.height} expected=${expected} actual=${frame.frameHash ?? 'none'}`,
     );
   }
+  return expected;
+};
+
+/** Preserve the original frame's hash domain; never strip native metadata and
+ * then certify the surviving TS projection as an equivalent recovery source.
+ */
+export const assertTypeScriptStorageFrame = (frame: RuntimeFrame): void => {
+  if (frame.accountAuthorityCheckpoints === undefined) return;
+  assertStorageFrameHash(frame);
   throw new Error(`STORAGE_NATIVE_AUTHORITY_RETIRED:frame=${frame.height}:offline-migration-required`);
 };

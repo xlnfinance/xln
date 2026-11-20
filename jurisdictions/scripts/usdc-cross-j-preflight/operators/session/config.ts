@@ -1,11 +1,11 @@
 import { realpathSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { isLoopbackUrl } from '../../../../../core/network/p2p/loopback-url';
 import { readExistingIdentities } from '../../identities';
 
 export const roles = ['hub', 'mm', 'user'] as const;
 export type Role = (typeof roles)[number];
-export type SessionConfig = {
+export type SessionConfig<Store = string> = {
   directory: string;
   apiBase: string;
   hubPort: number;
@@ -15,7 +15,8 @@ export type SessionConfig = {
   operatorsOnly: boolean;
   hubOnly?: boolean;
   authorityFile: string | null;
-  stores: Record<Role, string>;
+  runId?: string;
+  stores: Record<Role, Store>;
 };
 
 const values = [
@@ -27,9 +28,12 @@ const values = [
   '--mm-store',
   '--user-store',
   '--authority-file',
+  '--run-id',
   '--startup-timeout-ms',
 ];
-export const readSessionConfig = (args: readonly string[]): SessionConfig => {
+export function readSessionConfig(args: readonly string[]): SessionConfig;
+export function readSessionConfig(args: readonly string[], inspectOnly: true): SessionConfig<string | null>;
+export function readSessionConfig(args: readonly string[], inspectOnly = false): SessionConfig<string | null> {
   const options = new Map<string, string>();
   for (let index = 0; index < args.length; index++) {
     const key = args[index]!;
@@ -46,6 +50,9 @@ export const readSessionConfig = (args: readonly string[]): SessionConfig => {
   const hubOnly = options.has('--hub-only');
   if (hubOnly && (options.has('--external-gateway') || options.has('--authority-file')))
     throw new Error('USDC_SESSION_HUB_ONLY_REQUIRES_MANAGED_READ_ONLY_GATEWAY');
+  const runId = options.get('--run-id');
+  if (runId && (!options.has('--authority-file') || options.has('--external-gateway')))
+    throw new Error('USDC_SESSION_RUN_ID_REQUIRES_OWNED_AUTHORITY');
   const directory = realpathSync(resolve(options.get('--directory') ?? '.logs/ts-usdc-cross-j-poc/public'));
   const identities = readExistingIdentities(directory);
   if (new Set(identities.flatMap(role => role.chains.map(chain => chain.entityId))).size !== 6)
@@ -84,24 +91,47 @@ export const readSessionConfig = (args: readonly string[]): SessionConfig => {
     operatorsOnly: options.has('--operators-only'),
     hubOnly,
     authorityFile: options.has('--authority-file') ? realpathSync(resolve(options.get('--authority-file')!)) : null,
+    ...(runId ? { runId } : {}),
     stores: {
-      hub: storePath(directory, 'hub', options.get('--hub-store')),
-      mm: storePath(directory, 'mm', options.get('--mm-store')),
-      user: storePath(directory, 'user', options.get('--user-store')),
+      hub: storePath(directory, 'hub', options.get('--hub-store'), inspectOnly),
+      mm: storePath(directory, 'mm', options.get('--mm-store'), inspectOnly),
+      user: storePath(directory, 'user', options.get('--user-store'), inspectOnly),
     },
   };
-};
+}
 
 export const sessionRoles = (config: SessionConfig): readonly Role[] =>
   config.hubOnly ? ['hub'] : config.operatorsOnly ? ['hub', 'mm'] : roles;
 
-const storePath = (directory: string, role: Role, value: string | undefined): string => {
+const storePath = (directory: string, role: Role, value: string | undefined, inspectOnly: boolean): string | null => {
   if (!value) throw new Error(`USDC_SESSION_STORE_REQUIRED:${role}`);
   const vaultRoot = realpathSync(join(directory, role));
-  const store = realpathSync(resolve(value));
+  const requested = resolve(value);
+  let store: string;
+  try {
+    store = realpathSync(requested);
+  } catch (cause) {
+    if (!inspectOnly || !isMissingStorePath(cause)) throw cause;
+    const child = relative(vaultRoot, resolveMissingPath(requested));
+    if (child.startsWith('..') || child.startsWith('/')) throw new Error(`USDC_SESSION_STORE_OUTSIDE_ROLE:${role}`);
+    return null;
+  }
   const child = relative(vaultRoot, store);
   if (child.startsWith('..') || child.startsWith('/')) throw new Error(`USDC_SESSION_STORE_OUTSIDE_ROLE:${role}`);
   return store;
+};
+
+const isMissingStorePath = (error: unknown): boolean =>
+  error instanceof Error && 'code' in error && error.code === 'ENOENT';
+
+const resolveMissingPath = (path: string): string => {
+  try {
+    return realpathSync(path);
+  } catch (error) {
+    const parent = dirname(path);
+    if (!isMissingStorePath(error) || parent === path) throw error;
+    return join(resolveMissingPath(parent), basename(path));
+  }
 };
 
 export const sessionArgs = (config: SessionConfig): string[] => [
@@ -120,4 +150,5 @@ export const sessionArgs = (config: SessionConfig): string[] => [
   ...(config.operatorsOnly ? ['--operators-only'] : []),
   ...(config.hubOnly ? ['--hub-only'] : []),
   ...(config.authorityFile ? ['--authority-file', config.authorityFile] : []),
+  ...(config.runId ? ['--run-id', config.runId] : []),
 ];

@@ -107,7 +107,7 @@ export const prepareEvmFeeReplacement = async (
   batch: Batch,
 ): Promise<RuntimeTx | null> => {
   const attempt = batch.data.runtimeSubmitAttempt;
-  if (!attempt?.rawTransaction || adapter.mode === 'tron') return null;
+  if (!attempt?.rawTransaction || adapter.mode === 'tron' || adapter.evmFeeCeilingWei === '0') return null;
   const now = env.state.timestamp;
   const last = attempt.feeBumpedAt ?? attempt.attemptedAt;
   const deadline = batchResponseDeadline(env, batch);

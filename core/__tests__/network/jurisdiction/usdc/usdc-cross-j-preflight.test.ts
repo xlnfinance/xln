@@ -103,13 +103,14 @@ test('public restore accepts an explicit bounded startup budget without changing
     const selected = readSessionConfig([...args, '--startup-timeout-ms', '600000']);
     expect(selected.startupTimeoutMs).toBe(600_000);
     expect(readSessionConfig(sessionArgs(selected)).startupTimeoutMs).toBe(600_000);
+    expect(readSessionConfig([...args, '--startup-timeout-ms', '21600000']).startupTimeoutMs).toBe(21_600_000);
     const hubOnly = readSessionConfig([...args, '--hub-only']);
     expect(readSessionConfig(sessionArgs(hubOnly)).hubOnly).toBeTrue();
     for (const incompatible of [['--external-gateway'], ['--authority-file', 'unused.json']])
       expect(() => readSessionConfig([...args, '--hub-only', ...incompatible])).toThrow(
         'USDC_SESSION_HUB_ONLY_REQUIRES_MANAGED_READ_ONLY_GATEWAY',
       );
-    for (const invalid of ['0', '59999', '7200001', 'NaN'])
+    for (const invalid of ['0', '59999', String(Number.MAX_SAFE_INTEGER + 1), 'NaN'])
       expect(() => readSessionConfig([...args, '--startup-timeout-ms', invalid])).toThrow(
         'USDC_SESSION_STARTUP_BUDGET_INVALID',
       );

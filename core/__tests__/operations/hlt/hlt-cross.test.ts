@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { withCanonicalCrossJurisdictionRouteHash } from '../../../extensions/cross-j';
 import { deriveManagedEntityIdentity } from '../../../orchestrator/daemon-control';
+import { selectPocMakerQuote } from '../../../scenarios/usdc-poc/cross-swap';
 import {
   httpBaseForRuntimeWsUrl,
   resolveLoadJurisdictionRpc,
@@ -10,6 +11,7 @@ import {
 } from '../../../scripts/operations/hlt/cross/worker-cross';
 import {
   decodeCrossLoadReport,
+  decodeCommittedCrossRouteSnapshot,
   decodeCommittedCrossRoutes,
   selectMarketMakerCrossRoute,
 } from '../../../scripts/operations/hlt/cross/cross-boundary';
@@ -240,6 +242,25 @@ describe('production cross-j swap load boundaries', () => {
     expect(() => decodeCommittedCrossRoutes(hubCore(new Map([['wrong-key', cheap]])))).toThrow(
       'PRODUCTION_SWAP_LOAD_CROSS_ROUTE_ID_MISMATCH',
     );
+  });
+
+  test('USDC preflight rejects a quote expired at the committed Hub timestamp', () => {
+    const sourceHub = entity('2');
+    const targetHub = entity('3');
+    const { routeHash: _oldRouteHash, ...base } = route('mmx-usdc', targetHub, sourceHub);
+    const expiry = 61_000;
+    const maker = withCanonicalCrossJurisdictionRouteHash({
+      ...base,
+      target: { ...base.target, tokenId: 1, amount: 10_000_000n },
+      priceTicks: 10_000n,
+    });
+    const core = hubCore(new Map([[maker.orderId, maker]]));
+    const read = (timestamp: number) => {
+      const snapshot = decodeCommittedCrossRouteSnapshot({ ...core, timestamp });
+      return selectPocMakerQuote(snapshot.routes, sourceHub, targetHub, false, snapshot.timestamp, expiry - 2);
+    };
+    expect(read(expiry - 1).quote.effectiveWant).toBe(1_000_000n);
+    expect(() => read(expiry)).toThrow('USDC_POC_EXECUTABLE_USDC_QUOTE_MISSING');
   });
 
   test('cross report requires full committed fill and ordered timings', () => {

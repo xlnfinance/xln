@@ -1,4 +1,5 @@
 import { validateJInputs } from './j';
+import { decodeEvmWalletApproval } from '../../../runtime/j-submit/evm/wallet-approval';
 import {
   validateNumberedRecord,
   validatePendingImport,
@@ -16,14 +17,25 @@ import {
 
 export const validateDurableRuntimeState = (value: unknown, code: string): void => {
   const state = requireBoundaryRecord(value, code);
-  requireExactBoundaryKeys(state, [], [
-    'maxEntityInputsPerFrame', 'maxEntityTxsPerFrame',
-    'pendingAuditEvents',
-    'runtimeAdapterCommandFrontiers', 'pendingCommittedJOutbox', 'pendingJurisdictionImports',
-    'numberedRegistrationIntents', 'certifiedRegistrationEvidence',
-    'entityEncryptionSeeds',
-    'certifiedBoardNodes', 'accountJClaimNodes',
-  ], `${code}_FIELDS`);
+  requireExactBoundaryKeys(
+    state,
+    [],
+    [
+      'maxEntityInputsPerFrame',
+      'maxEntityTxsPerFrame',
+      'pendingAuditEvents',
+      'runtimeAdapterCommandFrontiers',
+      'pendingCommittedJOutbox',
+      'pendingJurisdictionImports',
+      'evmWalletApprovals',
+      'numberedRegistrationIntents',
+      'certifiedRegistrationEvidence',
+      'entityEncryptionSeeds',
+      'certifiedBoardNodes',
+      'accountJClaimNodes',
+    ],
+    `${code}_FIELDS`,
+  );
   for (const field of ['maxEntityInputsPerFrame', 'maxEntityTxsPerFrame']) {
     if (state[field] !== undefined) requireBoundaryInteger(state[field], `${code}_${field.toUpperCase()}`, 1);
   }
@@ -55,6 +67,12 @@ export const validateDurableRuntimeState = (value: unknown, code: string): void 
     if (frontier['expiresAtMs'] !== null) requireBoundaryInteger(frontier['expiresAtMs'], `${entryCode}_EXPIRES`, 1);
   });
   if (state['pendingCommittedJOutbox'] !== undefined) validateJInputs(state['pendingCommittedJOutbox'], `${code}_PENDING_COMMITTED_J_OUTBOX`);
+  if (state['evmWalletApprovals'] !== undefined) {
+    for (const [key, raw] of requireMap(state['evmWalletApprovals'], `${code}_WALLET_APPROVALS`)) {
+      const approval = decodeEvmWalletApproval(raw, `${code}_WALLET_APPROVAL`);
+      if (key !== String(approval.chainId)) throw new Error(`${code}_WALLET_APPROVAL_CHAIN`);
+    }
+  }
   if (state['pendingJurisdictionImports'] !== undefined) validateStringMap(state['pendingJurisdictionImports'], `${code}_PENDING_IMPORTS`, validatePendingImport);
   if (state['numberedRegistrationIntents'] !== undefined) validateStringMap(state['numberedRegistrationIntents'], `${code}_NUMBERED_INTENTS`, validateNumberedRecord);
   if (state['certifiedRegistrationEvidence'] !== undefined) validateStringMap(state['certifiedRegistrationEvidence'], `${code}_REGISTRATION_EVIDENCE`, validateRegistrationEvidence);

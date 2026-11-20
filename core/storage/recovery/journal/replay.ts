@@ -25,6 +25,8 @@ export type ReplayOptions = {
   borrowRuntimeWalFrom?: RuntimeReplica;
   /** Historical queries rebuild State but never mutate auxiliary read models. */
   readOnly?: boolean;
+  /** Inspect the latest materialized graph without applying any WAL inputs. */
+  materializedOnly?: boolean;
 };
 
 type LoadPersistedRuntime = (env: RuntimeReplica, targetHeight?: number) => Promise<LoadedRuntimeStorage | null>;
@@ -38,17 +40,21 @@ const resolveReplayTarget = async (
   // Unsafe restore switches are rejected even for an empty database. Otherwise
   // a daemon could silently boot a fresh Runtime under an unsafe configuration.
   assertStorageSafetyOverridesAllowed();
-  const latestHeight = await reads.resolvePersistedLatestHeight(env);
+  const handles = await reads.listPersistedStorageHandles(env);
+  const latestHeight = handles.reduce((highest, handle) => Math.max(highest, handle.latestHeight), 0);
   if (latestHeight <= 0) return null;
-  const targetHeight = Math.max(
-    1,
-    Math.min(
-      latestHeight,
-      Number.isFinite(Number(targetHeightOverride)) ? Math.floor(Number(targetHeightOverride)) : latestHeight,
-    ),
-  );
+  const targetHeight = options.materializedOnly
+    ? handles.reduce((highest, handle) => Math.max(highest, handle.latestMaterializedHeight), 0)
+    : Math.max(
+        1,
+        Math.min(
+          latestHeight,
+          Number.isFinite(Number(targetHeightOverride)) ? Math.floor(Number(targetHeightOverride)) : latestHeight,
+        ),
+      );
+  if (targetHeight <= 0 || targetHeight > latestHeight) throw new Error('STORAGE_RESTORE_TARGET_HEIGHT_INVALID');
   const selectedSnapshotHeight = await reads.resolvePersistedSnapshotHeight(env, targetHeight);
-  const selectedMaterializedHeight = (await reads.listPersistedStorageHandles(env)).reduce(
+  const selectedMaterializedHeight = handles.reduce(
     (highest, handle) =>
       handle.latestMaterializedHeight <= targetHeight ? Math.max(highest, handle.latestMaterializedHeight) : highest,
     0,
@@ -156,6 +162,8 @@ export const createRuntimeReplayLoader =
     targetHeightOverride?: number,
     options: ReplayOptions = {},
   ): Promise<LoadedRuntimeStorage | null> => {
+    if (options.materializedOnly && (runtimeSeed != null || targetHeightOverride !== undefined))
+      throw new Error('STORAGE_INSPECTION_REQUIRES_SEEDLESS_MATERIALIZED_HEAD');
     // Checkpoint selection and graph/tail restore own the same verified handle.
     // Closing a probe then reopening repeated the full WAL integrity decode and
     // introduced an unnecessary gap between selecting and reading its head.
@@ -167,6 +175,8 @@ export const createRuntimeReplayLoader =
       }
       const target = await resolveReplayTarget(reads, env, targetHeightOverride, options);
       if (!target) return null;
+      if (options.materializedOnly && target.selectedCheckpointHeight !== target.targetHeight)
+        throw new Error('STORAGE_INSPECTION_REPLAY_FORBIDDEN');
       const restored = await loadPersistedRuntime(env, target.selectedCheckpointHeight);
       if (!restored) return null;
       let targetFrame: RuntimeFrame | null = null;

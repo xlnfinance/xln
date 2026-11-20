@@ -1,4 +1,9 @@
-import type { TransactionReceipt } from 'ethers';
+import { Transaction, type TransactionReceipt } from 'ethers';
+import type { RuntimeReplica } from '../../../../core/runtime/types';
+import { evmAttemptSlot } from '../../../../core/storage/queries/evm-attempts';
+import type { MinedReceipt } from '../../../../core/scenarios/usdc-poc/evidence';
+import type { ChainAuthority, ExecutionAuthority, PayerGrant } from './authority';
+import { validateAuthorizedWire } from './calls';
 import { Depository__factory } from '../../../typechain-types';
 import { computeBatchHankoHash } from '../../../../core/jurisdiction/machine/batch';
 import type { ChainBinding } from './providers';
@@ -29,4 +34,66 @@ export const verifyBatchReceipt = (
   const expectedHash = computeBatchHankoHash(BigInt(chain.chainId), chain.depository, batch.encoded, batch.nonce);
   if (entity !== batch.entityId || hash !== expectedHash || nonce !== batch.nonce)
     throw new Error(`USDC_EXECUTION_BATCH_EVENT_MISMATCH:${receipt.hash}`);
+};
+
+export const verifyAuthorizedReceipt = (
+  authority: ExecutionAuthority,
+  chain: ChainAuthority,
+  payer: PayerGrant,
+  nonce: number,
+  entry: MinedReceipt,
+) => {
+  const { transaction, receipt } = entry;
+  const wire = validateAuthorizedWire(authority, chain, Transaction.from(transaction).serialized);
+  if (
+    wire.payer.address !== payer.address ||
+    wire.transaction.nonce !== nonce ||
+    wire.transaction.hash !== transaction.hash ||
+    receipt.hash !== transaction.hash ||
+    receipt.from.toLowerCase() !== payer.address ||
+    receipt.to?.toLowerCase() !== wire.transaction.to?.toLowerCase() ||
+    receipt.blockHash !== transaction.blockHash ||
+    receipt.blockNumber !== transaction.blockNumber ||
+    (receipt.status !== 1 && receipt.status !== 0)
+  )
+    throw new Error(`USDC_EXECUTION_RUN_RECEIPT_MISMATCH:${receipt.hash}`);
+  if (wire.batch && receipt.status === 1) verifyBatchReceipt(chain, receipt, wire.batch);
+  return { ...entry, batch: wire.batch };
+};
+
+export const receiptSlots = (authority: ExecutionAuthority, runIndex: number) => {
+  const [source, target] = authority.chains;
+  const sourceUser = source!.payers.find(payer => payer.role === 'source-user')!;
+  const targetUser = target!.payers.find(payer => payer.role === 'target-user')!;
+  const targetHub = target!.payers.find(payer => payer.role === 'target-hub')!;
+  const nonce = sourceUser.firstNonce + runIndex * 3;
+  return [
+    ['approval', 0, source!, sourceUser, nonce],
+    ['deposit', 0, source!, sourceUser, nonce + 1],
+    ['collateral', 0, source!, sourceUser, nonce + 2],
+    ['cover', 1, target!, targetHub, targetHub.firstNonce + runIndex],
+    ['withdrawal', 1, target!, targetUser, targetUser.firstNonce + runIndex],
+  ] as const;
+};
+
+const addSignedAttempt = (hashes: Map<string, string[]>, raw: string): void => {
+  const wire = Transaction.from(raw);
+  if (!wire.from || !wire.hash) throw new Error('USDC_STATUS_WAL_SIGNED_ATTEMPT_INVALID');
+  const key = evmAttemptSlot(wire.chainId, wire.from, wire.nonce);
+  hashes.set(key, [...new Set([...(hashes.get(key) ?? []), wire.hash])]);
+};
+
+export const committedAttemptHashes = (env: RuntimeReplica): Map<string, string[]> => {
+  const hashes = new Map<string, string[]>();
+  for (const raw of env.infrastructure?.evmWalletApprovals?.values() ?? []) addSignedAttempt(hashes, raw);
+  for (const input of env.infrastructure?.pendingCommittedJOutbox ?? []) {
+    for (const tx of input.jTxs) {
+      if (tx.type !== 'batch') continue;
+      const attempt = tx.data.runtimeSubmitAttempt;
+      if (!attempt?.rawTransaction) continue;
+      for (const raw of [attempt.rawTransaction, ...(attempt.competingTransactions ?? [])])
+        addSignedAttempt(hashes, raw);
+    }
+  }
+  return hashes;
 };

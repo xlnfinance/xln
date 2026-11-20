@@ -42,9 +42,15 @@ export const ACCOUNT_TX_REJECTION_CODES = {
   deltaTokenInvalid: 'ACCOUNT_DELTA_TOKEN_INVALID',
   deltaRowLimitExceeded: 'ACCOUNT_DELTA_ROW_LIMIT_EXCEEDED',
   htlcLockCapacity: 'ACCOUNT_HTLC_LOCK_CAPACITY',
+  collateralPolicyVersion: 'ACCOUNT_COLLATERAL_POLICY_VERSION_MISMATCH',
 } as const satisfies Record<string, string>;
 
 export type AccountTxRejection =
+  | Readonly<{
+      kind: 'collateral_policy_version_mismatch';
+      code: typeof ACCOUNT_TX_REJECTION_CODES.collateralPolicyVersion;
+      message: string;
+    }>
   | Readonly<{
       kind: 'validation';
       code: typeof ACCOUNT_TX_REJECTION_CODES.validation;

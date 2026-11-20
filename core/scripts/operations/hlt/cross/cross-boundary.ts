@@ -123,8 +123,7 @@ export const decodeCrossLoadReport = (value: unknown): CrossLoadReport => {
 const isLiveRoute = (route: CrossJurisdictionSwapRoute): boolean =>
   route.status === 'resting' || route.status === 'partially_filled';
 
-export const decodeCommittedCrossRoutes = (value: unknown): CrossJurisdictionSwapRoute[] => {
-  const core = decodeHubCoreRecord(value);
+const decodeCrossRoutes = (core: Record<string, unknown>): CrossJurisdictionSwapRoute[] => {
   const rawRoutes = core['crossJurisdictionSwaps'];
   if (!(rawRoutes instanceof Map)) {
     throw new Error('PRODUCTION_SWAP_LOAD_CROSS_ROUTES_INVALID');
@@ -144,6 +143,17 @@ export const decodeCommittedCrossRoutes = (value: unknown): CrossJurisdictionSwa
     routes.push(tx.data.route);
   }
   return routes;
+};
+
+export const decodeCommittedCrossRoutes = (value: unknown): CrossJurisdictionSwapRoute[] =>
+  decodeCrossRoutes(decodeHubCoreRecord(value));
+
+export const decodeCommittedCrossRouteSnapshot = (value: unknown) => {
+  const core = decodeHubCoreRecord(value);
+  const { timestamp } = core;
+  if (typeof timestamp !== 'number' || !Number.isSafeInteger(timestamp) || timestamp < 0)
+    throw new Error('PRODUCTION_SWAP_LOAD_HUB_TIMESTAMP_INVALID');
+  return { timestamp, routes: decodeCrossRoutes(core) };
 };
 
 export const selectMarketMakerCrossRoutes = (

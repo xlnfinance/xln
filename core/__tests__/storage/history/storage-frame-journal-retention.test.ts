@@ -57,6 +57,9 @@ import {
 } from '../../../storage/keys';
 import { validateStorageFrameRecordValue } from '../../../storage/schema/authoritative-schema';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../../account/crypto';
+import { computeFrameHash } from '../../../account/consensus/frame/hash';
+import { signEntityHashes } from '../../../hanko/signing';
+import { readEvmAttemptHistory } from '../../../storage/queries/evm-attempts';
 import { generateLazyEntityId } from '../../../entity/factory';
 import type { RuntimeFrame } from '../../../storage/types';
 import type { RoutedEntityInput } from '../../../runtime/types';
@@ -236,18 +239,27 @@ describe('storage frame journal retention', () => {
 
   test('Account history excludes an unacknowledged collision branch', async () => {
     const env = await createSavedEmptyEnv('account-history-collision');
-    const user = `0x${'11'.repeat(32)}`;
-    const hub = `0x${'22'.repeat(32)}`;
-    const hex = (byte: string, size = 32): string => `0x${byte.repeat(size * 2)}`;
-    const frame = (height: number, stateHash: string, prevFrameHash: string): AccountFrame => ({
-      height,
-      timestamp: height,
-      jHeight: 138,
-      accountTxs: [],
-      prevFrameHash,
-      accountStateRoot: hex('a'),
-      stateHash,
+    const signers = ['1', '2'].map(slot => {
+      const seed = env.runtimeSeed!;
+      const signer = deriveSignerAddressSync(seed, slot);
+      registerSignerKey(seed, signer, deriveSignerKeySync(seed, slot));
+      return { signer, entity: generateLazyEntityId([signer], 1n).toLowerCase() };
     });
+    const [owner, peer] = signers;
+    const user = owner!.entity;
+    const hub = peer!.entity;
+    const hex = (byte: string, size = 32): string => `0x${byte.repeat(size * 2)}`;
+    const frame = (height: number, root: string, prevFrameHash: string): AccountFrame => {
+      const payload = {
+        height,
+        timestamp: height,
+        jHeight: 138,
+        accountTxs: [],
+        prevFrameHash,
+        accountStateRoot: root,
+      };
+      return { ...payload, stateHash: computeFrameHash(payload) };
+    };
     const accountInput = (
       fromEntityId: string,
       toEntityId: string,
@@ -268,33 +280,74 @@ describe('storage frame journal retention', () => {
     const loser = frame(17, hex('1'), hex('0'));
     const winner = frame(17, hex('2'), hex('0'));
     const final = frame(18, hex('3'), winner.stateHash);
+    const [userWinner, userFinal] = await signEntityHashes(env, user, owner!.signer, [
+      winner.stateHash,
+      final.stateHash,
+    ]);
+    const [hubLoser, hubWinner, hubFinal] = await signEntityHashes(env, hub, peer!.signer, [
+      loser.stateHash,
+      winner.stateHash,
+      final.stateHash,
+    ]);
 
     env.state.height = 2;
     env.state.timestamp = 2_000;
-    await saveEnvToDB(env, {
-      runtimeTxs: [],
-      entityInputs: [routed(accountInput(hub, user, {
-        kind: 'ack_frame',
-        proposal: { frame: loser },
-      }))],
-    }, [routed(accountInput(user, hub, {
-      kind: 'ack_frame',
-      proposal: { frame: winner },
-    }))], new Map());
+    await saveEnvToDB(
+      env,
+      {
+        runtimeTxs: [],
+        entityInputs: [
+          routed(
+            accountInput(hub, user, {
+              kind: 'ack_frame',
+              proposal: { frame: loser, frameHanko: hubLoser },
+            }),
+          ),
+        ],
+      },
+      [
+        routed(
+          accountInput(user, hub, {
+            kind: 'ack_frame',
+            proposal: { frame: winner, frameHanko: userWinner },
+          }),
+        ),
+      ],
+      new Map(),
+    );
 
     env.state.height = 3;
     env.state.timestamp = 3_000;
-    await saveEnvToDB(env, {
-      runtimeTxs: [],
-      entityInputs: [routed(accountInput(hub, user, {
-        kind: 'ack_frame',
-        ack: { height: winner.height, frameHash: winner.stateHash },
-        proposal: { frame: final },
-      }))],
-    }, [routed(accountInput(user, hub, {
-      kind: 'ack',
-      ack: { height: final.height, frameHash: final.stateHash },
-    }))], new Map());
+    await saveEnvToDB(
+      env,
+      {
+        runtimeTxs: [],
+        entityInputs: [
+          routed(
+            accountInput(hub, user, {
+              kind: 'ack',
+              ack: { height: winner.height, frameHash: winner.stateHash, frameHanko: userWinner },
+            }),
+          ),
+          routed(
+            accountInput(hub, user, {
+              kind: 'ack_frame',
+              ack: { height: winner.height, frameHash: winner.stateHash, frameHanko: hubWinner },
+              proposal: { frame: final, frameHanko: hubFinal },
+            }),
+          ),
+        ],
+      },
+      [
+        routed(
+          accountInput(user, hub, {
+            kind: 'ack',
+            ack: { height: final.height, frameHash: final.stateHash, frameHanko: userFinal },
+          }),
+        ),
+      ],
+      new Map(),
+    );
 
     const records = await readPersistedAccountFrameHistoryRecords(env, user, hub, 10);
     expect(records.map(({ accountHeight, source, frame, runtimeHeight }) => ({
@@ -306,6 +359,34 @@ describe('storage frame journal retention', () => {
       { accountHeight: 17, source: 'ackCommit', stateHash: winner.stateHash, runtimeHeight: 3 },
       { accountHeight: 18, source: 'counterpartyCommit', stateHash: final.stateHash, runtimeHeight: 3 },
     ]);
+
+    const certified = await readPersistedAccountFrameHistoryRecords(env, user, hub, 10, {
+      requireLazyCertificate: true,
+    });
+    expect(certified.map(record => record.certificate)).toEqual([
+      { localFrameHanko: userWinner, peerFrameHanko: hubWinner },
+      { localFrameHanko: userFinal, peerFrameHanko: hubFinal },
+    ]);
+
+    const wal = getRuntimeWalDb(env);
+    const original = await wal.get(keyFrame(3));
+    const altered = decodeBuffer<RuntimeFrame>(original);
+    const input = altered.runtimeInput.entityInputs[1]?.entityTxs?.[0];
+    if (input?.type !== 'accountInput' || input.data.kind !== 'ack_frame' || !input.data.ack)
+      throw new Error('TEST_HISTORY_ACK_MISSING');
+    input.data.ack.frameHanko = `0x${'48'.repeat(65)}`;
+    await wal.put(keyFrame(3), encodeBuffer(altered));
+    await expect(readPersistedAccountFrameHistoryRecords(env, user, hub, 10)).rejects.toThrow(
+      'STORAGE_VERIFY_FRAME_HASH_MISMATCH: height=3',
+    );
+    await wal.put(keyFrame(3), original);
+
+    const middleFrame = await wal.get(keyFrame(2));
+    await wal.del(keyFrame(2));
+    await expect(readEvmAttemptHistory(wal, new Set(), new Map())).rejects.toThrow(
+      'STORAGE_VERIFY_FRAME_MISSING: height=2',
+    );
+    await wal.put(keyFrame(2), middleFrame);
 
     // Direct WAL history still verifies every ordered output. Losing the ACK
     // row must reject, never turn a committed frame into incomplete history.

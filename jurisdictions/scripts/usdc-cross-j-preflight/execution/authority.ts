@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { candidateSources } from '../budget';
+import { readExistingIdentities } from '../identities';
 import { safeParse, safeStringify } from '../../../../core/protocol/serialization';
 import { requireBoundaryRecord, requireExactBoundaryKeys } from '../../../../core/protocol/boundary-validation';
 import { requireRunId } from '../../../../core/scenarios/usdc-poc/journey/context';
@@ -236,3 +237,16 @@ export const requireCurrentAuthority = (authority: ExecutionAuthority, catalogPa
 
 export const readAuthority = (path: string): ExecutionAuthority =>
   decodeAuthority(safeParse(readFileSync(path, 'utf8')));
+
+export const verifyExecutionBindings = (directory: string, apiBase: string, authority: ExecutionAuthority): void => {
+  const identities = readExistingIdentities(directory);
+  if (authority.apiBase !== apiBase) throw new Error('USDC_EXECUTION_API_BINDING_MISMATCH');
+  for (const chain of authority.chains)
+    for (const role of ['user', 'hub'] as const) {
+      const own = identities.find(value => value.role === role)?.chains.find(value => value.chainId === chain.chainId);
+      const entity = role === 'user' ? chain.userEntity : chain.hubEntity;
+      const signer = role === 'user' ? chain.userSigner : chain.hubSigner;
+      if (own?.entityId !== entity || own.signerId !== signer)
+        throw new Error('USDC_EXECUTION_IDENTITY_BINDING_MISMATCH');
+    }
+};

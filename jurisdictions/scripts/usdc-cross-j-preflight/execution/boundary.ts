@@ -33,3 +33,9 @@ export const list = (value: unknown): unknown[] => {
 };
 
 export const address = (value: unknown): string => getAddress(text(value)).toLowerCase();
+
+export class ObservationUnavailable extends Error {
+  constructor(readonly code: string) {
+    super(code);
+  }
+}

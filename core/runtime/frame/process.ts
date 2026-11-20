@@ -320,7 +320,7 @@ const publishCommittedRuntimeFrame = (
         height: env.state.height,
       });
     }
-    notifyRuntimeFrameCommitted(env, appliedInput);
+    notifyRuntimeFrameCommitted(env, appliedInput, committedEvents);
   }
   return { env, state, staleWriterStopped: false };
 };

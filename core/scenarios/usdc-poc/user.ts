@@ -20,8 +20,11 @@ import type { RuntimeAdapterConfig } from '../../api/runtime-adapter/types';
 export const waitFor = async (label: string, ready: () => boolean | Promise<boolean>): Promise<void> => {
   const timeout = Number(process.env['USDC_POC_STAGE_TIMEOUT_MS'] ?? 60_000);
   if (!Number.isSafeInteger(timeout) || timeout < 1 || timeout > 900_000) throw new Error('USDC_POC_TIMEOUT_INVALID');
-  const deadline = Date.now() + timeout;
+  const authorityDeadline = Number(process.env['USDC_POC_STAGE_DEADLINE_MS'] ?? Number.MAX_SAFE_INTEGER);
+  if (!Number.isSafeInteger(authorityDeadline) || authorityDeadline < 1) throw new Error('USDC_POC_DEADLINE_INVALID');
+  const deadline = Math.min(Date.now() + timeout, authorityDeadline);
   while (!(await ready())) {
+    if (Date.now() >= authorityDeadline) throw new Error(`USDC_EXECUTION_AUTHORITY_EXPIRED:${label}`);
     if (Date.now() >= deadline) throw new Error(`USDC_POC_TIMEOUT:${label}`);
     await Bun.sleep(50);
   }

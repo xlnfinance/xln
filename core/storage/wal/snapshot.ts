@@ -216,6 +216,7 @@ const DURABLE_RUNTIME_STATE_KEYS = [
   'maxEntityTxsPerFrame',
   'runtimeAdapterCommandFrontiers',
   'pendingCommittedJOutbox',
+  'evmWalletApprovals',
   'pendingJurisdictionImports',
   'numberedRegistrationIntents',
   'certifiedRegistrationEvidence',
@@ -237,6 +238,7 @@ const buildDurableRuntimeStateSnapshot = (
       ? { runtimeAdapterCommandFrontiers: state.runtimeAdapterCommandFrontiers }
       : {}),
     ...(hasDurableEntries(state.pendingCommittedJOutbox) ? { pendingCommittedJOutbox: state.pendingCommittedJOutbox } : {}),
+    ...(state.evmWalletApprovals?.size ? { evmWalletApprovals: state.evmWalletApprovals } : {}),
     ...(hasDurableEntries(state.pendingJurisdictionImports)
       ? { pendingJurisdictionImports: state.pendingJurisdictionImports }
       : {}),
