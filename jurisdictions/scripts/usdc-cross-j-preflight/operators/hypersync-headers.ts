@@ -3,6 +3,7 @@ import { BLOCKCHAIN } from '../../../../core/config/constants';
 import { RpcTransportUnavailableError, TRANSIENT_RPC_HTTP_STATUSES } from '../../../../core/jurisdiction/adapter/kernel/failure';
 import { requireBoundaryRecord } from '../../../../core/protocol/boundary-validation';
 import { createHeaderReadQueue, requireLiveHeaderClient } from './header-read-queue';
+import { createReadPacer } from './read-pacing';
 
 const endpoint = 'https://arbitrum-sepolia.hypersync.xyz/query';
 const headerFields = {
@@ -114,6 +115,7 @@ const tracePage = (from: number, to: number, next: number, response: Response) =
 export const createHyperSyncHeaderReader = (token: string) => {
   if (!/^[A-Za-z0-9_-]+$/.test(token)) throw new Error('USDC_HYPERSYNC_TOKEN_INVALID');
   const queue = createHeaderReadQueue();
+  const pace = createReadPacer();
   return async (params: readonly unknown[], client: AbortSignal) => {
     const [from, to] = params;
     if (params.length !== 2 || typeof from !== 'number' || typeof to !== 'number' ||
@@ -123,9 +125,11 @@ export const createHyperSyncHeaderReader = (token: string) => {
     const release = await queue.acquire(client);
     try {
       requireLiveHeaderClient(client);
-      const signal = AbortSignal.any([client, AbortSignal.timeout(12_000)]);
+      const signal = AbortSignal.any([client, AbortSignal.timeout(45_000)]);
       const blocks: ReturnType<typeof decodePage>['blocks'] = [];
       for (let height = from; height <= to;) {
+        // The shared testnet token allows fifteen requests per minute.
+        await pace(endpoint, 4_500, signal);
         const response = await queryPage(token, height, to + 1, signal);
         if (!response.ok) tracePage(height, to, height, response);
         await checkResponse(response);

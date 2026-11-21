@@ -4,6 +4,8 @@ import { sendRpcBatch } from '../../rpc-utils';
 
 export const RPC_BLOCK_RANGE_METHOD = 'xln_getBlockRange';
 export const RPC_RECEIPT_BATCH_METHOD = 'xln_getReceiptBatch';
+// The gateway deadline includes admission, provider pacing and the response.
+const GATEWAY_ARRAY_READ_TIMEOUT_MS = 60_000;
 
 const createGatewayArrayReader = (rpcUrl: string, method: string, timeout: number) => {
   if (!rpcUrl) throw new Error('J_BLOCK_RANGE_RPC_URL_MISSING');
@@ -23,11 +25,11 @@ const createGatewayArrayReader = (rpcUrl: string, method: string, timeout: numbe
 };
 
 export const createRpcBlockRangeReader = (rpcUrl: string): RpcBlockRangeReader => {
-  const read = createGatewayArrayReader(rpcUrl, RPC_BLOCK_RANGE_METHOD, 15_000);
+  const read = createGatewayArrayReader(rpcUrl, RPC_BLOCK_RANGE_METHOD, GATEWAY_ARRAY_READ_TIMEOUT_MS);
   return (from, to) => read([from, to]);
 };
 
 export const createRpcReceiptBatch = (rpcUrl: string, maxBlocks: number): RpcReceiptBatch => {
-  const read = createGatewayArrayReader(rpcUrl, RPC_RECEIPT_BATCH_METHOD, 30_000);
+  const read = createGatewayArrayReader(rpcUrl, RPC_RECEIPT_BATCH_METHOD, GATEWAY_ARRAY_READ_TIMEOUT_MS);
   return { maxBlocks, read: heights => read([heights]) };
 };

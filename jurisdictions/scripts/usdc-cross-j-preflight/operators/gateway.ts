@@ -15,6 +15,7 @@ import { readBooleanEnv, readPositiveIntegerEnv } from '../../../../core/config/
 import { RPC_BLOCK_RANGE_METHOD, RPC_RECEIPT_BATCH_METHOD } from '../../../../core/jurisdiction/adapter/rpc/watcher/rpc-watcher-block-range';
 import { createHyperSyncHeaderReader } from './hypersync-headers';
 import { createHyperRpcReceiptReader } from './hyperrpc-receipts';
+import { createArbitrumHeaderRouter, parseSecondaryHeaderRpc, verifySecondaryHeaderRpc } from './arbitrum-header-rpc';
 
 const requestedApi = readCliOption(process.argv.slice(2), '--api-base', 'http://localhost:8080');
 const endpoint = new URL(requestedApi);
@@ -38,6 +39,12 @@ for (const chain of networks) {
   providers.set('/current' + chain.path, providers.get(chain.path)!);
   providers.set('/history' + chain.path, preflightProvider(archive, chain.chainId));
 }
+const configuredSecondary = process.env['POC_ARBITRUM_SECONDARY_HEADER_RPC'];
+const secondaryHeaderRpc = configuredSecondary === undefined ? undefined
+  : parseSecondaryHeaderRpc(runtimeRpc(networks[1]), configuredSecondary);
+const useSecondaryHeaderRpc = secondaryHeaderRpc === undefined ? undefined : createArbitrumHeaderRouter(
+  await verifySecondaryHeaderRpc(runtimeRpc(networks[1]), secondaryHeaderRpc),
+);
 const executionWriters = await openExecutionWriters(process.argv.slice(2), apiBase, catalogPath, providers);
 
 const reported = new Set<string>();
@@ -47,22 +54,25 @@ const readArbitrumRange = readBooleanEnv('POC_HYPERSYNC_ARBITRUM_HEADERS', false
   : undefined;
 const readEthereumReceipts = createHyperRpcReceiptReader();
 type GatewayCall = { id: unknown; method: string; params: unknown[] };
-const headerReadQueue = createHeaderReadQueue();
-let headerCooldownUntilMs = 0;
+const primaryHeaderLane = { queue: createHeaderReadQueue(), cooldownUntilMs: 0 };
+const secondaryHeaderLane = { queue: createHeaderReadQueue(), cooldownUntilMs: 0 };
 const traceHeaderTiming = process.env['POC_HEADER_BATCH_TIMING'] === '1';
 const paceRead = process.env['POC_RPC_READ_PACING'] === '1' ? createReadPacer() : null;
 const headerIntervalMs = readPositiveIntegerEnv('POC_RPC_HEADER_INTERVAL_MS', 500);
 const receiptIntervalMs = readPositiveIntegerEnv('POC_RPC_RECEIPT_INTERVAL_MS', 1_000);
 let headerBatchSequence = 0;
 
-const beginHeaderTiming = (calls: GatewayCall[], chainId: number, signal: AbortSignal) => {
+const beginHeaderTiming = (
+  calls: GatewayCall[], chainId: number, rpc: string, lane: typeof primaryHeaderLane, signal: AbortSignal,
+) => {
   if (!traceHeaderTiming || !calls.length || !calls.every(call => call.method === 'eth_getBlockByNumber')) return;
   const id = ++headerBatchSequence;
   const startedAt = performance.now();
-  const { active, waiting } = headerReadQueue.size();
+  const { active, waiting } = lane.queue.size();
   const meta = {
     id,
     chainId,
+    rpcHost: new URL(rpc).host,
     items: calls.length,
     positionIds: calls.every((call, index) => call.id === index + 1),
     activeAtArrival: active,
@@ -84,14 +94,17 @@ const beginHeaderTiming = (calls: GatewayCall[], chainId: number, signal: AbortS
   return { mark, finish };
 };
 
-const readHeaderBatch = async (calls: GatewayCall[], rpc: string, chainId: number, signal: AbortSignal) => {
-  const timing = beginHeaderTiming(calls, chainId, signal);
+const readHeaderBatch = async (calls: GatewayCall[], primaryRpc: string, chainId: number, signal: AbortSignal) => {
+  const secondary = secondaryHeaderRpc !== undefined && useSecondaryHeaderRpc?.(chainId, calls) === true;
+  const rpc = secondary ? secondaryHeaderRpc : primaryRpc;
+  const lane = secondary ? secondaryHeaderLane : primaryHeaderLane;
+  const timing = beginHeaderTiming(calls, chainId, rpc, lane, signal);
   let release: (() => void) | undefined;
   try {
-    release = await headerReadQueue.acquire(signal);
+    release = await lane.queue.acquire(signal);
     timing?.mark('admitted');
     requireLiveHeaderClient(signal);
-    const cooldown = headerCooldownUntilMs - performance.now();
+    const cooldown = lane.cooldownUntilMs - performance.now();
     if (cooldown > 0) {
       await Bun.sleep(cooldown);
       timing?.mark('cooldown-ended');
@@ -127,7 +140,7 @@ const readHeaderBatch = async (calls: GatewayCall[], rpc: string, chainId: numbe
     }
     const rawFailure = error instanceof Error ? error.message : '';
     const rateLimited = rawFailure === 'RPC_BATCH_HTTP_429';
-    if (rateLimited) headerCooldownUntilMs = performance.now() + 1_000;
+    if (rateLimited) lane.cooldownUntilMs = performance.now() + 1_000;
     const rpcTimeout = rawFailure === 'RPC_BATCH_TIMEOUT:10000';
     timing?.mark('failed', rateLimited || rpcTimeout ? rawFailure : failure.message);
     process.stderr.write(`USDC_PREFLIGHT_HEADER_BATCH_REJECTED:${failure.message}\n`);

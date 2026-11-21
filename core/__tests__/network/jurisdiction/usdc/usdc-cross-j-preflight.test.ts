@@ -21,6 +21,53 @@ import {
   requireLiveHeaderClient,
 } from '../../../../../jurisdictions/scripts/usdc-cross-j-preflight/operators/header-read-queue';
 import { createReadPacer } from '../../../../../jurisdictions/scripts/usdc-cross-j-preflight/operators/read-pacing';
+import {
+  createArbitrumHeaderRouter,
+  parseSecondaryHeaderRpc,
+} from '../../../../../jurisdictions/scripts/usdc-cross-j-preflight/operators/arbitrum-header-rpc';
+
+test('secondary RPC shares numbered Arbitrum header batches and leaves other requests on the primary lane', () => {
+  const useSecondary = createArbitrumHeaderRouter(0x34);
+  const block = (height: string, includeTransactions = false) => ({
+    method: 'eth_getBlockByNumber',
+    params: [height, includeTransactions],
+  });
+  const batch = [block('0x32'), block('0x33')];
+  expect(useSecondary(421614, batch)).toBeTrue();
+  expect(useSecondary(11155111, batch)).toBeFalse();
+  expect(useSecondary(421614, [])).toBeFalse();
+  expect(useSecondary(421614, [block('latest')])).toBeFalse();
+  expect(useSecondary(421614, [block('0x32', true)])).toBeFalse();
+  expect(useSecondary(421614, [block('0x032')])).toBeFalse();
+  expect(useSecondary(421614, [block('0x32'), { method: 'eth_chainId', params: [] }])).toBeFalse();
+  expect(useSecondary(421614, [{ method: 'eth_sendRawTransaction', params: ['0x'] }])).toBeFalse();
+  expect(useSecondary(421614, batch)).toBeFalse();
+  expect(useSecondary(421614, batch)).toBeTrue();
+});
+
+test('Arbitrum header routing pins batches at or above the verified common tip to the primary', () => {
+  const useSecondary = createArbitrumHeaderRouter(0x34);
+  const block = (height: string) => ({ method: 'eth_getBlockByNumber', params: [height, false] });
+  const historical = [block('0x32'), block('0x33')];
+
+  expect(useSecondary(421614, [...historical, block('0x34')])).toBeFalse();
+  expect(useSecondary(421614, [block('0x35')])).toBeFalse();
+  expect(useSecondary(421614, historical)).toBeTrue();
+  expect(useSecondary(421614, [block('0x36')])).toBeFalse();
+  expect(useSecondary(421614, historical)).toBeFalse();
+  expect(useSecondary(421614, historical)).toBeTrue();
+});
+
+test('secondary RPC configuration rejects duplicate endpoints and requires HTTPS on external hosts', () => {
+  const primary = 'https://primary.example';
+  expect(parseSecondaryHeaderRpc(primary, 'https://secondary.example/rpc')).toBe('https://secondary.example/rpc');
+  expect(() => parseSecondaryHeaderRpc(primary, 'https://primary.example/'))
+    .toThrow('USDC_PREFLIGHT_ARBITRUM_HEADER_RPC_DUPLICATE');
+  expect(() => parseSecondaryHeaderRpc(primary, 'http://secondary.example/rpc'))
+    .toThrow('USDC_PREFLIGHT_ARBITRUM_HEADER_RPC_INVALID');
+  expect(() => parseSecondaryHeaderRpc(primary, ''))
+    .toThrow('USDC_PREFLIGHT_ARBITRUM_HEADER_RPC_INVALID');
+});
 
 test('read pacing spaces starts on one endpoint and releases a cancelled waiter', async () => {
   const pace = createReadPacer();

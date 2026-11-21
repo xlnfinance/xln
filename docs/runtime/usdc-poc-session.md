@@ -85,11 +85,13 @@ WAL before the Entity certifies a new financial cursor.
    token registry before operator loops start.
 3. Hub/MM use `--require-restore`; the user uses the same mandatory-restore
    option. Missing recovery state cannot become a fresh financial Runtime.
-4. Hub starts first. The launcher waits for Hub `/api/info.deliveryReady`,
-   which opens after authenticated J catch-up, and for the existing Hub health
-   and reserve checks. Then it starts MM and waits for MM readiness. Support
-   Accounts with MM can finish provisioning after MM starts.
-5. User startup captures its restored proof before new events, catches up
+4. Once Hub binds its API, the launcher starts the remaining Runtimes.
+   Their authenticated J catch-up overlaps. Hub delivery readiness and the
+   Hub health and reserve checks remain required for the session.
+5. MM completes its J catch-up and waits for the authenticated delivery
+   routes for both configured Hub Entities. Then it starts the quote
+   bootstrap and its progress watchdog.
+6. User startup captures its restored proof before new events, catches up
    authenticated J observations, starts the canonical loop and reconnects
    authenticated relay transport.
 
@@ -101,13 +103,27 @@ before restoring these same stores to observe the new Hub reserves.
 Public cold restore also requires archive state and receipts at the original
 WAL frontier. The gateway uses the explicitly selected current RPC for chain
 identity/headers and the protected archive for other reads. Header requests use
-the canonical batch transport with shared backpressure; errors retain their
+the canonical batch transport with backpressure; errors retain their
 availability classification. `POC_RUNTIME_11155111_RPC` and
 `POC_RUNTIME_421614_RPC` select the current/header roles explicitly.
 
+Set `POC_ARBITRUM_SECONDARY_HEADER_RPC=https://sepolia-rollup.arbitrum.io/rpc`
+to share Arbitrum Sepolia header reads by explicit block number between that
+endpoint and a distinct `POC_RUNTIME_421614_RPC`. The gateway verifies both
+chain IDs and the hash at a common height before starting. It alternates
+header-only batches whose heights are all below that verified block between
+the two endpoints. Any batch containing a height at or above the verified
+block goes to the primary, which also reports the live head. The historical
+cutoff stays fixed for the gateway session. The endpoints have independent
+queues and rate-limit cooldowns. Set `POC_RPC_READ_PACING=1` to pace each
+endpoint. The watcher handles unavailable responses through its existing
+retry policy. Named block tags, full blocks, archive reads and transaction
+submissions use their existing bindings. Set the secondary endpoint in the
+gateway environment when using an external gateway.
+
 For the measured Arbitrum HyperSync configuration, set
 `POC_HYPERSYNC_ARBITRUM_HEADERS=1` and
-`XLN_J_WATCHER_RPC_MAX_BLOCKS_PER_POLL_421614=2047` in the launch environment.
+`XLN_J_WATCHER_RPC_MAX_BLOCKS_PER_POLL_421614=1023` in the launch environment.
 Supply `POC_HYPERSYNC_TOKEN` to the gateway from the protected environment.
 The session enables complete range reads on the Arbitrum watcher and starts
 the managed gateway with the same selection. When using an external gateway,
@@ -115,9 +131,11 @@ set the HyperSync flag on both the session and the gateway, and supply the
 token only to the gateway.
 
 The gateway reads each observation from HyperSync as a contiguous paginated
-range. The watcher validates both fresh observations through the existing
-header and receipt verifier. Current chain identity, finality and single
-headers use the configured current RPC. Archive receipts and historical
+range and spaces page requests by 4.5 s for the shared testnet quota. The
+gateway allows 45 s for an admitted range. Runtime allows up to 60 s for
+the gateway request including queue time. The watcher validates both fresh
+observations through the existing header and receipt verifier. Current chain
+identity and finality use the configured current RPC. Archive receipts and historical
 `eth_getProof` retain the protected history binding. An unavailable range
 uses the watcher's existing availability handling. The selected range source
 does not fall back to another provider.
@@ -129,7 +147,8 @@ To use HyperRPC for Ethereum receipt catch-up, set
 For an external gateway, set the batch size on both the launcher and the
 gateway. The gateway spaces HyperRPC requests by 12.5 s for the existing
 five-request-per-minute quota. Each request covers up to 32 receipt-bearing
-blocks. The watcher still verifies the complete receipt set per block and
+blocks. Runtime allows up to 60 s for the gateway request including queue
+time. The watcher verifies the complete receipt set per block and
 reads fresh headers after the receipt work. Historical proofs and Arbitrum
 receipts retain the archive binding.
 
@@ -141,9 +160,10 @@ drain guard and authenticated history checks remain active throughout.
 For [ticket 12](../../.scratch/ts-usdc-cross-j-poc/issues/12-public-rpc-capacity-and-funded-catchup.md),
 select `--operators-only` with the managed read-only gateway and use
 `--startup-timeout-ms 21600000` to give each operator up to six hours.
-Give the outer stand lease time for both operator waits plus startup and
-shutdown. The launch stays on the existing Hub and MM stores. The user
-store path identifies the preparation while its database stays closed.
+Give the outer stand lease time for gateway and Hub API startup, concurrent
+readiness waits, and shutdown. The launch stays on the existing Hub and MM
+stores. The user store path identifies the preparation while its database
+stays closed.
 
 ## Observation and shutdown
 

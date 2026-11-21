@@ -17,6 +17,7 @@ import {
   closeInfraDb,
   closeRuntimeDb,
   enqueueRuntimeInput,
+  getP2P,
   getP2PState,
   handleInboundP2PEntityInputs,
   listPersistedCheckpointHeights,
@@ -143,7 +144,7 @@ import {
   waitForTokenCatalog,
   yieldMarketMakerApi,
 } from './mm-node-core';
-import { readBooleanEnv } from '../../../config/environment';
+import { readBooleanEnv, readPositiveIntegerEnv } from '../../../config/environment';
 import {
   assertMarketMakerBootstrapFinalized,
   buildDeferredMarketMakerCrossHealth,
@@ -2264,7 +2265,7 @@ type MarketMakerQuoteLifecycle = {
   driveQuotes: (mode?: MarketMakerQuoteMode) => Promise<boolean>;
   markOffersReady: () => Promise<boolean>;
   refreshBootstrapPhase: (health: MarketMakerHealth | null) => void;
-  progress: ReturnType<typeof createBootstrapProgressMonitor>;
+  createProgressMonitor: () => ReturnType<typeof createBootstrapProgressMonitor>;
   loops: ReturnType<typeof createMarketMakerMaintenanceLoops>;
   readModel: ReturnType<typeof createMarketMakerQuoteReadModel>;
 };
@@ -2376,7 +2377,7 @@ const createMarketMakerQuoteLifecycle = (
     emit('phase', { phase: state.phase, health: summarizeMarketMakerHealthForDebug(currentHealth) });
     health.rebuildHealthResponse();
   };
-  const progress = createBootstrapProgressMonitor({
+  const createProgressMonitor = () => createBootstrapProgressMonitor({
     env,
     primaryContext,
     phase: () => state.phase,
@@ -2400,7 +2401,30 @@ const createMarketMakerQuoteLifecycle = (
     state.shuttingDown = true;
     loops.stop();
   };
-  return { driveQuotes, markOffersReady, refreshBootstrapPhase, progress, loops, readModel };
+  return { driveQuotes, markOffersReady, refreshBootstrapPhase, createProgressMonitor, loops, readModel };
+};
+
+const waitForConfiguredHubRoutes = async ({ env, state, health }: MarketMakerNodeContext): Promise<void> => {
+  const timeoutName = 'XLN_MARKET_MAKER_HUB_READY_TIMEOUT_MS';
+  if (process.env[timeoutName] === undefined) return;
+  const timeoutMs = readPositiveIntegerEnv(timeoutName, MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS);
+  const p2p = getP2P(env);
+  if (!p2p) throw new Error('MARKET_MAKER_BOOTSTRAP_HUB_TRANSPORT_MISSING');
+  const hubs = resolvedArgs.hubIdentities;
+  state.phase = 'waiting-hub-routes';
+  health.rebuildHealthResponse();
+  nodeLog.info('bootstrap.hub_routes_waiting', { count: hubs.length });
+  // The managed Hub advertises direct delivery readiness after its J drain.
+  // A single profile or socket cannot stand in for the other Hub Entity.
+  const ready = await p2p.bootstrapEntityRoutes(hubs.map(hub => hub.entityId), timeoutMs);
+  if (state.shuttingDown) return;
+  if (!ready) throw new Error('MARKET_MAKER_BOOTSTRAP_HUB_ROUTES_TIMEOUT');
+  const visible = readVisibleHubProfiles(env);
+  if (!hubs.every(hub => visible.some(profile =>
+    profile.entityId === hub.entityId && profile.jurisdictionRef === hub.jurisdictionRef))) {
+    throw new Error('MARKET_MAKER_BOOTSTRAP_HUB_PROFILE_MISMATCH');
+  }
+  nodeLog.info('bootstrap.hub_routes_ready', { count: hubs.length });
 };
 
 const startMarketMakerBootstrapWorker = (
@@ -2411,6 +2435,9 @@ const startMarketMakerBootstrapWorker = (
   void (async () => {
     await sleep(MARKET_MAKER_BOOTSTRAP_START_DELAY_MS);
     if (state.shuttingDown) return;
+    await waitForConfiguredHubRoutes(context);
+    if (state.shuttingDown) return;
+    const progress = lifecycle.createProgressMonitor();
     state.phase = 'bootstrap-same-chain';
     health.publishBootstrap();
     emit('phase', { phase: state.phase });
@@ -2419,7 +2446,7 @@ const startMarketMakerBootstrapWorker = (
         env,
         isShuttingDown: () => state.shuttingDown,
         health,
-        progress: lifecycle.progress,
+        progress,
         refreshPhase: lifecycle.refreshBootstrapPhase,
         isDepthComplete: lifecycle.readModel.isBootstrapDepthComplete,
         canCheckCompletion: lifecycle.readModel.canCheckCompletion,

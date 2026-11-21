@@ -78,6 +78,7 @@ try {
         ARB_SEPOLIA_RPC: process.env['ARB_SEPOLIA_RPC'],
         POC_RUNTIME_11155111_RPC: process.env['POC_RUNTIME_11155111_RPC'],
         POC_RUNTIME_421614_RPC: process.env['POC_RUNTIME_421614_RPC'],
+        POC_ARBITRUM_SECONDARY_HEADER_RPC: process.env['POC_ARBITRUM_SECONDARY_HEADER_RPC'],
         POC_HYPERSYNC_ARBITRUM_HEADERS: process.env['POC_HYPERSYNC_ARBITRUM_HEADERS'],
         POC_HYPERSYNC_TOKEN: process.env['POC_HYPERSYNC_TOKEN'],
         POC_HYPERRPC_ETHEREUM_RECEIPT_BATCH_CALLS: process.env['POC_HYPERRPC_ETHEREUM_RECEIPT_BATCH_CALLS'],
@@ -118,6 +119,7 @@ try {
   const identities = readExistingIdentities(config.directory);
   const roleEnv = (role: Role): NodeJS.ProcessEnv => ({
     ...baseEnv,
+    ...(role === 'mm' ? { XLN_MARKET_MAKER_HUB_READY_TIMEOUT_MS: String(config.startupTimeoutMs) } : {}),
     XLN_RUNTIME_SEED: readVaultSeed(join(config.directory, role)),
     XLN_RADAPTER_AUTH_SEED: readVaultSeed(join(config.directory, role)),
     XLN_RADAPTER_AUDIENCE: 'poc-usdc',
@@ -160,6 +162,7 @@ try {
       depositoryAddress: Object.values(catalog.jurisdictions).find(j => j.chainId === chain.chainId)!.contracts
         .depository,
     }));
+  const readiness: Promise<void>[] = [];
   for (const role of selectedRoles) {
     if (role === 'user') continue;
     const port = role === 'hub' ? config.hubPort : config.mmPort;
@@ -194,9 +197,15 @@ try {
       ],
       roleEnv(role),
     );
-    // MM can start after Hub has drained J history. Hub mesh bootstrap may
-    // still need MM to open support Accounts, so it cannot gate this launch.
-    await waitSessionReady(
+    if (role === 'hub' && selectedRoles.includes('mm')) {
+      await waitSessionReady(children, 'hub-api', async () =>
+        (await readSessionStatus(port, '/api/info'))?.['runtimeId'] === hubs[0]!.signerId,
+        config.startupTimeoutMs,
+      );
+    }
+    // Each Runtime drains its own WAL and J history. MM uses the Hub's
+    // authenticated delivery readiness before beginning its quote watchdog.
+    readiness.push(waitSessionReady(
       children,
       role,
       async () => {
@@ -209,8 +218,7 @@ try {
         return health['ok'] === true && reserves['ok'] === true && adapter['ready'] === true;
       },
       config.startupTimeoutMs,
-    );
-    if (stopping) throw new Error('USDC_SESSION_START_INTERRUPTED');
+    ));
   }
   if (selectedRoles.includes('user')) {
     const userReady = join(runDirectory, 'user-ready.json');
@@ -222,8 +230,10 @@ try {
       [config.directory, config.apiBase, userReady],
       roleEnv('user'),
     );
-    await waitSessionReady(children, 'user', async () => existsSync(userReady), config.startupTimeoutMs);
+    readiness.push(waitSessionReady(children, 'user', async () => existsSync(userReady), config.startupTimeoutMs));
   }
+  await Promise.all(readiness);
+  if (stopping) throw new Error('USDC_SESSION_START_INTERRUPTED');
   writeFileSync(
     join(runDirectory, 'session.json'),
     safeStringify(

@@ -181,6 +181,12 @@ test('funded user, Hub and MM restore exact WAL state, reject conflicts and stop
     const previous = readdirSync(join(root, 'sessions'));
     const session = launch('session', protectedConfig);
     const directory = await ready(session, previous);
+    const mmLog = readFileSync(join(directory, 'mm.log'), 'utf8');
+    const waitingForBothRoutes = mmLog.search(/bootstrap\.hub_routes_waiting .*"count":2\b/);
+    const bothRoutesReady = mmLog.search(/bootstrap\.hub_routes_ready .*"count":2\b/);
+    expect(waitingForBothRoutes).toBeGreaterThanOrEqual(0);
+    expect(bothRoutesReady).toBeGreaterThan(waitingForBothRoutes);
+    expect(mmLog.indexOf('offers.ready')).toBeGreaterThan(bothRoutesReady);
     const restored = record(join(directory, 'user-restored.json'));
     for (const key of ['runtimeId', 'height', 'canonicalStateHash', 'entityHashes', 'accounts', 'orderedOutboxDigest'])
       expect(restored[key]).toEqual(funded[key]);
