@@ -77,7 +77,8 @@ test('reports supervised deadline, RPC timing and slot evidence and stops watch 
       join(journey, 'execution.log'),
       'USDC_POC_STAGE:execution-user-relay-connected\n' +
         slot('approval', 'confirmed') +
-        slot('collateral', 'unavailable', 2),
+        slot('collateral', 'unavailable', 2) +
+        slot('withdrawal', 'conflict'),
     );
     const result = invoke(journey, '--watch');
     const output = result.stdout.toString();
@@ -90,6 +91,7 @@ test('reports supervised deadline, RPC timing and slot evidence and stops watch 
     expect(output).toContain('approval nonce 0  confirmed');
     expect(output).toContain('deposit nonce 1  attempted, acceptance unknown');
     expect(output).toContain('collateral nonce 2  accepted by RPC | receipt evidence unavailable');
+    expect(output).toContain(`withdrawal nonce 0  nonce conflict  ${hash}`);
     expect(output).not.toContain('nonce 3');
   } finally {
     close();

@@ -2,7 +2,7 @@
 
 Type: implementation
 Category: enhancement
-Completed: no
+Completed: yes
 Status: ready-for-agent
 Blocked by: 16 - Supervise the authorized one-USDC journey from the execution CLI
 
@@ -21,7 +21,7 @@ bun jurisdictions/scripts/usdc-cross-j-preflight/execution/index.ts status \
 
 ## Acceptance criteria
 
-- [ ] Validate the run ID, original manifest, catalog, chain anchors, and participant identities. Return one observation with human output and the same facts under `--json`. Show the manifest digest, observed blocks and WAL frame, the last verified step, and the reason progress is blocked or unknown.
+- [x] Validate the run ID, original manifest, catalog, chain anchors, and participant identities. Return one observation with human output and the same facts under `--json`. Show the manifest digest, observed blocks and WAL frame, the last verified step, and the reason progress is blocked or unknown.
 - [x] Reconcile the five fixed on-chain slots for the selected run. Verify a known transaction hash directly and use the canonical nonce lookup for a consumed slot without a known hash. Validate each receipt against the expected payer, nonce, authorized call, and canonical block. Distinguish confirmed success, revert, pending evidence, no observed transaction, and unavailable evidence. A consumed nonce with unavailable history is an unresolved slot.
 - [x] Inspect a consistent committed WAL frame for the source reserve or collateral, both Cross-J legs, remaining amounts, and target cover or exit. Report the Runtime observation independently from the on-chain receipt when the watcher is behind. Preserve an explicit unknown when the required WAL or RPC evidence is unavailable. Establish completion from the five valid receipts, settled route with zero remainder, and the exact external payout.
 - [x] Report authority expiry independently of the historical result. Use a read-only RPC provider and inspect the verified materialized WAL graph without applying the WAL tail or signing. WAL and verified chain receipts remain the sources of financial progress. Limit the output to observations and the outstanding prerequisites for continuing.
@@ -84,10 +84,21 @@ account nonce reads at the original anchor on the current RPC. With the archive
 on the same anchor, status verified the approval and deposit by hash. These
 observations kept the signing guard active and left the original stores intact.
 
-The [post-demo scope](../spec.md#scope-after-the-accepted-demo) defers the open
-P3 review item. If a different transaction consumed an expected nonce, status
-must surface that slot's conflict and preserve the independently verified slots.
-The current validation ends the whole observation on this case.
+### Nonce conflict verification
+
+On 2026-11-22, the interrupted two-Anvil fixture mined a malformed `processBatch`
+at the target user's withdrawal nonce. `status` identified the canonical hash
+and block as `conflict`. It retained the verified approval and 1 USDC deposit,
+the separate authorized collateral revert, and the unobserved Hub cover. The
+report remained incomplete and recorded zero status signatures, submissions, or
+writes to the original WAL and manifest. The operator progress command also
+rendered the nonce conflict and hash.
+
+The scoped patch on `7815226df21c76f031efc76446892beb33ae88ab` passed 21 owning
+tests with 177 assertions, including the full supervised one-USDC journey.
+Deployment TypeScript passed. `bun run check` passed 3 short and 38 source gates.
+The verified patch SHA-256 is
+`493d037f04e89fcfea3a0b95a27d18be34dd80c417e4b51b9d2a2d858c4dc1b8`.
 
 ## References
 

@@ -82,9 +82,6 @@ records what remains outside the single-run closure.
 - [14](issues/14-five-run-and-recovery-gas-plan.md) owns the five-run plan and
   cumulative recovery gas. The selected capital baseline is a 1-USDC source
   Hub buffer, 5 USDC of target Hub reserve and five 1-USDC user deposits.
-- [17](issues/17-read-only-usdc-run-status.md) remains in the backlog. The
-  outstanding diagnostic is a conflicting transaction in an expected nonce
-  slot during read-only run inspection.
 - The original stand's [six funding receipts](../../docs/evidence/ts-usdc-cross-j-poc/local-evidence.md#operator-funding-publicjson)
   remain under [11](issues/11-separate-operator-funding.md). It has a confirmed
   1/5-USDC reserve allocation and 0.001/0.0001-ETH signer topups. The owner paused
@@ -125,7 +122,7 @@ and the explicit owner decisions above.
 | [14](issues/14-five-run-and-recovery-gas-plan.md)         | Five-run and recovery gas budget                                   | 11, open                |
 | [15](issues/15-clean-candidate-public-proof.md)           | Clean committed public proof and signed Cross-J trace              | Complete                |
 | [16](issues/16-supervised-one-usdc-cli-run.md)            | Supervised one-USDC CLI run with pre-approval checks               | Complete locally        |
-| [17](issues/17-read-only-usdc-run-status.md)              | Read-only status for interrupted or completed runs                 | P3 deferred             |
+| [17](issues/17-read-only-usdc-run-status.md)              | Read-only status for interrupted or completed runs                 | Complete locally        |
 
 Ticket 12 uses the existing funding receipts under the original Runtime
 identities. Following the single-run closure, its outstanding observation

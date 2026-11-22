@@ -44,8 +44,11 @@ remainder, zero open Pulls and zero pending Account ACKs at completion.
   from the original WAL and receipts after interruption, and verifies the signed
   Cross-J evidence. With a valid grant, resuming the same run preserves the
   original nonce slots and avoids duplicate financial effects.
-- **Deferred work.** Ticket [17](issues/17-read-only-usdc-run-status.md)
-  retains the nonce-conflict diagnostic. The paused restore in
+- **Read-only run inspection.** Ticket [17](issues/17-read-only-usdc-run-status.md)
+  verifies receipts and WAL after interruption or authority expiry. It reports
+  a competing transaction at an authorized nonce with its hash and block,
+  preserving the independent results for the other slots.
+- **Deferred work.** The paused restore in
   [12](issues/12-public-rpc-capacity-and-funded-catchup.md) blocks original
   funding verification in [11](issues/11-separate-operator-funding.md), which
   precedes the [five-run and recovery budget](issues/14-five-run-and-recovery-gas-plan.md).

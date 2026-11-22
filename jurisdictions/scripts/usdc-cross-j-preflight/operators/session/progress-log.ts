@@ -73,6 +73,7 @@ const statuses = {
   known: 'already known to RPC',
   confirmed: 'confirmed',
   reverted: 'reverted',
+  conflict: 'nonce conflict',
   pending: 'pending',
   unobserved: 'unobserved',
   unavailable: 'receipt evidence unavailable',

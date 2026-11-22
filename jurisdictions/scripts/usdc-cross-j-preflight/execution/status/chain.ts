@@ -2,7 +2,7 @@ import { keccak256, Transaction, type JsonRpcProvider } from 'ethers';
 import { evmAttemptSlot } from '../../../../../core/storage/queries/evm-attempts';
 import { networks } from '../../identities';
 import { preflightProvider, RpcEnvironmentError, runtimeRpc } from '../../provider';
-import { validateAuthorizedWire } from '../calls';
+import { ExecutionCallNotAuthorized, validateAuthorizedWire } from '../calls';
 import { receiptSlots, verifyAuthorizedReceipt } from '../receipt-event';
 import { findMinedNonceReceipt } from '../nonce-receipt';
 import type { ChainAuthority, ExecutionAuthority, PayerGrant } from '../authority';
@@ -21,15 +21,16 @@ type SlotIdentity = {
 };
 export type SlotObservation = SlotIdentity &
   (
-    | {
-        status: 'confirmed' | 'reverted';
+    | ({
         consumed: true;
         hash: string;
         block: { number: number; hash: string };
         via: 'hash' | 'nonce';
         reason: string | null;
-        entry: Entry;
-      }
+      } & (
+        | { status: 'confirmed' | 'reverted'; entry: Entry }
+        | { status: 'conflict'; via: 'nonce'; reason: string; entry: null }
+      ))
     | {
         status: 'pending' | 'unobserved' | 'unavailable';
         consumed: boolean | null;
@@ -158,7 +159,8 @@ type ReadContext = {
   knownHashes: ReadonlyMap<string, readonly string[]>;
 };
 
-const readConsumed = async (ctx: ReadContext, slot: Slot, chain: ChainAuthority, payer: PayerGrant, nonce: number) => {
+const readConsumed = async (ctx: ReadContext, slot: Slot): Promise<SlotObservation> => {
+  const [, , chain, payer, nonce] = slot;
   if (!ctx.historical) throw new ObservationUnavailable('USDC_STATUS_HISTORY_RPC_UNCONFIGURED');
   const upper = await ctx.history();
   const [, atUpper] = await Promise.all([
@@ -168,12 +170,21 @@ const readConsumed = async (ctx: ReadContext, slot: Slot, chain: ChainAuthority,
   if (atUpper <= nonce) throw new ObservationUnavailable('USDC_STATUS_HISTORY_NONCE_UNAVAILABLE');
   const providers = { current: ctx.current, historical: ctx.historical };
   const entry = await findMinedNonceReceipt(providers, chain, payer, nonce, upper);
-  return minedSlot(
-    slot,
-    verifyAuthorizedReceipt(ctx.authority, chain, payer, nonce, entry),
-    'nonce',
-    hashesFor(ctx.knownHashes, slot),
-  );
+  const hashes = hashesFor(ctx.knownHashes, slot);
+  try {
+    return minedSlot(slot, verifyAuthorizedReceipt(ctx.authority, chain, payer, nonce, entry), 'nonce', hashes);
+  } catch (error) {
+    if (!(error instanceof ExecutionCallNotAuthorized)) throw error;
+    return {
+      ...slotBase(slot, hashes),
+      status: 'conflict',
+      consumed: true,
+      hash: entry.receipt.hash,
+      block: { number: entry.receipt.blockNumber, hash: entry.receipt.blockHash },
+      via: 'nonce',
+      reason: 'USDC_STATUS_NONCE_CONFLICT',
+    };
+  }
 };
 
 const readKnownHash = async (ctx: ReadContext, slot: Slot, hash: string) => {
@@ -200,7 +211,7 @@ const readSlot = async (ctx: ReadContext, slot: Slot): Promise<SlotObservation> 
     const confirmedNonce = await bounded(ctx.current.getTransactionCount(payer.address, ctx.point), 6_000);
     if (confirmedNonce < payer.firstNonce) throw new Error('USDC_EXECUTION_NONCE_ANCHOR_MISMATCH');
     consumed = confirmedNonce > nonce;
-    if (consumed) return await bounded(readConsumed(ctx, slot, chain, payer, nonce), 12_000);
+    if (consumed) return await bounded(readConsumed(ctx, slot), 12_000);
     const pending = known.find(candidate => candidate.result !== null)?.result;
     const pendingObserved =
       pending !== undefined ||

@@ -6,7 +6,16 @@ export type ProgressSlot = Readonly<{
   chainId: number;
   nonce: number;
   hash: string | null;
-  status: 'attempted' | 'submitted' | 'known' | 'confirmed' | 'reverted' | 'pending' | 'unobserved' | 'unavailable';
+  status:
+    | 'attempted'
+    | 'submitted'
+    | 'known'
+    | 'confirmed'
+    | 'reverted'
+    | 'conflict'
+    | 'pending'
+    | 'unobserved'
+    | 'unavailable';
 }>;
 
 export const logProgressSlot = (runId: string, { step, chainId, nonce, hash, status }: ProgressSlot): void =>

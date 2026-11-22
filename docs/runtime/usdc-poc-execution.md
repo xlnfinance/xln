@@ -278,6 +278,11 @@ the command uses the configured archive within the same observation. A missing
 or lagging archive can leave a consumed slot unresolved. The command returns
 without waiting for archive or watcher catch-up.
 
+If a verified mined transaction consumed a slot and its call falls outside
+the manifest, that slot reports `conflict` with the transaction hash and
+block. The other slots keep their independent results. The run remains
+incomplete, and a revert of the conflicting call still occupies the nonce.
+
 The WAL section shows one verified user Runtime frame and separate source and
 target views. A confirmed receipt can precede its Runtime observation.
 `watcher-behind` means the WAL's finalized J-height is below the receipt block.

@@ -1,4 +1,4 @@
-import { Interface, Transaction, zeroPadValue } from 'ethers';
+import { Interface, Transaction, isError, zeroPadValue } from 'ethers';
 import { Depository__factory } from '../../../typechain-types';
 import { decodeJBatch } from '../../../../core/jurisdiction/machine/batch';
 import { isLeftEntity } from '../../../../core/protocol/identity/entity-id';
@@ -8,12 +8,39 @@ import { payerSlots, type ChainAuthority, type ExecutionAuthority, type PayerGra
 const tokenAbi = new Interface(['function approve(address,uint256) returns(bool)']);
 const batchAbi = Depository__factory.createInterface();
 const same = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
+
+export class ExecutionCallNotAuthorized extends Error {
+  constructor(cause?: unknown) {
+    super('USDC_EXECUTION_CALL_NOT_AUTHORIZED', { cause });
+  }
+}
+
 const requireCall = (condition: boolean): void => {
-  if (!condition) throw new Error('USDC_EXECUTION_CALL_NOT_AUTHORIZED');
+  if (!condition) throw new ExecutionCallNotAuthorized();
+};
+
+const decodeCalldata = <T>(decode: () => T): T => {
+  try {
+    return decode();
+  } catch (error) {
+    const invalidBatch =
+      error instanceof Error &&
+      /^(J_BATCH_ABI_RESULT|ABI_MONEY_|deferred error during ABI decoding )/.test(error.message);
+    if (
+      invalidBatch ||
+      isError(error, 'BUFFER_OVERRUN') ||
+      isError(error, 'INVALID_ARGUMENT') ||
+      isError(error, 'NUMERIC_FAULT') ||
+      isError(error, 'BAD_DATA')
+    ) {
+      throw new ExecutionCallNotAuthorized(error);
+    }
+    throw error;
+  }
 };
 
 const validateBatch = (chain: ChainAuthority, payer: PayerGrant, stage: number, encoded: string): void => {
-  const batch = decodeJBatch(encoded);
+  const batch = decodeCalldata(() => decodeJBatch(encoded));
   const operation =
     payer.role === 'source-user'
       ? stage === 1
@@ -113,7 +140,7 @@ export const validateAuthorizedWire = (authority: ExecutionAuthority, chain: Cha
   const stage = payer.role === 'source-user' ? offset % 3 : 0;
   if (payer.role === 'source-user' && stage === 0) {
     requireCall(same(transaction.to!, chain.token));
-    const args = tokenAbi.decodeFunctionData('approve', transaction.data);
+    const args = decodeCalldata(() => Array.from(tokenAbi.decodeFunctionData('approve', transaction.data)));
     requireCall(
       same(String(args[0]), chain.depository) &&
         args[1] === 1_000_000n &&
@@ -122,7 +149,7 @@ export const validateAuthorizedWire = (authority: ExecutionAuthority, chain: Cha
     return { transaction, payer, runIndex: Math.floor(offset / 3), batch: null };
   }
   requireCall(same(transaction.to!, chain.depository));
-  const args = batchAbi.decodeFunctionData('processBatch', transaction.data);
+  const args = decodeCalldata(() => Array.from(batchAbi.decodeFunctionData('processBatch', transaction.data)));
   requireCall(transaction.data === batchAbi.encodeFunctionData('processBatch', [args[0], args[1], args[2]]));
   validateBatch(chain, payer, stage, String(args[0]));
   return {

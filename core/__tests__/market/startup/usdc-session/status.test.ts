@@ -298,6 +298,52 @@ test('status reconciles the mined deposit of an expired interrupted run without 
       hash: revertedHash,
       via: 'nonce',
     });
+    const targetUser = fixture.identities.find(identity => identity.role === 'user')!.chains[1]!;
+    if (!('signerIndex' in targetUser) || targetUser.signerIndex === undefined) {
+      throw new Error('TEST_TARGET_USER_SIGNER_INDEX_MISSING');
+    }
+    const targetKey = hexlify(
+      deriveSignerKeySync(readVaultSeed(join(root, 'user')), String(targetUser.signerIndex + 1)),
+    );
+    const foreign = await new Wallet(targetKey, target).sendTransaction({
+      to: fixture.chains[1]!.contracts.depository,
+      data: Depository__factory.createInterface().getFunction('processBatch')!.selector,
+      nonce: 0,
+      type: 2,
+      gasLimit: 50_000n,
+      maxFeePerGas: 1_000_000_000n,
+      maxPriorityFeePerGas: 100_000_000n,
+    });
+    await until(
+      'conflicting transaction mined',
+      async () => (await target.getTransactionReceipt(foreign.hash)) !== null,
+    );
+    const foreignReceipt = (await target.getTransactionReceipt(foreign.hash))!;
+    expect(foreignReceipt.status).toBe(0);
+    const conflict = await launchStatus(fixture, manifest, 'status-nonce-conflict', env);
+    expect(conflict).toMatchObject({
+      complete: false,
+      lastConfirmedStep: 'deposit',
+      remainingPrincipal: 1_000_000n,
+      payout: null,
+      slots: [
+        expect.objectContaining({ step: 'approval', status: 'confirmed', hash: submitted[0] }),
+        expect.objectContaining({ step: 'deposit', status: 'confirmed', hash: depositHash }),
+        expect.objectContaining({ step: 'collateral', status: 'reverted', hash: revertedHash }),
+        expect.objectContaining({ step: 'cover', status: 'unobserved' }),
+        expect.objectContaining({
+          step: 'withdrawal',
+          chainId: 421614,
+          nonce: 0,
+          status: 'conflict',
+          consumed: true,
+          hash: foreign.hash,
+          block: { number: foreignReceipt.blockNumber, hash: foreignReceipt.blockHash },
+          via: 'nonce',
+        }),
+      ],
+    });
+    expect(conflict['reasons']).toContain('withdrawal:USDC_STATUS_NONCE_CONFLICT');
     expect(submitted).toHaveLength(2);
     expect(Object.values(stores).flatMap(fingerprint)).toEqual(storeHash);
     expect(readFileSync(manifest, 'utf8')).toBe(originalManifest);

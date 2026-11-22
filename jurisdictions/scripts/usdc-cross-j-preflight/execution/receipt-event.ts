@@ -44,19 +44,23 @@ export const verifyAuthorizedReceipt = (
   entry: MinedReceipt,
 ) => {
   const { transaction, receipt } = entry;
-  const wire = validateAuthorizedWire(authority, chain, Transaction.from(transaction).serialized);
+  const signed = Transaction.from(transaction);
+  // Establish the payer, nonce and receipt before classifying a call rejection.
+  // An RPC mismatch cannot prove another transaction spent this slot.
   if (
-    wire.payer.address !== payer.address ||
-    wire.transaction.nonce !== nonce ||
-    wire.transaction.hash !== transaction.hash ||
+    transaction.from.toLowerCase() !== payer.address ||
+    signed.from?.toLowerCase() !== payer.address ||
+    signed.nonce !== nonce ||
+    signed.hash !== transaction.hash ||
     receipt.hash !== transaction.hash ||
     receipt.from.toLowerCase() !== payer.address ||
-    receipt.to?.toLowerCase() !== wire.transaction.to?.toLowerCase() ||
+    receipt.to?.toLowerCase() !== signed.to?.toLowerCase() ||
     receipt.blockHash !== transaction.blockHash ||
     receipt.blockNumber !== transaction.blockNumber ||
     (receipt.status !== 1 && receipt.status !== 0)
   )
     throw new Error(`USDC_EXECUTION_RUN_RECEIPT_MISMATCH:${receipt.hash}`);
+  const wire = validateAuthorizedWire(authority, chain, signed.serialized);
   if (wire.batch && receipt.status === 1) verifyBatchReceipt(chain, receipt, wire.batch);
   return { ...entry, batch: wire.batch };
 };
