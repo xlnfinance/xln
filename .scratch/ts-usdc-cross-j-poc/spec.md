@@ -1,6 +1,6 @@
 # Prove the TypeScript USDC Cross-J path without a frontend
 
-Status: ready-for-agent
+Status: complete
 Created: 2026-11-16
 Inspected source baseline: `b2dceb3438ff2582cee0c5741fe4a0528f5cbd26`
 Owner decisions: [design interview](map.md)
@@ -27,33 +27,28 @@ On 2026-11-19 the owner approved closing
 [06](issues/06-public-sepolia-arbitrum-proof.md) as preparation and observation
 of one public 1-USDC demo. The [recorded run](../../docs/evidence/ts-usdc-cross-j-poc/fresh-ubkyjm-journey-executed.json)
 paid 0.899801 USDC and retains its actual working-tree fingerprint.
-[14](issues/14-five-run-and-recovery-gas-plan.md) tracks the five-run plan
-and recovery budget. [15](issues/15-clean-candidate-public-proof.md) tracks the
-clean-commit proof and durable signed Cross-J trace. The original funded
-stores remain tracked in [11](issues/11-separate-operator-funding.md) and
-[12](issues/12-public-rpc-capacity-and-funded-catchup.md).
+
+On 2026-11-22, [15](issues/15-clean-candidate-public-proof.md) closed the
+single-run scope with a clean-candidate public proof on `1ce560d95`. The
+[execution report](../../docs/evidence/ts-usdc-cross-j-poc/ticket15-fresh-pqmqwh-journey-executed.json)
+binds the 1 USDC deposit, one Cross-J and 0.899801 USDC payout to the exact
+approved manifest. The [signed trace](../../docs/evidence/ts-usdc-cross-j-poc/ticket15-fresh-pqmqwh-journey-signed-trace.json)
+records the maker fill and both Account commitments. It confirms zero
+remainder, zero open Pulls and zero pending Account ACKs at completion.
 
 ## Scope after the accepted demo
 
-- **Accepted public result.** Tickets 05 and 06 record the observed one-USDC
-  journey, with five successful receipts, both Cross-J legs settled, zero
-  source remainder, and a 0.899801 USDC external payout. That evidence is bound
-  to the candidate recorded for the public run.
-- **CLI for one authorized run.** The locally verified CLI from
+- **CLI for one authorized run.** The supervised CLI from
   [16](issues/16-supervised-one-usdc-cli-run.md) runs on an already funded
   stand. It rechecks the signed tariff and backing before approval, reconciles
   from the original WAL and receipts after interruption, and verifies the signed
   Cross-J evidence. With a valid grant, resuming the same run preserves the
   original nonce slots and avoids duplicate financial effects.
-- **Remaining public proof.** [15](issues/15-clean-candidate-public-proof.md)
-  covers one public run bound to a verified clean SHA, with its receipts and
-  self-contained signed Cross-J trace. Refresh preflight for that exact
-  candidate and obtain separate spending authority before submission.
-- **Deferred work.** Keep further `status` diagnostics, including the nonce
-  conflict in [17](issues/17-read-only-usdc-run-status.md), in the backlog. The
-  original funded stand restore in 12 and the five-run public funding and gas
-  plan in 14 have separate deliverables. Ticket 15 can proceed independently
-  of all three.
+- **Deferred work.** Ticket [17](issues/17-read-only-usdc-run-status.md)
+  retains the nonce-conflict diagnostic. The paused restore in
+  [12](issues/12-public-rpc-capacity-and-funded-catchup.md) blocks original
+  funding verification in [11](issues/11-separate-operator-funding.md), which
+  precedes the [five-run and recovery budget](issues/14-five-run-and-recovery-gas-plan.md).
 
 ## Accepted operating model
 

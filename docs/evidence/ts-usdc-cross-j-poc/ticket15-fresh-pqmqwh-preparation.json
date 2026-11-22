@@ -1,0 +1,1045 @@
+{
+  "status": "unfunded-stand-and-unsigned-package-verified",
+  "stand": "ticket15-fresh-pQmqWH",
+  "observedAt": "2026-11-22T15:30:00.231Z",
+  "candidate": {
+    "digest": "6366d3e8c879749fb688ab79fc175e3a57af9f7ddb616eab15ea61083ee87a09",
+    "head": "1ce560d954f4f59dc4e0bf5f9182dc1ad225711d"
+  },
+  "startup": {
+    "initialHeads": {
+      "421614": 331712665,
+      "11155111": 12189610
+    },
+    "readyAtMs": {
+      "hub": 16892,
+      "mm": 36009
+    },
+    "unfundedVerified": true,
+    "children": [
+      {
+        "exitCode": 0,
+        "name": "gateway",
+        "signalCode": null
+      },
+      {
+        "exitCode": 0,
+        "name": "hub",
+        "signalCode": null
+      },
+      {
+        "exitCode": 0,
+        "name": "mm",
+        "signalCode": null
+      }
+    ],
+    "accounts": [
+      {
+        "chainId": 11155111,
+        "signerId": "0x0b51580798d5ba11b52f9d178e8ff8309e6830d2",
+        "entityId": "0xe95389464e8192b511daca0ad26a20cf5b5222d1897c1aef176274ed59a94abe",
+        "hubEntityId": "0xc11697f8f041c8801502d414ae7383daf13f70e8f4f1ab6d1cccd7661c19c08b",
+        "height": 2
+      },
+      {
+        "chainId": 421614,
+        "signerId": "0x28360c2e06e220f2fd245f299db4661a538cef19",
+        "entityId": "0x883387564198674469044bc201e8fe93c0ce2fde0239d8e44d8f291a4328cfb7",
+        "hubEntityId": "0x3d27bf5bf6ea250406a9c12acc8fdeaa9570ef683a45450dd78e111864f363be",
+        "height": 2
+      }
+    ]
+  },
+  "wal": {
+    "operators": [
+      {
+        "anchors": [
+          {
+            "batchNonce": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "block": 12189608,
+            "blockHash": "0x5fa735aeec1bd8fe13f064c2854affe562a475e13c30fc7493723f3e7b0ef3f5",
+            "chainId": 11155111,
+            "entityId": "0xc11697f8f041c8801502d414ae7383daf13f70e8f4f1ab6d1cccd7661c19c08b",
+            "provenValuesRoot": "0xa14f71459e1913a323a5aad20e6c7335ccffe62cc09dd1acd79c484a0efb49c7",
+            "runtimeFrame": 13,
+            "stateRoot": "0x057302a7774ca8ef1feb88c33cd94f3c8ec6a2a595d520cbe91a7dd8e791d38d",
+            "tokenOneReserveAtoms": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            }
+          },
+          {
+            "batchNonce": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "block": 331712680,
+            "blockHash": "0x0db5a8f187a9a03ab124be0d0b9431131a72c79417aea72bff0e9c6f591be0ed",
+            "chainId": 421614,
+            "entityId": "0x3d27bf5bf6ea250406a9c12acc8fdeaa9570ef683a45450dd78e111864f363be",
+            "provenValuesRoot": "0xd6da030c8641de206f737dcfa01c9f07b5eb8101b309fbfc35a20bd7b45096c8",
+            "runtimeFrame": 13,
+            "stateRoot": "0xc14d9f34e3318d11bcec0cf411a9eeb2d7be1ad8ddca0db6a6aff6ea3c577aec",
+            "tokenOneReserveAtoms": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            }
+          }
+        ],
+        "role": "hub",
+        "verified": {
+          "checkedFrames": 51,
+          "latestHeight": 51
+        }
+      },
+      {
+        "anchors": [
+          {
+            "batchNonce": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "block": 12189610,
+            "blockHash": "0x6aac9ac47045994f32cd30e41c409e1119a034fe06497e2ad4aaa784e59c53e6",
+            "chainId": 11155111,
+            "entityId": "0xbe1fcda7243b41625733037e179f9ce49c58676b2204fcec9234f9740d44dec0",
+            "provenValuesRoot": "0x417aea66b56a28d9af2782aab9ceec8c4fb75a8369050be2f2bed83b2eeebffa",
+            "runtimeFrame": 7,
+            "stateRoot": "0xbd8259b280ec3fe10db00026c99955579f53afa6a0382a2f9f79bc207cf89f84",
+            "tokenOneReserveAtoms": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            }
+          },
+          {
+            "batchNonce": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "block": 331712744,
+            "blockHash": "0x4398ccf5f0db3dde6312d8c80dd40eff357f38b5932a951aa15de82680ec3e59",
+            "chainId": 421614,
+            "entityId": "0x536858c418f5d045bd367664abb6ac1aef1bc1e3daa4459eb5ba487bba3f9068",
+            "provenValuesRoot": "0x76a6710cd8e9ba87577bd59766c3b019d3c3423120ac96be2e0446377d2edc48",
+            "runtimeFrame": 8,
+            "stateRoot": "0xf702205daef0cfad474a0d7646a7e37edfa93ceffd459df7a19ca392f0ae85c4",
+            "tokenOneReserveAtoms": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            }
+          }
+        ],
+        "role": "mm",
+        "verified": {
+          "checkedFrames": 37,
+          "latestHeight": 37
+        }
+      }
+    ],
+    "user": {
+      "height": 12,
+      "comparedIdentical": [
+        "runtimeId",
+        "height",
+        "canonicalStateHash",
+        "entityHashes",
+        "accounts"
+      ],
+      "integrity": {
+        "latestHeight": 12,
+        "checkedFrames": 12
+      },
+      "liveQueueWasEmpty": true,
+      "committedOutputCount": 1,
+      "restoredOutboxMatchesCommitted": true,
+      "outputs": [
+        {
+          "entityId": "0x3d27bf5bf6ea250406a9c12acc8fdeaa9570ef683a45450dd78e111864f363be",
+          "originFrame": 12,
+          "operations": [
+            "accountInput"
+          ]
+        }
+      ]
+    },
+    "restored": [
+      {
+        "role": "hub",
+        "height": 51,
+        "restoredHeadVerified": true,
+        "runtimeId": "0xfa9316f6ef918dcc6067e67fb8129f6c6155f1d6",
+        "entities": [
+          {
+            "chainId": 11155111,
+            "entityId": "0xc11697f8f041c8801502d414ae7383daf13f70e8f4f1ab6d1cccd7661c19c08b",
+            "finalizedThroughHeight": 12189611,
+            "reserveAtoms": "0",
+            "accounts": 2
+          },
+          {
+            "chainId": 421614,
+            "entityId": "0x3d27bf5bf6ea250406a9c12acc8fdeaa9570ef683a45450dd78e111864f363be",
+            "finalizedThroughHeight": 331712791,
+            "reserveAtoms": "0",
+            "accounts": 2
+          }
+        ]
+      },
+      {
+        "role": "mm",
+        "height": 37,
+        "restoredHeadVerified": true,
+        "runtimeId": "0xf2925f21bdf77eaa8f6631317f3dddd49cabf466",
+        "entities": [
+          {
+            "chainId": 11155111,
+            "entityId": "0xbe1fcda7243b41625733037e179f9ce49c58676b2204fcec9234f9740d44dec0",
+            "finalizedThroughHeight": 12189611,
+            "reserveAtoms": "0",
+            "accounts": 1
+          },
+          {
+            "chainId": 421614,
+            "entityId": "0x536858c418f5d045bd367664abb6ac1aef1bc1e3daa4459eb5ba487bba3f9068",
+            "finalizedThroughHeight": 331712763,
+            "reserveAtoms": "0",
+            "accounts": 1
+          }
+        ]
+      },
+      {
+        "role": "user",
+        "height": 12,
+        "matchingCanonicalState": true,
+        "matchingAccounts": 2
+      }
+    ]
+  },
+  "funding": {
+    "approved": false,
+    "chains": [
+      {
+        "anchorHash": "0x0b23041b917596e519809e5dbd633823be00929ac244ff181084b94a5408c51f",
+        "anchorNumber": 12189617,
+        "calls": [
+          {
+            "cap": {
+              "gasLimit": {
+                "__xlnType": "BigInt",
+                "value": "200000"
+              },
+              "maxFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "1000000000"
+              },
+              "maxPriorityFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "100000000"
+              }
+            },
+            "data": "0x095ea7b300000000000000000000000032a4a72992ad142e36fa1c5989b95fed609878180000000000000000000000000000000000000000000000000000000000000001",
+            "estimate": {
+              "__xlnType": "BigInt",
+              "value": "139993"
+            },
+            "nonce": 129,
+            "stage": "approval",
+            "to": "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
+            "valueWei": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            }
+          },
+          {
+            "cap": {
+              "gasLimit": {
+                "__xlnType": "BigInt",
+                "value": "600000"
+              },
+              "maxFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "1000000000"
+              },
+              "maxPriorityFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "100000000"
+              }
+            },
+            "encodedBatch": "0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000160000000000000000000000000000000000000000000000000000000000000018000000000000000000000000000000000000000000000000000000000000001a000000000000000000000000000000000000000000000000000000000000001c000000000000000000000000000000000000000000000000000000000000001e000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000220000000000000000000000000000000000000000000000000000000000000024000000000000000000000000000000000000000000000000000000000000003200000000000000000000000000000000000000000000000000000000000000340000000000000000000000000000000000000000000000000000000000000036000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001c11697f8f041c8801502d414ae7383daf13f70e8f4f1ab6d1cccd7661c19c08b0000000000000000000000001c7d4b196cb0c7b01d743fbc6116a902379c72380000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+            "estimate": "conditional-on-confirmed-allowance-and-authorized-hanko",
+            "hankoHash": "0x34de73daa50cd45e9e01452e423cfcb2add0c221136ad17fe8e70a21a0f97416",
+            "nextEntityNonce": {
+              "__xlnType": "BigInt",
+              "value": "8"
+            },
+            "nonce": 130,
+            "stage": "deposit",
+            "to": "0x32a4a72992ad142e36fa1c5989b95fed60987818",
+            "valueWei": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            }
+          },
+          {
+            "cap": {
+              "gasLimit": {
+                "__xlnType": "BigInt",
+                "value": "300000"
+              },
+              "maxFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "1000000000"
+              },
+              "maxPriorityFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "100000000"
+              }
+            },
+            "data": "0x",
+            "estimate": {
+              "__xlnType": "BigInt",
+              "value": "207391"
+            },
+            "nonce": 131,
+            "stage": "native-topup",
+            "to": "0xfa9316f6ef918dcc6067e67fb8129f6c6155f1d6",
+            "valueWei": {
+              "__xlnType": "BigInt",
+              "value": "1000000000000000"
+            }
+          },
+          {
+            "cap": {
+              "gasLimit": {
+                "__xlnType": "BigInt",
+                "value": "200000"
+              },
+              "maxFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "1000000000"
+              },
+              "maxPriorityFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "100000000"
+              }
+            },
+            "data": "0xa9059cbb0000000000000000000000000b51580798d5ba11b52f9d178e8ff8309e6830d200000000000000000000000000000000000000000000000000000000000f4240",
+            "estimate": {
+              "__xlnType": "BigInt",
+              "value": "154151"
+            },
+            "nonce": 132,
+            "stage": "user-principal-transfer",
+            "to": "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
+            "valueWei": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            }
+          },
+          {
+            "cap": {
+              "gasLimit": {
+                "__xlnType": "BigInt",
+                "value": "300000"
+              },
+              "maxFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "1000000000"
+              },
+              "maxPriorityFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "100000000"
+              }
+            },
+            "data": "0x",
+            "estimate": {
+              "__xlnType": "BigInt",
+              "value": "207391"
+            },
+            "nonce": 133,
+            "stage": "user-native-topup",
+            "to": "0x0b51580798d5ba11b52f9d178e8ff8309e6830d2",
+            "valueWei": {
+              "__xlnType": "BigInt",
+              "value": "2000000000000000"
+            }
+          }
+        ],
+        "chainId": 11155111,
+        "depository": "0x32a4a72992ad142e36fa1c5989b95fed60987818",
+        "feesWei": {
+          "__xlnType": "BigInt",
+          "value": "1600000000000000"
+        },
+        "funder": {
+          "address": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+          "firstNonce": 129
+        },
+        "funderNativeWei": {
+          "__xlnType": "BigInt",
+          "value": "41189548022328296251"
+        },
+        "funderUsdcAtoms": {
+          "__xlnType": "BigInt",
+          "value": "3999996"
+        },
+        "hubEntity": "0xc11697f8f041c8801502d414ae7383daf13f70e8f4f1ab6d1cccd7661c19c08b",
+        "hubSigner": "0xfa9316f6ef918dcc6067e67fb8129f6c6155f1d6",
+        "hubUsdcAtoms": {
+          "__xlnType": "BigInt",
+          "value": "1"
+        },
+        "nativeOutflowCeilingWei": {
+          "__xlnType": "BigInt",
+          "value": "4600000000000000"
+        },
+        "token": "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
+        "userSigner": "0x0b51580798d5ba11b52f9d178e8ff8309e6830d2",
+        "userUsdcAtoms": {
+          "__xlnType": "BigInt",
+          "value": "1000000"
+        }
+      },
+      {
+        "anchorHash": "0x4cc2fb34b85b3ddc6765a0cb6f98f1eb7f8b1997e8c48368c078b071cf9e3385",
+        "anchorNumber": 331712952,
+        "calls": [
+          {
+            "cap": {
+              "gasLimit": {
+                "__xlnType": "BigInt",
+                "value": "90000"
+              },
+              "maxFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "100000000"
+              },
+              "maxPriorityFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "0"
+              }
+            },
+            "data": "0x095ea7b30000000000000000000000008223aa4c60adb851f53a120c3d3841de9e77c18800000000000000000000000000000000000000000000000000000000000f4240",
+            "estimate": {
+              "__xlnType": "BigInt",
+              "value": "56240"
+            },
+            "nonce": 49,
+            "stage": "approval",
+            "to": "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d",
+            "valueWei": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            }
+          },
+          {
+            "cap": {
+              "gasLimit": {
+                "__xlnType": "BigInt",
+                "value": "600000"
+              },
+              "maxFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "100000000"
+              },
+              "maxPriorityFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "0"
+              }
+            },
+            "encodedBatch": "0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000160000000000000000000000000000000000000000000000000000000000000018000000000000000000000000000000000000000000000000000000000000001a000000000000000000000000000000000000000000000000000000000000001c000000000000000000000000000000000000000000000000000000000000001e0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000002200000000000000000000000000000000000000000000000000000000000000240000000000000000000000000000000000000000000000000000000000000032000000000000000000000000000000000000000000000000000000000000003400000000000000000000000000000000000000000000000000000000000000360000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000013d27bf5bf6ea250406a9c12acc8fdeaa9570ef683a45450dd78e111864f363be00000000000000000000000075faf114eafb1bdbe2f0316df893fd58ce46aa4d00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000f4240000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+            "estimate": "conditional-on-confirmed-allowance-and-authorized-hanko",
+            "hankoHash": "0x430dd7f366a2179a457b55825b042313ee1150bc25863ba7b8b2a44bedf46758",
+            "nextEntityNonce": {
+              "__xlnType": "BigInt",
+              "value": "8"
+            },
+            "nonce": 50,
+            "stage": "deposit",
+            "to": "0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+            "valueWei": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            }
+          },
+          {
+            "cap": {
+              "gasLimit": {
+                "__xlnType": "BigInt",
+                "value": "300000"
+              },
+              "maxFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "100000000"
+              },
+              "maxPriorityFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "0"
+              }
+            },
+            "data": "0x",
+            "estimate": {
+              "__xlnType": "BigInt",
+              "value": "21000"
+            },
+            "nonce": 51,
+            "stage": "native-topup",
+            "to": "0x38be18879d51d4849cc031a70db1870d376c66ea",
+            "valueWei": {
+              "__xlnType": "BigInt",
+              "value": "100000000000000"
+            }
+          },
+          {
+            "cap": {
+              "gasLimit": {
+                "__xlnType": "BigInt",
+                "value": "300000"
+              },
+              "maxFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "100000000"
+              },
+              "maxPriorityFeePerGasWei": {
+                "__xlnType": "BigInt",
+                "value": "0"
+              }
+            },
+            "data": "0x",
+            "estimate": {
+              "__xlnType": "BigInt",
+              "value": "21000"
+            },
+            "nonce": 52,
+            "stage": "user-native-topup",
+            "to": "0x28360c2e06e220f2fd245f299db4661a538cef19",
+            "valueWei": {
+              "__xlnType": "BigInt",
+              "value": "100000000000000"
+            }
+          }
+        ],
+        "chainId": 421614,
+        "depository": "0x8223aa4c60adb851f53a120c3d3841de9e77c188",
+        "feesWei": {
+          "__xlnType": "BigInt",
+          "value": "129000000000000"
+        },
+        "funder": {
+          "address": "0x42da3ba8c586f6fe9ef6ed1d09423eb73e4fe25b",
+          "firstNonce": 49
+        },
+        "funderNativeWei": {
+          "__xlnType": "BigInt",
+          "value": "527644664869999600"
+        },
+        "funderUsdcAtoms": {
+          "__xlnType": "BigInt",
+          "value": "11000000"
+        },
+        "hubEntity": "0x3d27bf5bf6ea250406a9c12acc8fdeaa9570ef683a45450dd78e111864f363be",
+        "hubSigner": "0x38be18879d51d4849cc031a70db1870d376c66ea",
+        "hubUsdcAtoms": {
+          "__xlnType": "BigInt",
+          "value": "1000000"
+        },
+        "nativeOutflowCeilingWei": {
+          "__xlnType": "BigInt",
+          "value": "329000000000000"
+        },
+        "token": "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d",
+        "userSigner": "0x28360c2e06e220f2fd245f299db4661a538cef19",
+        "userUsdcAtoms": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        }
+      }
+    ],
+    "executionAllowed": false,
+    "expiresAt": "2026-11-22T17:29:23.512Z",
+    "publicBroadcasts": 0,
+    "publicSignatures": 0,
+    "sha256": "16277245d2608e9aa8b043644b78ba52a2c345f8d89e3aa8ef09112b307313b0",
+    "verifiedSameCandidate": true,
+    "manifest": "ticket15-fresh-pqmqwh-funding-unsigned.json"
+  },
+  "fundingLiveReadOnlyAudit": {
+    "activeExecutableAndCatalogMatch": true,
+    "authorityApproved": false,
+    "chains": [
+      {
+        "allowanceAtoms": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "anchorHash": "0x0b23041b917596e519809e5dbd633823be00929ac244ff181084b94a5408c51f",
+        "anchorNumber": 12189617,
+        "assetAndCodeVerified": true,
+        "before": {
+          "backing": {
+            "__xlnType": "BigInt",
+            "value": "4000004"
+          },
+          "entityNonce": {
+            "__xlnType": "BigInt",
+            "value": "7"
+          },
+          "funderNativeWei": {
+            "__xlnType": "BigInt",
+            "value": "41189548022328296251"
+          },
+          "funderNonce": 129,
+          "funderUsdc": {
+            "__xlnType": "BigInt",
+            "value": "3999996"
+          },
+          "hubDebt": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "hubNativeWei": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "hubReserve": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "point": {
+            "hash": "0x0b23041b917596e519809e5dbd633823be00929ac244ff181084b94a5408c51f",
+            "number": 12189617
+          },
+          "user": {
+            "nativeWei": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "usdc": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            }
+          }
+        },
+        "calls": [
+          {
+            "estimate": {
+              "__xlnType": "BigInt",
+              "value": "139993"
+            },
+            "gasLimit": {
+              "__xlnType": "BigInt",
+              "value": "200000"
+            },
+            "stage": "approval",
+            "withinLimit": true
+          },
+          {
+            "estimate": null,
+            "gasLimit": {
+              "__xlnType": "BigInt",
+              "value": "600000"
+            },
+            "reason": "authorized-hanko-and-confirmed-allowance-required",
+            "stage": "deposit"
+          },
+          {
+            "estimate": {
+              "__xlnType": "BigInt",
+              "value": "207391"
+            },
+            "gasLimit": {
+              "__xlnType": "BigInt",
+              "value": "300000"
+            },
+            "stage": "native-topup",
+            "withinLimit": true
+          },
+          {
+            "estimate": {
+              "__xlnType": "BigInt",
+              "value": "154151"
+            },
+            "gasLimit": {
+              "__xlnType": "BigInt",
+              "value": "200000"
+            },
+            "stage": "user-principal-transfer",
+            "withinLimit": true
+          },
+          {
+            "estimate": {
+              "__xlnType": "BigInt",
+              "value": "207391"
+            },
+            "gasLimit": {
+              "__xlnType": "BigInt",
+              "value": "300000"
+            },
+            "stage": "user-native-topup",
+            "withinLimit": true
+          }
+        ],
+        "chainId": 11155111,
+        "confirmedAfter": 129,
+        "feeLimits": [
+          {
+            "fits": true,
+            "maxFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "1000000000"
+            },
+            "maxPriorityFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "100000000"
+            },
+            "stage": "approval"
+          },
+          {
+            "fits": true,
+            "maxFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "1000000000"
+            },
+            "maxPriorityFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "100000000"
+            },
+            "stage": "deposit"
+          },
+          {
+            "fits": true,
+            "maxFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "1000000000"
+            },
+            "maxPriorityFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "100000000"
+            },
+            "stage": "native-topup"
+          },
+          {
+            "fits": true,
+            "maxFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "1000000000"
+            },
+            "maxPriorityFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "100000000"
+            },
+            "stage": "user-principal-transfer"
+          },
+          {
+            "fits": true,
+            "maxFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "1000000000"
+            },
+            "maxPriorityFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "100000000"
+            },
+            "stage": "user-native-topup"
+          }
+        ],
+        "feeSample": {
+          "baseFeePerGasWei": {
+            "__xlnType": "BigInt",
+            "value": "18"
+          },
+          "block": 12189617,
+          "hash": "0x0b23041b917596e519809e5dbd633823be00929ac244ff181084b94a5408c51f"
+        },
+        "liveNonce": 129,
+        "observed": {
+          "backing": {
+            "__xlnType": "BigInt",
+            "value": "4000004"
+          },
+          "entityNonce": {
+            "__xlnType": "BigInt",
+            "value": "7"
+          },
+          "funderNativeWei": {
+            "__xlnType": "BigInt",
+            "value": "41189548022328296251"
+          },
+          "funderNonce": 129,
+          "funderUsdc": {
+            "__xlnType": "BigInt",
+            "value": "3999996"
+          },
+          "hubDebt": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "hubNativeWei": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "hubReserve": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "point": {
+            "hash": "0x0b23041b917596e519809e5dbd633823be00929ac244ff181084b94a5408c51f",
+            "number": 12189617
+          },
+          "user": {
+            "nativeWei": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "usdc": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            }
+          }
+        },
+        "pendingAfter": 129,
+        "pendingNonce": 129,
+        "requiredNativeWei": {
+          "__xlnType": "BigInt",
+          "value": "4600000000000000"
+        },
+        "requiredUsdcAtoms": {
+          "__xlnType": "BigInt",
+          "value": "1000001"
+        },
+        "status": "read-only-precheck-passed",
+        "unusedSlots": 5
+      },
+      {
+        "allowanceAtoms": {
+          "__xlnType": "BigInt",
+          "value": "0"
+        },
+        "anchorHash": "0x4cc2fb34b85b3ddc6765a0cb6f98f1eb7f8b1997e8c48368c078b071cf9e3385",
+        "anchorNumber": 331712952,
+        "assetAndCodeVerified": true,
+        "before": {
+          "backing": {
+            "__xlnType": "BigInt",
+            "value": "7200398"
+          },
+          "entityNonce": {
+            "__xlnType": "BigInt",
+            "value": "7"
+          },
+          "funderNativeWei": {
+            "__xlnType": "BigInt",
+            "value": "527644664869999600"
+          },
+          "funderNonce": 49,
+          "funderUsdc": {
+            "__xlnType": "BigInt",
+            "value": "11000000"
+          },
+          "hubDebt": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "hubNativeWei": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "hubReserve": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "point": {
+            "hash": "0x4cc2fb34b85b3ddc6765a0cb6f98f1eb7f8b1997e8c48368c078b071cf9e3385",
+            "number": 331712952
+          },
+          "user": {
+            "nativeWei": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "usdc": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            }
+          }
+        },
+        "calls": [
+          {
+            "estimate": {
+              "__xlnType": "BigInt",
+              "value": "56240"
+            },
+            "gasLimit": {
+              "__xlnType": "BigInt",
+              "value": "90000"
+            },
+            "stage": "approval",
+            "withinLimit": true
+          },
+          {
+            "estimate": null,
+            "gasLimit": {
+              "__xlnType": "BigInt",
+              "value": "600000"
+            },
+            "reason": "authorized-hanko-and-confirmed-allowance-required",
+            "stage": "deposit"
+          },
+          {
+            "estimate": {
+              "__xlnType": "BigInt",
+              "value": "21000"
+            },
+            "gasLimit": {
+              "__xlnType": "BigInt",
+              "value": "300000"
+            },
+            "stage": "native-topup",
+            "withinLimit": true
+          },
+          {
+            "estimate": {
+              "__xlnType": "BigInt",
+              "value": "21000"
+            },
+            "gasLimit": {
+              "__xlnType": "BigInt",
+              "value": "300000"
+            },
+            "stage": "user-native-topup",
+            "withinLimit": true
+          }
+        ],
+        "chainId": 421614,
+        "confirmedAfter": 49,
+        "feeLimits": [
+          {
+            "fits": true,
+            "maxFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "100000000"
+            },
+            "maxPriorityFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "stage": "approval"
+          },
+          {
+            "fits": true,
+            "maxFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "100000000"
+            },
+            "maxPriorityFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "stage": "deposit"
+          },
+          {
+            "fits": true,
+            "maxFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "100000000"
+            },
+            "maxPriorityFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "stage": "native-topup"
+          },
+          {
+            "fits": true,
+            "maxFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "100000000"
+            },
+            "maxPriorityFeePerGasWei": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "stage": "user-native-topup"
+          }
+        ],
+        "feeSample": {
+          "baseFeePerGasWei": {
+            "__xlnType": "BigInt",
+            "value": "20000000"
+          },
+          "block": 331713010,
+          "hash": "0x738d126226c6e32f8ed6099afedf2eae88dea44f9e926f819801c2d8c145b748"
+        },
+        "liveNonce": 49,
+        "observed": {
+          "backing": {
+            "__xlnType": "BigInt",
+            "value": "7200398"
+          },
+          "entityNonce": {
+            "__xlnType": "BigInt",
+            "value": "7"
+          },
+          "funderNativeWei": {
+            "__xlnType": "BigInt",
+            "value": "527644664869999600"
+          },
+          "funderNonce": 49,
+          "funderUsdc": {
+            "__xlnType": "BigInt",
+            "value": "11000000"
+          },
+          "hubDebt": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "hubNativeWei": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "hubReserve": {
+            "__xlnType": "BigInt",
+            "value": "0"
+          },
+          "point": {
+            "hash": "0x971d48b5a7d36f2b8b580a416b89f859ff2fed65c01b099d4824a6737156373c",
+            "number": 331712999
+          },
+          "user": {
+            "nativeWei": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            },
+            "usdc": {
+              "__xlnType": "BigInt",
+              "value": "0"
+            }
+          }
+        },
+        "pendingAfter": 49,
+        "pendingNonce": 49,
+        "requiredNativeWei": {
+          "__xlnType": "BigInt",
+          "value": "329000000000000"
+        },
+        "requiredUsdcAtoms": {
+          "__xlnType": "BigInt",
+          "value": "1000000"
+        },
+        "status": "read-only-precheck-passed",
+        "unusedSlots": 4
+      }
+    ],
+    "expiresAt": "2026-11-22T17:29:23.512Z",
+    "observedAt": "2026-11-22T15:30:00.231Z",
+    "publicBroadcasts": 0,
+    "publicSignatures": 0,
+    "sha256": "16277245d2608e9aa8b043644b78ba52a2c345f8d89e3aa8ef09112b307313b0",
+    "startedAt": "2026-11-22T15:29:46.437Z"
+  },
+  "publicSignatures": 0,
+  "publicBroadcasts": 0
+}

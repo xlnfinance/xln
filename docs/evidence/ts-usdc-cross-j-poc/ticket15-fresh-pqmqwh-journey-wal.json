@@ -1,0 +1,31 @@
+{
+  "candidateHead": "1ce560d954f4f59dc4e0bf5f9182dc1ad225711d",
+  "runId": "ticket15-pqmqwh-1usdc-20261122",
+  "unsignedSha256": "1d35072041c0b2ffb09a66fb449e86d2104b09fd4c1f335c3752ad310e17d0cb",
+  "stores": [
+    {
+      "role": "user",
+      "runtimeId": "0x0b51580798d5ba11b52f9d178e8ff8309e6830d2",
+      "integrity": {
+        "latestHeight": 59,
+        "checkedFrames": 59
+      }
+    },
+    {
+      "role": "hub",
+      "runtimeId": "0xfa9316f6ef918dcc6067e67fb8129f6c6155f1d6",
+      "integrity": {
+        "latestHeight": 115,
+        "checkedFrames": 115
+      }
+    },
+    {
+      "role": "mm",
+      "runtimeId": "0xf2925f21bdf77eaa8f6631317f3dddd49cabf466",
+      "integrity": {
+        "latestHeight": 63,
+        "checkedFrames": 63
+      }
+    }
+  ]
+}
