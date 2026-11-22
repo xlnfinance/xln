@@ -9,6 +9,7 @@ import {
 } from '../../runtime';
 import { createCheckpointBarrierRuntimeTx } from '../../runtime/checkpoint/barrier';
 import { enqueueRuntimeContinuation } from '../../runtime/loop/loop-envelope';
+import { isJCatchupFenced } from '../../runtime/loop/loop-work';
 import { haltRuntimeRequiresOperator, transitionRuntimeLifecycle } from '../../runtime/replica/lifecycle';
 import type { RuntimeP2PConfig } from '../../runtime/envelope/p2p-types';
 import type { RuntimeReplica } from '../../runtime/types';
@@ -19,6 +20,8 @@ export type NodeRuntimeQuiesceOptions = {
   workTimeoutMs: number;
   loopTimeoutMs: number;
   quietMs?: number;
+  /** Process exit during J catch-up can recover the committed WAL prefix. */
+  preserveStartupPrefix?: boolean;
   /**
    * Bootstrap-only: drain the in-memory pre-snapshot state while storage is
    * intentionally paused. The caller must publish the complete state as one
@@ -107,16 +110,17 @@ export const quiesceNodeRuntime = async (
   } catch (error) {
     failures.push(`watchers:${errorText(error)}`);
   }
-  try {
-    runtimeDrained = await waitForRuntimeWorkDrained(
-      env,
-      options.workTimeoutMs,
-      options.quietMs,
-      drainOptions,
-    );
-    if (!runtimeDrained) failures.push('work_drain_timeout');
-  } catch (error) {
-    failures.push(`work_drain:${errorText(error)}`);
+  // During catch-up, committed peer work is fenced from delivery until the
+  // J audit passes. Exit waits for the active frame and preserves that outbox
+  // in the WAL for recovery. A checkpoint or a running node still drains.
+  const preserveStartupPrefix = options.preserveStartupPrefix && !afterInitialDrain && isJCatchupFenced(env);
+  if (!preserveStartupPrefix) {
+    try {
+      runtimeDrained = await waitForRuntimeWorkDrained(env, options.workTimeoutMs, options.quietMs, drainOptions);
+      if (!runtimeDrained) failures.push('work_drain_timeout');
+    } catch (error) {
+      failures.push(`work_drain:${errorText(error)}`);
+    }
   }
   if (runtimeDrained && afterInitialDrain) {
     try {
@@ -132,17 +136,23 @@ export const quiesceNodeRuntime = async (
       failures.push(`barrier:${errorText(error)}`);
     }
   }
+  const stopPeerTransport = async (): Promise<void> => {
+    try {
+      await stopP2PAndWait(env, options.loopTimeoutMs);
+    } catch (error) {
+      failures.push(`p2p:${errorText(error)}`);
+    }
+  };
+  // A committed frame may be waiting for a peer route that cannot open while
+  // readiness is fenced. Closing transport releases that wait in the frame.
+  const stoppingPeers = preserveStartupPrefix ? stopPeerTransport() : null;
   try {
     runtimeIdle = await stopRuntimeLoopAndWait(env, options.loopTimeoutMs);
     if (!runtimeIdle) failures.push('loop_drain_timeout');
   } catch (error) {
     failures.push(`loop_drain:${errorText(error)}`);
   }
-  try {
-    await stopP2PAndWait(env, options.loopTimeoutMs);
-  } catch (error) {
-    failures.push(`p2p:${errorText(error)}`);
-  }
+  await (stoppingPeers ?? stopPeerTransport());
 
   if (failures.length > 0) {
     throw new Error(`NODE_RUNTIME_QUIESCE_FAILED:${failures.join('|')}`);

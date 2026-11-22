@@ -3,7 +3,8 @@ import { closeSync, openSync } from 'node:fs';
 import { join } from 'node:path';
 import { requireBoundaryRecord } from '../../../../../core/protocol/boundary-validation';
 
-export type ManagedChild = { name: string; child: ChildProcess; error: Error | null };
+export const sessionChildShutdownGraceMs = 10_000;
+export type ManagedChild = { name: string; child: ChildProcess; error: Error | null; shutdownGraceMs: number };
 
 export const launchSessionChild = (
   children: ManagedChild[],
@@ -12,11 +13,20 @@ export const launchSessionChild = (
   entry: string,
   args: string[],
   env: NodeJS.ProcessEnv,
+  options: { ipc?: boolean; shutdownGraceMs?: number } = {},
 ): ManagedChild => {
   const fd = openSync(join(runDirectory, `${name}.log`), 'wx', 0o600);
-  const child = spawn(process.execPath, [entry, ...args], { env, stdio: ['ignore', fd, fd] });
+  const child = spawn(process.execPath, [entry, ...args], {
+    env,
+    stdio: options.ipc ? ['ignore', fd, fd, 'ipc'] : ['ignore', fd, fd],
+  });
   closeSync(fd);
-  const managed: ManagedChild = { name, child, error: null };
+  const managed: ManagedChild = {
+    name,
+    child,
+    error: null,
+    shutdownGraceMs: options.shutdownGraceMs ?? sessionChildShutdownGraceMs,
+  };
   child.on('error', error => {
     managed.error = error;
   });
@@ -32,9 +42,10 @@ export const assertSessionChildrenLive = (children: readonly ManagedChild[]): vo
   }
 };
 
-export const waitSessionChild = async (managed: ManagedChild): Promise<void> => {
+export const waitSessionChild = async (managed: ManagedChild, signal?: AbortSignal): Promise<void> => {
   const deadline = Date.now() + 60_000;
   while (managed.child.exitCode === null && managed.child.signalCode === null) {
+    signal?.throwIfAborted();
     if (managed.error) throw managed.error;
     if (Date.now() >= deadline) throw new Error(`USDC_SESSION_INSPECTION_TIMEOUT:${managed.name}`);
     await Bun.sleep(25);
@@ -48,9 +59,9 @@ export const waitSessionChild = async (managed: ManagedChild): Promise<void> => 
 export const stopSessionChildren = async (children: readonly ManagedChild[]): Promise<void> => {
   const requested = children.filter(({ child }) => child.exitCode === null && child.signalCode === null);
   const failures: Error[] = [];
-  for (const { name, child } of [...requested].reverse()) {
+  for (const { name, child, shutdownGraceMs } of [...requested].reverse()) {
     child.kill('SIGTERM');
-    const deadline = Date.now() + 10_000;
+    const deadline = Date.now() + shutdownGraceMs;
     while (child.exitCode === null && child.signalCode === null && Date.now() < deadline) await Bun.sleep(25);
     if (child.exitCode === null && child.signalCode === null) {
       child.kill('SIGKILL');
@@ -72,9 +83,11 @@ export const waitSessionReady = async (
   label: string,
   predicate: () => Promise<boolean>,
   timeoutMs = 60_000,
+  signal?: AbortSignal,
 ): Promise<void> => {
   const startedAt = performance.now();
   while (true) {
+    signal?.throwIfAborted();
     assertSessionChildrenLive(children);
     if (await predicate()) return;
     if (performance.now() - startedAt >= timeoutMs) throw new Error(`USDC_SESSION_READINESS_TIMEOUT:${label}`);

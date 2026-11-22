@@ -19,6 +19,7 @@ import { observeBoundSlots } from '../status/chain';
 import type { ChainAuthority, ExecutionAuthority, PayerGrant } from '../authority';
 import { connectGatewayObservation, type ExecutionProviders } from '../providers';
 import { inspectUserWal } from '../status/wal';
+import { logProgressSlot } from './progress-events';
 import { readCrossJProof } from './cross-j-proof';
 
 const readAuthorizedReceipt = async (
@@ -98,6 +99,7 @@ export const reportStoppedRun = async (
   const slots = observed.flatMap(chain =>
     chain.slots.map(({ entry, ...slot }) => ({ ...slot, receipt: entry ? receiptFields(entry) : null })),
   );
+  for (const slot of slots) logProgressSlot(user.runId, slot);
   return {
     slots,
     runtimeHeight: wal.state?.height ?? null,
@@ -178,6 +180,17 @@ export const reportCompletedRun = async (
     buildTargetReceiptEvidence(targetProvider.historical, [cover, exit], first, last),
   ]);
   if (after - before !== paid) throw new Error('USDC_EXECUTION_RUN_PAYOUT_DELTA_MISMATCH');
+  const receipts = [approval.receipt, deposit.receipt, collateral.receipt, cover.receipt, exit.receipt];
+  for (const [index, [step, , chain, , nonce]] of receiptSlots(authority, runIndex).entries()) {
+    const receipt = receipts[index]!;
+    logProgressSlot(user.runId, {
+      step,
+      chainId: chain.chainId,
+      nonce,
+      hash: receipt.hash,
+      status: receipt.status === 1 ? 'confirmed' : 'reverted',
+    });
+  }
   return {
     status: 'complete',
     runId: user.runId,

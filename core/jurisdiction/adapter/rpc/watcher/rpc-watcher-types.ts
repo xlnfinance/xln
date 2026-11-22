@@ -95,9 +95,20 @@ export type RpcWatcherSession = {
   readWatchedErc20Tokens(): Promise<WatchedErc20Token[]>;
 };
 
+export type RpcWatcherReadScope = {
+  services: RpcWatcherServices;
+  close(): void;
+};
+
+export type ActiveRpcWatcherSession = RpcWatcherSession & {
+  abort: AbortController;
+  reads: RpcWatcherReadScope;
+};
+
 export type RpcWatcherControllerState = {
-  session: RpcWatcherSession | null;
+  session: ActiveRpcWatcherSession | null;
   inFlight: Promise<void> | null;
+  inFlightOwner: ActiveRpcWatcherSession | null;
   fatalError: string | null;
   generation: number;
   lastScanProgress: RpcWatcherScanProgress;
@@ -106,6 +117,7 @@ export type RpcWatcherControllerState = {
 export type RpcWatcherMethods = {
   startWatching(env: RuntimeReplica): void;
   pollNow(): Promise<void>;
+  getWatcherCurrentBlockNumber(): Promise<number>;
   isWatching(): boolean;
   stopWatching(): void;
   stopWatchingAndWait(): Promise<void>;

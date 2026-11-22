@@ -109,9 +109,13 @@ export const stopJurisdictionWatchersAndWait = async (env: RuntimeReplica): Prom
 
 /** Raise a process-local fence before draining so Runtime work cannot restart
  * a watcher between stop completion and the next measured operation. */
-export const pauseJurisdictionWatchersAndWait = async (env: RuntimeReplica): Promise<void> => {
+export const fenceJurisdictionWatchers = (env: RuntimeReplica): void => {
   const infrastructure = env.infrastructure;
   if (!infrastructure) throw new Error('JADAPTER_WATCHER_PAUSE_INFRASTRUCTURE_MISSING');
   infrastructure.jurisdictionWatchersPaused = true;
+};
+
+export const pauseJurisdictionWatchersAndWait = async (env: RuntimeReplica): Promise<void> => {
+  fenceJurisdictionWatchers(env);
   await stopJurisdictionWatchersAndWait(env);
 };

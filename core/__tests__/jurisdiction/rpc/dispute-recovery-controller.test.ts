@@ -68,7 +68,8 @@ const setup = (certified: number, durable = 41) => {
     sendAuthenticatedBatch: calls => Promise.all(calls.map(call => provider.send(call.method, call.params))),
     resolveFinalityDepth: () => 0, isTransientRpcUnavailable: isRpcWatcherTransientError,
   };
-  return { env, replica, watcher, key, reads, chain, services, controller: createRpcWatcherController(services), provider };
+  const controller = createRpcWatcherController(() => ({ services, close() {} }));
+  return { env, replica, watcher, key, reads, chain, services, controller, provider };
 };
 
 test('controller restart reconciles 41/42 A-to-B, waits for rewind, then recovers without publishing 42', async () => {

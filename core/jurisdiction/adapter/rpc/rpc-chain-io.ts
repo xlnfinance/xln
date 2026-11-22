@@ -148,9 +148,11 @@ const fetchTronJson = async (
   config: JAdapterConfig,
   url: string,
   request: Readonly<{ body: string; label: string; detail?: string }>,
+  owner?: AbortSignal,
 ): Promise<unknown> => {
   const { body, label, detail = '' } = request;
   const controller = new AbortController();
+  const signal = owner ? AbortSignal.any([owner, controller.signal]) : controller.signal;
   const timeout = setTimeout(() => controller.abort(), TRON_FETCH_TIMEOUT_MS);
   try {
     let response: Response;
@@ -162,7 +164,7 @@ const fetchTronJson = async (
           ...(config.tronApiKey ? { 'TRON-PRO-API-KEY': config.tronApiKey } : {}),
         },
         body,
-        signal: controller.signal,
+        signal,
       });
     } catch (error) {
       const timedOut = error instanceof Error && error.name === 'AbortError';
@@ -177,7 +179,8 @@ const fetchTronJson = async (
       return await response.json();
     } catch (error) {
       const timedOut = error instanceof Error && error.name === 'AbortError';
-      if (timedOut) throw new RpcTransportUnavailableError(`${label}_TIMEOUT${detail}`, { cause: error });
+      if (signal.aborted || timedOut)
+        throw new RpcTransportUnavailableError(`${label}_TIMEOUT${detail}`, { cause: error });
       throw new Error(`${label}_RESPONSE_INVALID${detail}`, { cause: error });
     }
   } finally {
@@ -185,7 +188,9 @@ const fetchTronJson = async (
   }
 };
 
-const readTronSolidifiedBlockNumber = async (config: JAdapterConfig, provider: ethers.JsonRpcProvider): Promise<number> => {
+const readTronSolidifiedBlockNumber = async (
+  config: JAdapterConfig, provider: ethers.JsonRpcProvider, signal?: AbortSignal,
+): Promise<number> => {
   const fullHost = String(config.tronSolidityHost || config.tronFullHost || config.rpcUrl || '')
     .replace(/\/jsonrpc\/?$/i, '')
     .replace(/\/$/, '');
@@ -193,7 +198,7 @@ const readTronSolidifiedBlockNumber = async (config: JAdapterConfig, provider: e
   const rawPayload = await fetchTronJson(config, `${fullHost}/walletsolidity/getnowblock`, {
     body: '{}',
     label: 'TRON_SOLIDIFIED_HEAD',
-  });
+  }, signal);
   if (!rawPayload || typeof rawPayload !== 'object' || Array.isArray(rawPayload)) {
     throw new Error('TRON_SOLIDIFIED_HEAD_PAYLOAD_INVALID');
   }
@@ -221,6 +226,7 @@ const readTronSolidifiedBlockNumber = async (config: JAdapterConfig, provider: e
 const sendTronRpcCall = async (
   config: JAdapterConfig,
   request: RpcBatchRequest,
+  signal?: AbortSignal,
 ): Promise<RpcBatchResponse> => {
   const rpcUrl = String(config.rpcUrl || '').trim();
   if (!rpcUrl) throw new Error('TRON_RPC_URL_MISSING');
@@ -228,7 +234,7 @@ const sendTronRpcCall = async (
     body: JSON.stringify(request),
     label: 'TRON_RPC',
     detail: `:${request.method}`,
-  });
+  }, signal);
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new Error(`TRON_RPC_RESPONSE_INVALID:${request.method}`);
   }
@@ -259,14 +265,16 @@ const sendTronRpcCall = async (
 const sendTronRpcCalls = async (
   config: JAdapterConfig,
   requests: readonly RpcBatchRequest[],
+  signal?: AbortSignal,
 ): Promise<Map<number, RpcBatchResponse>> => {
   const responses = new Map<number, RpcBatchResponse>();
   let nextIndex = 0;
   const worker = async (): Promise<void> => {
     while (nextIndex < requests.length) {
+      signal?.throwIfAborted();
       const request = requests[nextIndex++];
       if (!request) return;
-      responses.set(request.id, await sendTronRpcCall(config, request));
+      responses.set(request.id, await sendTronRpcCall(config, request, signal));
     }
   };
   await Promise.all(Array.from({ length: Math.min(12, requests.length) }, worker));
@@ -276,15 +284,17 @@ const sendTronRpcCalls = async (
 const sendCalls = async (
   config: JAdapterConfig,
   requests: readonly RpcBatchRequest[],
+  signal?: AbortSignal,
 ): Promise<Map<number, RpcBatchResponse>> => {
-  if (config.mode === 'tron') return sendTronRpcCalls(config, requests);
+  if (config.mode === 'tron') return sendTronRpcCalls(config, requests, signal);
   const rpcUrl = String(config.rpcUrl || '').trim();
   if (!rpcUrl) throw new Error('J_RECEIPT_BATCH_RPC_URL_MISSING');
-  return sendRpcBatch(rpcUrl, [...requests]);
+  return sendRpcBatch(rpcUrl, [...requests], undefined, signal);
 };
 
 const createAuthenticatedBatchSender = (
   config: JAdapterConfig,
+  signal?: AbortSignal,
 ): RpcChainIo['sendAuthenticatedBatch'] => async calls => {
   if (calls.length === 0) return [];
   const batch: RpcBatchRequest[] = calls.map((call, index) => ({
@@ -293,7 +303,7 @@ const createAuthenticatedBatchSender = (
     method: call.method,
     params: call.params,
   }));
-  const responses = await sendCalls(config, batch);
+  const responses = await sendCalls(config, batch, signal);
   return batch.map(request => {
     const response = responses.get(request.id);
     if (!response) throw new Error(`J_RECEIPT_BATCH_RESPONSE_MISSING:${request.id}:${request.method}`);
@@ -312,6 +322,7 @@ const createAuthenticatedBatchSender = (
 const createHeaderReader = (
   config: JAdapterConfig,
   headerBatchCalls?: number,
+  signal?: AbortSignal,
 ): RpcChainIo['readBlockHeaders'] => async heights => {
   const canonicalHeights = [...new Set(heights)].sort((left, right) => left - right);
   // The audit batch grows with authority evidence; above MAX_RPC_BATCH_CALLS
@@ -319,7 +330,7 @@ const createHeaderReader = (
   const sendChunk: RpcBatchSend = async calls => {
     // Request id = height, unique within the deduplicated set.
     const requests: RpcBatchRequest[] = calls.map(call => ({ id: Number(call.params[0]), jsonrpc: '2.0', ...call }));
-    const responses = await sendCalls(config, requests);
+    const responses = await sendCalls(config, requests, signal);
     return requests.map(({ id }) => responses.get(id));
   };
   const responses = await sendBatchInChunks(sendChunk, canonicalHeights.map(jHeight => ({
@@ -359,6 +370,7 @@ export const createRpcChainIo = (
   provider: ethers.JsonRpcProvider,
   signer: Signer,
   headerBatchCalls?: number,
+  readSignal?: AbortSignal,
 ): RpcChainIo => {
   const settings = readSettings(config);
   const estimateGas = async (estimate: () => Promise<bigint>): Promise<bigint> =>
@@ -380,9 +392,9 @@ export const createRpcChainIo = (
     readCurrentBlockNumber,
     readLatestBlockTimestamp,
     readSafeBlockNumber: () =>
-      config.mode === 'tron' ? readTronSolidifiedBlockNumber(config, provider) : readCurrentBlockNumber(),
-    readBlockHeaders: createHeaderReader(config, headerBatchCalls),
-    sendAuthenticatedBatch: createAuthenticatedBatchSender(config),
+      config.mode === 'tron' ? readTronSolidifiedBlockNumber(config, provider, readSignal) : readCurrentBlockNumber(),
+    readBlockHeaders: createHeaderReader(config, headerBatchCalls, readSignal),
+    sendAuthenticatedBatch: createAuthenticatedBatchSender(config, readSignal),
     resolveFinalityDepth: scenarioMode => resolveRpcFinalityDepth(config, scenarioMode),
   };
 };

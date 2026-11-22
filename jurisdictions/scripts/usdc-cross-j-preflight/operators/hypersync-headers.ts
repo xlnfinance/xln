@@ -116,20 +116,25 @@ export const createHyperSyncHeaderReader = (token: string) => {
   if (!/^[A-Za-z0-9_-]+$/.test(token)) throw new Error('USDC_HYPERSYNC_TOKEN_INVALID');
   const queue = createHeaderReadQueue();
   const pace = createReadPacer();
+  const trace = process.env['POC_HEADER_BATCH_TIMING'] === '1';
   return async (params: readonly unknown[], client: AbortSignal) => {
     const [from, to] = params;
     if (params.length !== 2 || typeof from !== 'number' || typeof to !== 'number' ||
         !Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from < 0 || to < from ||
         to >= Number.MAX_SAFE_INTEGER || to - from > BLOCKCHAIN.J_WATCHER_MAX_BLOCKS_PER_POLL)
       throw new Error('USDC_HYPERSYNC_RANGE_INVALID');
+    const queuedAt = performance.now();
     const release = await queue.acquire(client);
+    const queueMs = Math.round(performance.now() - queuedAt);
     try {
       requireLiveHeaderClient(client);
       const signal = AbortSignal.any([client, AbortSignal.timeout(45_000)]);
       const blocks: ReturnType<typeof decodePage>['blocks'] = [];
+      let upstreamMs = 0;
       for (let height = from; height <= to;) {
         // The shared testnet token allows fifteen requests per minute.
         await pace(endpoint, 4_500, signal);
+        const sentAt = performance.now();
         const response = await queryPage(token, height, to + 1, signal);
         if (!response.ok) tracePage(height, to, height, response);
         await checkResponse(response);
@@ -137,11 +142,14 @@ export const createHyperSyncHeaderReader = (token: string) => {
           if (signal.aborted) throw new RpcTransportUnavailableError('USDC_HYPERSYNC_TRANSPORT_UNAVAILABLE');
           throw new Error('USDC_HYPERSYNC_JSON_INVALID');
         });
+        upstreamMs += performance.now() - sentAt;
         const page = decodePage(raw, height, to + 1);
         tracePage(height, to, page.next, response);
         blocks.push(...page.blocks);
         height = page.next;
       }
+      if (trace)
+        process.stderr.write(`USDC_HYPERSYNC_RANGE_TIMING:${JSON.stringify({ queueMs, upstreamMs: Math.round(upstreamMs) })}\n`);
       return blocks;
     } finally {
       release();

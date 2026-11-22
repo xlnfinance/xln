@@ -373,6 +373,7 @@ describe('production startup wiring', () => {
     const hubDeliveryBlocked = hubSource.indexOf('setRuntimeDeliveryReady(env, false);');
     const hubIngressBlocked = hubSource.indexOf('externalIngressReady: false,');
     const hubCatchup = hubSource.indexOf('const watcherDrain = await drainJWatcherBacklog(');
+    const hubShutdown = hubSource.indexOf('const stop = installHubShutdownHandlers(');
     const hubLoopStart = hubSource.indexOf('startRuntimeLoop(env, {');
     const hubResume = hubSource.indexOf('await ensurePendingNumberedRegistrationsResumed(env);', hubLoopStart);
     const hubIngressReady = hubSource.indexOf('live.externalIngressReady = true;');
@@ -385,6 +386,8 @@ describe('production startup wiring', () => {
     expect(hubP2PStart).toBeGreaterThan(hubIngressBlocked);
     expect(hubP2PReady).toBeGreaterThan(hubP2PStart);
     expect(hubCatchup).toBeGreaterThan(hubP2PReady);
+    expect(hubShutdown).toBeGreaterThan(hubP2PReady);
+    expect(hubCatchup).toBeGreaterThan(hubShutdown);
     expect(hubLoopStart).toBeGreaterThan(hubCatchup);
     expect(hubResume).toBeGreaterThan(hubLoopStart);
     expect(hubIngressReady).toBeGreaterThan(hubResume);
@@ -412,6 +415,7 @@ describe('production startup wiring', () => {
     );
     const mmResume = mmSource.indexOf('await ensurePendingNumberedRegistrationsResumed(env);', mmInitializationCall);
     const mmCatchup = mmSource.indexOf('const watcherDrain = await drainJWatcherBacklog(');
+    const mmShutdown = mmSource.indexOf('const stop = installMarketMakerShutdownSignals(');
     const mmIngressReady = mmSource.indexOf('state.externalIngressReady = true;');
     const mmDeliveryReady = mmSource.indexOf('setRuntimeDeliveryReady(env, true);');
     const mmDirectReady = mmSource.indexOf('directRuntimeWs.setReady(true);');
@@ -429,6 +433,8 @@ describe('production startup wiring', () => {
     expect(mmP2PReady).toBeGreaterThan(mmP2PStart);
     expect(mmInitializationCall).toBeGreaterThan(mmP2PReady);
     expect(mmCatchup).toBeGreaterThan(mmInitializationCall);
+    expect(mmShutdown).toBeGreaterThan(mmP2PReady);
+    expect(mmCatchup).toBeGreaterThan(mmShutdown);
     expect(mmResume).toBeGreaterThan(mmCatchup);
     expect(mmIngressReady).toBeGreaterThan(mmResume);
     expect(mmDeliveryReady).toBeGreaterThan(mmIngressReady);
@@ -436,7 +442,7 @@ describe('production startup wiring', () => {
     const mmContext = extractSourceBlock(
       mmSource,
       'const createMarketMakerNodeContext = (',
-      'type StartedMarketMakerServices =',
+      'const startMarketMakerServices = async (',
     );
     expect(mmContext).toContain('externalIngressReady: false,');
     expect(mmSource).toContain("if (!isIngressReady()) throw new Error('RUNTIME_STARTUP_J_CATCHUP_PENDING');");

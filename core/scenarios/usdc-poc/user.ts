@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Wallet, isHexString } from 'ethers';
 import * as runtime from '../../runtime';
+import { pauseJurisdictionWatchersAndWait } from '../../runtime/loop/loop-watchers';
 import type { EntityTx } from '../../types/entity-tx';
 import type { RuntimeInput, RuntimeReplica } from '../../runtime/types';
 import { configureCryptoPoolEntry } from '../../protocol/crypto/crypto-pool';
@@ -221,7 +222,7 @@ export const openPocAccount = async (user: PocUser, apiBase: string, hub: string
 };
 
 export const closeUser = async (user: Pick<PocUser, 'env'>): Promise<void> => {
-  await runtime.stopJurisdictionWatchersAndWait(user.env);
+  await pauseJurisdictionWatchersAndWait(user.env);
   if (!(await runtime.waitForRuntimeWorkDrained(user.env, 10_000)))
     throw new Error('USDC_POC_SHUTDOWN_WORK_NOT_DRAINED');
   await runtime.stopRuntimeLoopAndWait(user.env);

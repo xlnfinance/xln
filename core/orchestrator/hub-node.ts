@@ -44,6 +44,7 @@ import { toPublicRpcUrl } from '../network/p2p/loopback-url';
 import { startParentLivenessWatch } from '../support/process/parent-watch';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 import { quiesceNodeRuntime } from './process/node-runtime-quiesce';
+import { pauseJurisdictionWatchersAndWait } from '../runtime/loop/loop-watchers';
 import { drainJWatcherBacklog } from '../jurisdiction/adapter/operations/backlog-drain';
 import { createRelayStore } from '../network/relay/store';
 import { safeStringify } from '../protocol/serialization';
@@ -1368,11 +1369,13 @@ const installHubShutdownHandlers = (
   live: HubNodeLiveContext,
   meshController: HubMeshBootstrapController,
   httpSurface: HubHttpSurface,
-): void => {
+): AbortSignal => {
+  const stop = new AbortController();
   let shutdownStarted = false;
   const shutdown = async (code = 0): Promise<void> => {
     if (shutdownStarted) return;
     shutdownStarted = true;
+    stop.abort();
     dumpRuntimeSamplingProfile('shutdown');
     dumpOpCounters(resolvedArgs.name, 'shutdown');
     live.shuttingDown = true;
@@ -1384,11 +1387,13 @@ const installHubShutdownHandlers = (
         failures.push(`${label}:${error instanceof Error ? error.message : String(error)}`);
       }
     };
+    await runCleanup('watchers', () => pauseJurisdictionWatchersAndWait(live.env));
     await runCleanup('mesh_producer', meshController.pauseAndWait);
     await runCleanup('quiesce', () =>
       quiesceNodeRuntime(live.env, {
         workTimeoutMs: 10_000,
         loopTimeoutMs: 10_000,
+        preserveStartupPrefix: true,
       }),
     );
     await runCleanup('server', () =>
@@ -1415,6 +1420,22 @@ const installHubShutdownHandlers = (
     stopParentWatch();
     void shutdown();
   });
+  return stop.signal;
+};
+
+const logHubAdminUrl = (env: RuntimeReplica): void => {
+  if (!LOG_HUB_ADMIN_URL) return;
+  try {
+    const adminUrl = buildRuntimeAdminUrl(env);
+    if (adminUrl) {
+      nodeLog.info('admin_url.ready', { name: resolvedArgs.name, url: redactTokenBearingUrlForLog(adminUrl) });
+    }
+  } catch (error) {
+    nodeLog.warn('admin_url.unavailable', {
+      name: resolvedArgs.name,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 };
 
 const run = async (): Promise<void> => {
@@ -1486,6 +1507,7 @@ const run = async (): Promise<void> => {
     meshController.pauseAndWait,
     bootstrapClockMs,
   );
+  const stop = installHubShutdownHandlers(live, meshController, httpSurface);
 
   const importJStartedAt = startTiming('import_j');
   const jurisdiction = await prepareJurisdictionForImport(resolveJurisdictionConfig(resolvedArgs.rpcUrl));
@@ -1514,8 +1536,10 @@ const run = async (): Promise<void> => {
     tokenCatalogsByEntityId.set(normalizeEntityId(live.bootstrap.entityId), tokenCatalog);
   }
 
+  if (stop.aborted) return;
   startJurisdictionWatchers(env);
-  const watcherDrain = await drainJWatcherBacklog(env, async currentEnv => processRuntime(currentEnv));
+  const watcherDrain = await drainJWatcherBacklog(env, async currentEnv => processRuntime(currentEnv), stop);
+  if (stop.aborted) return;
 
   startRuntimeLoop(env, {
     tickDelayMs: HUB_RUNTIME_TICK_DELAY_MS,
@@ -1530,6 +1554,7 @@ const run = async (): Promise<void> => {
   });
   await restoreHubBrainVaultOwner(live, brainVaultOwner);
   await ensurePendingNumberedRegistrationsResumed(env);
+  if (stop.aborted) return;
   live.externalIngressReady = true;
   setRuntimeDeliveryReady(env, true);
   httpSurface.directRuntimeWs.setReady(true);
@@ -1547,24 +1572,8 @@ const run = async (): Promise<void> => {
     api: apiUrl,
     relay: resolvedArgs.relayUrl,
   });
-  if (LOG_HUB_ADMIN_URL) {
-    try {
-      const adminUrl = buildRuntimeAdminUrl(env);
-      if (adminUrl) {
-        nodeLog.info('admin_url.ready', {
-          name: resolvedArgs.name,
-          url: redactTokenBearingUrlForLog(adminUrl),
-        });
-      }
-    } catch (error) {
-      nodeLog.warn('admin_url.unavailable', {
-        name: resolvedArgs.name,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
+  logHubAdminUrl(env);
 
-  installHubShutdownHandlers(live, meshController, httpSurface);
   await waitUntil(() => false, Number.MAX_SAFE_INTEGER, 1000);
 };
 

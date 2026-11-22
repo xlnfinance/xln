@@ -5,6 +5,8 @@ import { requireCurrentAuthority, payerSlots, type ExecutionAuthority, type Chai
 import { validateAuthorizedWire } from './calls';
 import { broadcastPreparedRpcTransaction } from '../../../../core/jurisdiction/adapter/rpc/write/prepared/prepared-broadcast';
 import { readNonceReceipt } from './nonce-receipt';
+import { logProgressSlot, type ProgressSlot } from './flow/progress-events';
+import { receiptSlots } from './receipt-event';
 import { waitForHistory, type ExecutionProviders, type ChainBinding, type NonceGrant } from './providers';
 
 export const verifyEntityHanko = async (
@@ -96,8 +98,18 @@ export const submitAuthorizedWire = async (
   const provider = providers.current;
   if (validated.batch) await verifyBatchHanko(provider, chain, validated.batch);
   const hash = validated.transaction.hash!;
+  const nonce = validated.transaction.nonce;
+  const [step] = receiptSlots(authority, validated.runIndex).find(
+    ([, , bound, payer, slot]) =>
+      bound.chainId === chain.chainId && payer.address === validated.payer.address && slot === nonce,
+  )!;
+  const logSubmission = (status: ProgressSlot['status']): void =>
+    logProgressSlot(authority.runIds[validated.runIndex]!, { step, chainId: chain.chainId, nonce, hash, status });
   const existing = await provider.getTransaction(hash);
-  if (existing) return hash;
+  if (existing) {
+    logSubmission('known');
+    return hash;
+  }
   const confirmedNonce = await provider.getTransactionCount(validated.payer.address, 'latest');
   if (confirmedNonce > validated.transaction.nonce) throw new Error('USDC_EXECUTION_NONCE_ALREADY_CONSUMED');
   const pendingNonce = await provider.getTransactionCount(validated.payer.address, 'pending');
@@ -109,7 +121,9 @@ export const submitAuthorizedWire = async (
   )
     throw new Error('USDC_EXECUTION_PAYER_NATIVE_INSUFFICIENT');
   requireCurrentAuthority(authority, catalogPath);
+  logSubmission('attempted');
   const accepted = await broadcastPreparedRpcTransaction({ mode: 'rpc', chainId: chain.chainId }, provider, raw);
   if (accepted !== hash) throw new Error('USDC_EXECUTION_BROADCAST_HASH_MISMATCH');
+  logSubmission('submitted');
   return accepted;
 };

@@ -8,6 +8,9 @@ import { deriveRuntimeSignerPrivateKey } from '../../../storage/recovery/bundle/
 import { readExistingIdentities } from '../../../../jurisdictions/scripts/usdc-cross-j-preflight/identities';
 import { safeStringify } from '../../../protocol/serialization';
 import { isLoopbackUrl } from '../../../network/p2p/loopback-url';
+import { closeRuntimeDb, readPersistedFrameJournal } from '../../../runtime';
+import { encodeCanonicalConsensusBytes } from '../../../protocol/serialization/binary-codec';
+import { keccakBytesHash } from '../../../protocol/crypto/keccak-text';
 
 const [root, apiBase] = process.argv.slice(2);
 if (!root || !apiBase || !isLoopbackUrl(apiBase)) throw new Error('USDC_FIXTURE_LOCAL_INPUT_REQUIRED');
@@ -59,4 +62,13 @@ try {
   await closeUser(user);
   provider.destroy();
 }
-writeFileSync(join(root, 'funded-user.json'), safeStringify(runtimeProof(user), 2), { mode: 0o600 });
+const proof = runtimeProof(user);
+try {
+  const frame = await readPersistedFrameJournal(user.env, proof.height);
+  if (!frame) throw new Error('USDC_FIXTURE_FUNDED_WAL_HEAD_MISSING');
+  // Replay republishes the committed outbox. Live delivery can prune it in memory after commit.
+  const orderedOutboxDigest = keccakBytesHash(encodeCanonicalConsensusBytes(frame.runtimeOutputs ?? []));
+  writeFileSync(join(root, 'funded-user.json'), safeStringify({ ...proof, orderedOutboxDigest }, 2), { mode: 0o600 });
+} finally {
+  await closeRuntimeDb(user.env);
+}

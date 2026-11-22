@@ -1292,6 +1292,7 @@ const createMarketMakerShutdown = (deps: MarketMakerShutdownDeps): ((code?: numb
       quiesceNodeRuntime(deps.env, {
         workTimeoutMs: 10_000,
         loopTimeoutMs: 10_000,
+        preserveStartupPrefix: true,
       }),
     );
     await runCleanup('server', () => stopServerGracefully(deps.server, deps.httpDrain, resolvedArgs.name, 5_000));
@@ -1305,18 +1306,24 @@ const createMarketMakerShutdown = (deps: MarketMakerShutdownDeps): ((code?: numb
   };
 };
 
-const installMarketMakerShutdownSignals = (shutdown: (code?: number) => Promise<void>): void => {
+const installMarketMakerShutdownSignals = (shutdown: (code?: number) => Promise<void>): AbortSignal => {
+  const stop = new AbortController();
+  const requestStop = (code = 0): void => {
+    stop.abort();
+    void shutdown(code);
+  };
   const stopParentWatch = startParentLivenessWatch(
     resolvedArgs.name,
     process.env['XLN_ORCHESTRATOR_PID'],
-    () => void shutdown(1),
+    () => requestStop(1),
   );
   const shutdownFromSignal = (): void => {
     stopParentWatch();
-    void shutdown();
+    requestStop();
   };
   process.on('SIGTERM', shutdownFromSignal);
   process.on('SIGINT', shutdownFromSignal);
+  return stop.signal;
 };
 
 type BootstrapProgressMonitorDeps = {
@@ -2171,13 +2178,7 @@ export const createMarketMakerDirectRuntimeRoute = (
   return route;
 };
 
-type StartedMarketMakerServices = {
-  server: Bun.Server<{ type?: string }>;
-  httpDrain: ReturnType<typeof createHttpDrainTracker>;
-  primaryContext: MarketMakerEntityContext;
-};
-
-const startMarketMakerServices = async (context: MarketMakerNodeContext): Promise<StartedMarketMakerServices> => {
+const startMarketMakerServices = async (context: MarketMakerNodeContext): Promise<MarketMakerEntityContext | null> => {
   const { env, state, health } = context;
   const p2p = startP2P(env, {
     relayUrls: [resolvedArgs.relayUrl],
@@ -2233,6 +2234,9 @@ const startMarketMakerServices = async (context: MarketMakerNodeContext): Promis
     }),
     websocket: createMarketMakerWebSocketHandler(env, directRuntimeWs, handleRuntimeAdapterWsMessage),
   });
+  const stop = installMarketMakerShutdownSignals(createMarketMakerShutdown({
+    env, server, httpDrain, stopRuntimeLoops: () => state.stopRuntimeLoops(),
+  }));
   state.tokenIdsByContext = await initializeMarketMakerContexts({
     env,
     jurisdiction: resolveJurisdictionConfig(resolvedArgs.rpcUrl),
@@ -2246,11 +2250,14 @@ const startMarketMakerServices = async (context: MarketMakerNodeContext): Promis
   });
   const primaryContext = state.contexts[0];
   if (!primaryContext) throw new Error('MARKET_MAKER_PRIMARY_CONTEXT_MISSING');
+  if (stop.aborted) return null;
   p2p.updateConfig({ advertiseEntityIds: state.contexts.map(item => item.entityId) });
   state.phase = 'j-catchup';
   startJurisdictionWatchers(env);
-  const watcherDrain = await drainJWatcherBacklog(env, async currentEnv => processRuntime(currentEnv));
+  const watcherDrain = await drainJWatcherBacklog(env, async currentEnv => processRuntime(currentEnv), stop);
+  if (stop.aborted) return null;
   await ensurePendingNumberedRegistrationsResumed(env);
+  if (stop.aborted) return null;
   state.externalIngressReady = true;
   setRuntimeDeliveryReady(env, true);
   directRuntimeWs.setReady(true);
@@ -2258,7 +2265,7 @@ const startMarketMakerServices = async (context: MarketMakerNodeContext): Promis
     jurisdictions: watcherDrain.length,
     cursors: watcherDrain.map(status => `${status.chainId}:${status.committedCursor}/${status.targetBlock}`),
   });
-  return { server, httpDrain, primaryContext };
+  return primaryContext;
 };
 
 type MarketMakerQuoteLifecycle = {
@@ -2499,7 +2506,8 @@ export const runMarketMakerNode = async (): Promise<void> => {
   });
   nodeLog.info('startup phase', { phase: state.phase });
   emitBootstrapDebugEvent('startup', { phase: state.phase });
-  const { server, httpDrain, primaryContext: primaryMmContext } = await startMarketMakerServices(context);
+  const primaryMmContext = await startMarketMakerServices(context);
+  if (!primaryMmContext) return;
 
   const quoteLifecycle = createMarketMakerQuoteLifecycle(context, primaryMmContext);
   state.phase = 'runtime-ready';
@@ -2514,12 +2522,5 @@ export const runMarketMakerNode = async (): Promise<void> => {
   });
   startMarketMakerBootstrapWorker(context, quoteLifecycle);
 
-  const shutdown = createMarketMakerShutdown({
-    env,
-    server,
-    httpDrain,
-    stopRuntimeLoops: state.stopRuntimeLoops,
-  });
-  installMarketMakerShutdownSignals(shutdown);
   await new Promise<void>(() => {});
 };

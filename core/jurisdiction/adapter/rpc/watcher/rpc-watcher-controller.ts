@@ -14,8 +14,10 @@ import { requireWatcherJurisdictionReplica } from '../../watcher/observe/watcher
 import { runWatcherPoll } from './rpc-watcher-poll';
 import { createWatchedErc20TokenReader } from '../../rpc-watcher-inputs';
 import type {
+  ActiveRpcWatcherSession,
   RpcWatcherControllerState,
   RpcWatcherMethods,
+  RpcWatcherReadScope,
   RpcWatcherServices,
   RpcWatcherSession,
   RpcWatcherTrace,
@@ -42,14 +44,16 @@ export const resolveRpcWatcherPollMs = (configured: number | undefined): number 
 const createWatcherSession = (
   env: RuntimeReplica,
   generation: number,
-  services: RpcWatcherServices,
-): RpcWatcherSession => {
+  abort: AbortController,
+  reads: RpcWatcherReadScope,
+): ActiveRpcWatcherSession => {
+  const { services } = reads;
   const startBlock = getWatcherStartBlock(env, services.depositoryAddress, services.chainId);
   const localScan = getMinimumScannedSignerJHeight(
     env,
     requireWatcherJurisdictionReplica(env, services.depositoryAddress, services.chainId, 'session-start'),
   );
-  let session: RpcWatcherSession;
+  let session: ActiveRpcWatcherSession;
   const readWatchedErc20Tokens = createWatchedErc20TokenReader(
     services.getDepository(),
     calls => services.sendAuthenticatedBatch(calls),
@@ -58,6 +62,8 @@ const createWatcherSession = (
   session = {
     env,
     generation,
+    abort,
+    reads,
     interval: null,
     manualPolling: env.scenarioMode === true,
     confirmationDepth: services.resolveFinalityDepth(env.scenarioMode === true),
@@ -204,10 +210,11 @@ const waitForRpcCooldown = (session: RpcWatcherSession): Promise<void> => {
   });
 };
 
-const pollOnce = (state: RpcWatcherControllerState, services: RpcWatcherServices): Promise<void> => {
+const pollOnce = (state: RpcWatcherControllerState): Promise<void> => {
   const session = state.session;
   if (!session) return Promise.resolve();
   if (state.inFlight) return state.inFlight;
+  const { services } = session.reads;
   const trace: RpcWatcherTrace = {
     step: 'start',
     fromBlock: null,
@@ -235,8 +242,11 @@ const pollOnce = (state: RpcWatcherControllerState, services: RpcWatcherServices
     .finally(() => {
       session.rpcCooldown.untilMs = performance.now() + session.rpcCooldown.backoffMs;
       state.inFlight = null;
+      state.inFlightOwner = null;
+      if (state.session !== session) session.reads.close();
     });
   state.inFlight = poll;
+  state.inFlightOwner = session;
   return poll;
 };
 
@@ -246,17 +256,16 @@ const pollOnce = (state: RpcWatcherControllerState, services: RpcWatcherServices
  */
 const scheduleNextPoll = (
   state: RpcWatcherControllerState,
-  services: RpcWatcherServices,
-  session: RpcWatcherSession,
+  session: ActiveRpcWatcherSession,
   delayMs: number,
 ): void => {
   session.interval = setTimeout(() => {
     if (state.session !== session || state.generation !== session.generation) return;
     const before = session.lastSyncedBlock;
-    void pollOnce(state, services).finally(() => {
+    void pollOnce(state).finally(() => {
       if (state.session !== session || state.generation !== session.generation) return;
       const advanced = session.lastSyncedBlock > before;
-      scheduleNextPoll(state, services, session, advanced ? 0 : session.pollMs);
+      scheduleNextPoll(state, session, advanced ? 0 : session.pollMs);
     });
   }, delayMs);
 };
@@ -266,25 +275,35 @@ const scheduleNextPoll = (
  * target; single-flight and generation fences prevent a stopped poll from
  * writing after shutdown or into a later watcher session.
  */
-export const createRpcWatcherController = (services: RpcWatcherServices): RpcWatcherMethods => {
+export const createRpcWatcherController = (
+  openReads: (signal: AbortSignal) => RpcWatcherReadScope,
+): RpcWatcherMethods => {
   const state: RpcWatcherControllerState = {
     session: null,
     inFlight: null,
+    inFlightOwner: null,
     fatalError: null,
     generation: 0,
     lastScanProgress: { scannedThroughHeight: 0, replicaScannedThrough: {} },
   };
   return {
     startWatching(env): void {
-      services.assertStackBindingVerified();
       if (state.session) {
-        rpcLog.debug('watcher.already_running', { chainId: services.chainId });
+        rpcLog.debug('watcher.already_running', { chainId: state.session.reads.services.chainId });
         return;
       }
-      services.getDepository().removeAllListeners();
-      services.getEntityProvider().removeAllListeners();
+      const abort = new AbortController();
+      const reads = openReads(abort.signal);
+      const { services } = reads;
       state.generation += 1;
-      const session = createWatcherSession(env, state.generation, services);
+      let session: ActiveRpcWatcherSession;
+      try {
+        services.assertStackBindingVerified();
+        session = createWatcherSession(env, state.generation, abort, reads);
+      } catch (error) {
+        reads.close();
+        throw error;
+      }
       state.lastScanProgress = session.scanProgress;
       state.session = session;
       if (state.fatalError) {
@@ -303,7 +322,7 @@ export const createRpcWatcherController = (services: RpcWatcherServices): RpcWat
         fromBlock: session.lastSyncedBlock + 1,
       });
       if (!session.manualPolling) {
-        scheduleNextPoll(state, services, session, 0);
+        scheduleNextPoll(state, session, 0);
       }
       rpcLog.info('watcher.ready', {
         chainId: services.chainId,
@@ -313,7 +332,13 @@ export const createRpcWatcherController = (services: RpcWatcherServices): RpcWat
     },
 
     async pollNow(): Promise<void> {
-      await pollOnce(state, services);
+      await pollOnce(state);
+    },
+
+    getWatcherCurrentBlockNumber(): Promise<number> {
+      const session = state.session;
+      if (!session) throw new Error('J_WATCHER_NOT_RUNNING');
+      return session.reads.services.readCurrentBlockNumber();
     },
 
     isWatching(): boolean {
@@ -322,15 +347,16 @@ export const createRpcWatcherController = (services: RpcWatcherServices): RpcWat
 
     stopWatching(): void {
       const session = state.session;
+      if (!session) return;
       state.generation += 1;
       state.session = null;
-      if (session?.interval) clearTimeout(session.interval);
-      if (session) {
-        session.interval = null;
-        session.rpcCooldown.releaseWait?.();
-        state.lastScanProgress = session.scanProgress;
-      }
-      rpcLog.info('watcher.stopped', { chainId: services.chainId });
+      if (session.interval) clearTimeout(session.interval);
+      session.interval = null;
+      session.abort.abort();
+      session.rpcCooldown.releaseWait?.();
+      state.lastScanProgress = session.scanProgress;
+      if (state.inFlightOwner !== session) session.reads.close();
+      rpcLog.info('watcher.stopped', { chainId: session.reads.services.chainId });
     },
 
     async stopWatchingAndWait(): Promise<void> {

@@ -10,7 +10,7 @@ import { startParentLivenessWatch } from '../../../../core/support/process/paren
 import { openExecutionWriters } from './execution-writer';
 import { sendRpcBatch, type RpcBatchRequest } from '../../../../core/jurisdiction/adapter/rpc-utils';
 import { createHeaderReadQueue, HeaderReadCancelled, requireLiveHeaderClient } from './header-read-queue';
-import { createReadPacer } from './read-pacing';
+import { createReadPacer, waitForReadDelay } from './read-pacing';
 import { readBooleanEnv, readPositiveIntegerEnv } from '../../../../core/config/environment';
 import { RPC_BLOCK_RANGE_METHOD, RPC_RECEIPT_BATCH_METHOD } from '../../../../core/jurisdiction/adapter/rpc/watcher/rpc-watcher-block-range';
 import { createHyperSyncHeaderReader } from './hypersync-headers';
@@ -106,7 +106,7 @@ const readHeaderBatch = async (calls: GatewayCall[], primaryRpc: string, chainId
     requireLiveHeaderClient(signal);
     const cooldown = lane.cooldownUntilMs - performance.now();
     if (cooldown > 0) {
-      await Bun.sleep(cooldown);
+      await waitForReadDelay(cooldown, signal);
       timing?.mark('cooldown-ended');
     }
     const batch: RpcBatchRequest[] = calls.map(call => {
@@ -120,7 +120,7 @@ const readHeaderBatch = async (calls: GatewayCall[], primaryRpc: string, chainId
     }
     requireLiveHeaderClient(signal);
     timing?.mark('sent');
-    const responses = await sendRpcBatch(rpc, batch, 10_000);
+    const responses = await sendRpcBatch(rpc, batch, 10_000, signal);
     timing?.mark('upstream-replied');
     return batch.map(call => {
       const reply = responses.get(call.id);
@@ -134,7 +134,7 @@ const readHeaderBatch = async (calls: GatewayCall[], primaryRpc: string, chainId
     });
   } catch (error) {
     const failure = preflightRpcError(error);
-    if (error instanceof HeaderReadCancelled) {
+    if (signal.aborted || error instanceof HeaderReadCancelled) {
       timing?.mark('cancelled');
       return calls.map(call => ({ jsonrpc: '2.0', id: call.id, error: failure }));
     }
@@ -174,7 +174,7 @@ const readPacedReceipt = async (
   // Explicit one-call transport here prevents provider-internal HTTP retries
   // from starting a second upstream read outside the configured pacing.
   try {
-    const responses = await sendRpcBatch(rpc, [{ id: 1, jsonrpc: '2.0', method: call.method, params: call.params }], 10_000);
+    const responses = await sendRpcBatch(rpc, [{ id: 1, jsonrpc: '2.0', method: call.method, params: call.params }], 10_000, signal);
     const reply = responses.get(1);
     if (!reply || (!reply.error && !Object.hasOwn(reply, 'result')))
       throw new Error('USDC_PREFLIGHT_RECEIPT_RESPONSE_MISSING');
@@ -204,6 +204,7 @@ const relay = startStandaloneRelayServer({
       return { id: call['id'], method: call['method'], params: call['params'] };
     });
     const chain = networks.find(value => value.path === path);
+    const readChain = chain ?? networks.find(value => path.endsWith(value.path))!;
     const writer = chain && executionWriters.get(chain.chainId);
     const replies =
       chain && calls.every(call => currentHeaderMethods.has(call.method))
@@ -241,7 +242,8 @@ const relay = startStandaloneRelayServer({
                   const receiptChain = chain ?? networks.find(value => '/history' + value.path === path)!;
                   return await readPacedReceipt(call, process.env[receiptChain.env]!, receiptChain.chainId, request.signal, paceRead);
                 }
-                return { jsonrpc: '2.0', id: call['id'], result: await reader.send(call['method'], call['params']) };
+                const result = await reader.readForRequest(call.method, call.params, readChain.chainId, request.signal);
+                return { jsonrpc: '2.0', id: call.id, result };
               } catch (error) {
                 if (error instanceof HeaderReadCancelled)
                   return { jsonrpc: '2.0', id: call['id'], error: preflightRpcError(error) };

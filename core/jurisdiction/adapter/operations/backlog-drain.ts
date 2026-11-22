@@ -5,6 +5,7 @@ import type { JAdapter } from '../types';
 import { safeStringify } from '../../../protocol/serialization';
 import { scheduler } from 'node:timers/promises';
 import { getLiveJAdapterEntries } from '../../../runtime/j-submit/live-jadapters';
+import { rpcLog } from '../rpc-public';
 
 import {
   getJWatcherDrainStatus,
@@ -21,6 +22,16 @@ import {
 } from './backlog-drain-status';
 
 const J_WATCHER_DRAIN_RETRY_DELAY_MS = 100;
+const J_WATCHER_DRAIN_PROGRESS_INTERVAL_MS = 10_000;
+
+const logDrainProgress = (statuses: readonly JWatcherDrainStatus[], complete: boolean): void => {
+  rpcLog.info('watcher.startup_progress', {
+    complete,
+    chains: statuses.map(({ chainId, targetBlock, committedCursor, authenticatedThrough }) => ({
+      chainId, targetBlock, committedCursor, authenticatedThrough,
+    })),
+  });
+};
 
 type ProcessRuntimeFrame = (env: RuntimeReplica, inputs?: EntityInput[]) => Promise<RuntimeReplica>;
 
@@ -32,18 +43,22 @@ const getUniqueWatcherAdapters = (env: RuntimeReplica): JAdapter[] => {
   return [...adapters];
 };
 
-const captureTrustedJWatcherTargets = async (env: RuntimeReplica): Promise<CapturedJWatcherTarget[]> => {
+const captureTrustedJWatcherTargets = async (
+  env: RuntimeReplica, stop?: AbortSignal,
+): Promise<CapturedJWatcherTarget[]> => {
   const targets: CapturedJWatcherTarget[] = [];
   for (const adapter of getUniqueWatcherAdapters(env)) {
+    if (stop?.aborted) return [];
+    const readHead = adapter.mode === 'browservm' ? adapter.getCurrentBlockNumber : adapter.getWatcherCurrentBlockNumber;
     if (
       !adapter.pollNow ||
-      !adapter.getCurrentBlockNumber ||
+      !readHead ||
       !adapter.getFinalityDepth ||
       !adapter.getWatcherScanProgress
     ) {
       throw new Error(`J_WATCHER_DRAIN_API_MISSING:${adapter.chainId}:${adapter.addresses.depository}`);
     }
-    const chainHead = requireSafeBlock(await adapter.getCurrentBlockNumber(), 'J_WATCHER_CHAIN_HEAD_INVALID');
+    const chainHead = requireSafeBlock(await readHead.call(adapter), 'J_WATCHER_CHAIN_HEAD_INVALID');
     const finalityDepth = requireSafeBlock(adapter.getFinalityDepth(), 'J_WATCHER_FINALITY_DEPTH_INVALID');
     // Validate the trusted stack selector now, but never retain the mutable
     // JReplica object. Atomic frame publication replaces canonical replicas.
@@ -132,19 +147,31 @@ const pollCapturedTargets = async (
 export const drainJWatcherBacklog = async (
   env: RuntimeReplica,
   processFrame: ProcessRuntimeFrame,
+  stop?: AbortSignal,
 ): Promise<JWatcherDrainStatus[]> => {
-  const targets = await captureTrustedJWatcherTargets(env);
+  const targets = await captureTrustedJWatcherTargets(env, stop).catch(error => {
+    if (stop?.aborted) return [];
+    throw error;
+  });
+  if (stop?.aborted) return [];
   if (targets.length === 0) {
     if ((env.runtimeMempool?.entityInputs.length ?? 0) > 0) await processFrame(env);
     return [];
   }
 
   let progress: JWatcherDrainProgress | null = null;
-  while (true) {
+  let lastLoggedAt = -Infinity;
+  while (!stop?.aborted) {
     const statuses = targets.map((target) => getJWatcherDrainStatus(env, target));
-    if (statuses.every(isJWatcherDrainComplete)) return statuses;
+    const complete = statuses.every(isJWatcherDrainComplete);
+    const now = performance.now();
+    if (complete || now - lastLoggedAt >= J_WATCHER_DRAIN_PROGRESS_INTERVAL_MS) {
+      logDrainProgress(statuses, complete);
+      lastLoggedAt = now;
+    }
+    if (complete) return statuses;
     const fingerprint = getDrainFingerprint(env, targets, statuses);
-    progress = observeJWatcherDrainProgress(progress, fingerprint, performance.now());
+    progress = observeJWatcherDrainProgress(progress, fingerprint, now);
     if (progress.retrying) {
       // RPC watchers intentionally absorb transient read races. Avoid a hot
       // loop while the same bounded target is retried, but retain a hard stall
@@ -155,6 +182,8 @@ export const drainJWatcherBacklog = async (
     // a continuously advancing chain here creates a moving target: every slow
     // quorum frame observes a newer empty suffix and the drain never returns.
     await pollCapturedTargets(targets, statuses);
+    if (stop?.aborted) return [];
     await processFrame(env);
   }
+  return [];
 };

@@ -4,6 +4,7 @@ import { normalizeLoopbackUrl } from '../../../network/p2p/loopback-url';
 import { createBrowserVMAdapter } from '../browservm/browservm';
 import { TRON_CHAIN_IDS, sponsorsWithPublicDevKey } from '../chain-ids';
 import { createRpcAdapter } from '../rpc/rpc-adapter';
+import { bindRpcReadCancellation } from '../rpc-utils';
 import type { JAdapter, JAdapterConfig } from '../types';
 
 const DEFAULT_RPC_POLLING_INTERVAL_MS = 1_000;
@@ -148,7 +149,14 @@ const createNetworkAdapter = async (config: JAdapterConfig, privateKey: string |
         ? new NonceTrackingWallet(privateKey, provider)
         : new ethers.VoidSigner(ethers.ZeroAddress, provider);
 
-  return createRpcAdapter({ ...config, rpcUrl, ...(tronApiKey ? { tronApiKey } : {}) }, provider, signer);
+  return createRpcAdapter(
+    { ...config, rpcUrl, ...(tronApiKey ? { tronApiKey } : {}) },
+    provider,
+    signer,
+    signal => new ethers.JsonRpcProvider(
+      bindRpcReadCancellation(provider._getConnection(), signal), config.chainId, xlnJsonRpcProviderOptions(config.chainId),
+    ),
+  );
 };
 
 /** Build the external Jurisdiction adapter selected by immutable Runtime config. */

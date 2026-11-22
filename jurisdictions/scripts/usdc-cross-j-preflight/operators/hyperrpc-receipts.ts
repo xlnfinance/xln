@@ -20,8 +20,8 @@ const decodeBatch = (params: readonly unknown[], limit: number): RpcBatchRequest
   });
 };
 
-const readBatch = async (rpc: string, batch: RpcBatchRequest[]) => {
-  const replies = await sendRpcBatch(rpc, batch, 10_000);
+const readBatch = async (rpc: string, batch: RpcBatchRequest[], signal: AbortSignal) => {
+  const replies = await sendRpcBatch(rpc, batch, 10_000, signal);
   if (replies.size !== batch.length) throw new Error('USDC_HYPERRPC_RECEIPT_REPLY_COUNT_INVALID');
   return batch.map(({ id }) => {
     const reply = replies.get(id);
@@ -45,7 +45,9 @@ export const createHyperRpcReceiptReader = () => {
   const trace = process.env['POC_HEADER_BATCH_TIMING'] === '1';
   return async (params: readonly unknown[], signal: AbortSignal) => {
     const batch = decodeBatch(params, limit);
+    const queuedAt = performance.now();
     const release = await queue.acquire(signal);
+    const queueMs = Math.round(performance.now() - queuedAt);
     try {
       // The PoC uses the five-request-per-minute HyperRPC quota.
       await pace(raw, 12_500, signal);
@@ -53,13 +55,14 @@ export const createHyperRpcReceiptReader = () => {
       const started = performance.now();
       let result = 'reply';
       try {
-        return await readBatch(raw, batch);
+        return await readBatch(raw, batch, signal);
       } catch (error) {
         result = error instanceof RpcTransportUnavailableError && error.message.endsWith('_429') ? '429' : 'error';
         throw error;
       } finally {
         if (trace) process.stderr.write(`USDC_HYPERRPC_RECEIPTS:${JSON.stringify({
-          items: batch.length, sentAt: Math.round(started), ms: Math.round(performance.now() - started), result,
+          items: batch.length, sentAt: Math.round(started), queueMs,
+          ms: Math.round(performance.now() - started), result,
         })}\n`);
       }
     } finally {

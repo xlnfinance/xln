@@ -1,6 +1,15 @@
 import { setTimeout } from 'node:timers/promises';
 import { HeaderReadCancelled, requireLiveHeaderClient } from './header-read-queue';
 
+export const waitForReadDelay = async (delayMs: number, signal: AbortSignal): Promise<void> => {
+  try {
+    await setTimeout(Math.ceil(delayMs), undefined, { signal });
+  } catch (error) {
+    if (signal.aborted) throw new HeaderReadCancelled();
+    throw error;
+  }
+};
+
 export const createReadPacer = () => {
   const nextByEndpoint = new Map<string, number>();
   return async (endpoint: string, intervalMs: number, signal: AbortSignal): Promise<void> => {
@@ -12,12 +21,7 @@ export const createReadPacer = () => {
         nextByEndpoint.set(endpoint, now + intervalMs);
         return;
       }
-      try {
-        await setTimeout(Math.ceil(delay), undefined, { signal });
-      } catch (error) {
-        if (signal.aborted) throw new HeaderReadCancelled();
-        throw error;
-      }
+      await waitForReadDelay(delay, signal);
     }
   };
 };

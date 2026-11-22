@@ -285,6 +285,39 @@ afterEach(async () => {
 });
 
 describe('RPC J-watcher backlog drain', () => {
+  test('stop releases an active RPC poll before the provider replies', async () => {
+    managedAnvil = await startAnvil();
+    rpcProxy = startRpcGateProxy(managedAnvil.rpcUrl);
+    adapter = await createJAdapter({ mode: 'rpc', chainId: CHAIN_ID, rpcUrl: rpcProxy.rpcUrl, watchPollMs: 100 });
+    await adapter.deployStack();
+    const env = createEmptyEnv(RUNTIME_SEED);
+    env.scenarioMode = true;
+    const jReplica = createJReplica(env, 'Shutdown', adapter.addresses.depository);
+    jReplica.chainId = CHAIN_ID;
+    jReplica.contracts = { ...adapter.addresses };
+    attachLiveJAdapter(env, 'Shutdown', adapter);
+    adapter.startWatching(env);
+    const gate = rpcProxy.armBlockNumberGate();
+    const poll = adapter.pollNow!();
+    try {
+      await Promise.race([
+        gate.entered,
+        poll.then(() => { throw new Error('J_WATCHER_POLL_DID_NOT_REACH_RPC'); }),
+      ]);
+      await Promise.race([
+        Promise.all([adapter.stopWatchingAndWait(), poll]),
+        Bun.sleep(1_500).then(() => { throw new Error('J_WATCHER_SHUTDOWN_WAITED_FOR_RPC'); }),
+      ]);
+      expect(adapter.isWatching()).toBeFalse();
+      expect(adapter.getWatcherScanProgress?.().scannedThroughHeight).toBe(0);
+      expect(await adapter.getCurrentBlockNumber()).toBeGreaterThan(0);
+    } finally {
+      gate.release();
+    }
+    adapter.startWatching(env);
+    expect(await adapter.getWatcherCurrentBlockNumber!()).toBeGreaterThan(0);
+  }, 10_000);
+
   test.each([
     {
       name: 'delivers an authenticated event beyond 4096 historical blocks before returning',
@@ -653,15 +686,16 @@ describe('RPC J-watcher backlog drain', () => {
       const inFlightPoll = adapter.pollNow?.();
       if (!inFlightPoll) throw new Error('J_WATCHER_BACKLOG_POLL_API_MISSING');
       await waitForGate('shutdown', shutdownGate, inFlightPoll);
-      let shutdownComplete = false;
-      const shutdown = adapter.stopWatchingAndWait().then(() => {
-        shutdownComplete = true;
-      });
-      await Bun.sleep(25);
-      expect(shutdownComplete).toBe(false);
-      shutdownGate.release();
-      await shutdown;
-      await inFlightPoll;
+      const cursorBeforeStop = adapter.getWatcherScanProgress?.();
+      try {
+        await Promise.race([
+          Promise.all([adapter.stopWatchingAndWait(), inFlightPoll]),
+          Bun.sleep(1_500).then(() => { throw new Error('J_WATCHER_SHUTDOWN_WAITED_FOR_RPC'); }),
+        ]);
+        expect(adapter.getWatcherScanProgress?.()).toEqual(cursorBeforeStop);
+      } finally {
+        shutdownGate.release();
+      }
       expect(adapter.isWatching()).toBe(false);
 
       // Exercise the actual automatic timer on the same real transport. The

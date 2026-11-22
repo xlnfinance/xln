@@ -1,24 +1,111 @@
-import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { acquireStandLock, inheritedStandLock } from '../../../../../tools/stand-lock';
 import { runStandChild } from '../../../../../tools/stand/run';
-import { sessionArgs, type SessionConfig } from '../../operators/session/config';
+import { sessionArgs, sessionWatcherEnv, type SessionConfig } from '../../operators/session/config';
 import {
   launchSessionChild,
+  sessionChildShutdownGraceMs,
   stopSessionChildren,
   waitSessionReady,
   type ManagedChild,
 } from '../../operators/session/processes';
 import { readAuthority, requireCurrentAuthority } from '../authority';
 import type { ExecutionConfig } from '../config';
-import { withCleanup } from './run-report';
+import { runProgressMarker } from './progress-events';
+import { releaseUserDelivery, supervisedExecutionEnv, userCaughtUp } from './operator-barrier';
+import { reasonText, throwAfter, withCleanup } from './run-report';
 
 const entry = 'jurisdictions/scripts/usdc-cross-j-preflight/execution/index.ts';
+
+const launchExecution = (children: ManagedChild[], logs: string, config: ExecutionConfig): ManagedChild =>
+  launchSessionChild(
+    children,
+    logs,
+    'execution',
+    entry,
+    [
+      'run',
+      '--directory',
+      config.directory,
+      '--user-store',
+      config.store,
+      '--api-base',
+      config.apiBase,
+      '--hub-url',
+      config.hubUrl,
+      '--authority-file',
+      config.authorityPath,
+      '--run-id',
+      config.runId,
+      '--output',
+      config.output,
+    ],
+    {
+      PATH: process.env['PATH'],
+      HOME: process.env['HOME'],
+      TMPDIR: process.env['TMPDIR'],
+      XLN_ORCHESTRATOR_PID: String(process.pid),
+      [supervisedExecutionEnv]: '1',
+      ...sessionWatcherEnv(),
+    },
+    { ipc: true },
+  );
+
+const remainingMs = (deadline: number): number => Math.max(1, deadline - Date.now());
+
+const requireUnexpired = (expiresAt: number): void => {
+  if (Date.now() >= expiresAt) throw new Error('USDC_EXECUTION_AUTHORITY_EXPIRED');
+};
+
+const operatorReady = (logs: string, marker: RegExp): boolean =>
+  marker.test(readFileSync(join(logs, 'supervisor.log'), 'utf8'));
+
+const releaseWhenReady = async (
+  children: ManagedChild[],
+  runner: ManagedChild,
+  logs: string,
+  startupDeadline: number,
+  expiresAt: number,
+): Promise<void> => {
+  let caughtUp = false;
+  runner.child.on('message', (message: unknown) => {
+    if (message !== userCaughtUp || caughtUp) runner.error = new Error('USDC_EXECUTION_USER_IPC_INVALID');
+    else caughtUp = true;
+  });
+  await waitSessionReady(
+    children,
+    'supervisor',
+    async () => {
+      requireUnexpired(expiresAt);
+      return operatorReady(logs, /^USDC_SESSION_READY:/m);
+    },
+    remainingMs(startupDeadline),
+  );
+  await waitSessionReady(
+    children,
+    'user-catch-up',
+    async () => {
+      requireUnexpired(expiresAt);
+      return caughtUp;
+    },
+    remainingMs(expiresAt),
+  );
+  requireUnexpired(expiresAt);
+  await new Promise<void>((resolve, reject) =>
+    runner.child.send(releaseUserDelivery, error => (error ? reject(error) : resolve())),
+  );
+};
 
 const supervise = async (config: ExecutionConfig, session: SessionConfig, expiresAt: number): Promise<void> => {
   const root = join(config.directory, 'sessions');
   mkdirSync(root, { recursive: true, mode: 0o700 });
   const logs = mkdtempSync(join(root, 'journey-'));
+  const launcher = join(logs, 'launcher.log');
+  writeFileSync(launcher, runProgressMarker + JSON.stringify({ runId: config.runId, expiresAt }) + '\n', {
+    mode: 0o600,
+    flag: 'wx',
+  });
   console.log(`USDC_EXECUTION_LOG_DIRECTORY:${logs}`);
   const children: ManagedChild[] = [];
   let stop!: (error: Error) => void;
@@ -30,6 +117,7 @@ const supervise = async (config: ExecutionConfig, session: SessionConfig, expire
   process.on('SIGTERM', onStop);
   await withCleanup(
     async () => {
+      const startupDeadline = Math.min(Date.now() + session.startupTimeoutMs * 5, expiresAt);
       const supervisor = launchSessionChild(
         children,
         logs,
@@ -37,45 +125,24 @@ const supervise = async (config: ExecutionConfig, session: SessionConfig, expire
         'jurisdictions/scripts/usdc-cross-j-preflight/operators/session/index.ts',
         sessionArgs({ ...session, runId: config.runId }),
         process.env,
+        // The supervisor must finish stopping MM, Hub and gateway before it releases the stores.
+        { shutdownGraceMs: 3 * sessionChildShutdownGraceMs + 5_000 },
       );
       await Promise.race([
         interrupted,
         waitSessionReady(
           [supervisor],
-          'supervisor',
-          async () => /^USDC_SESSION_READY:/m.test(readFileSync(join(logs, 'supervisor.log'), 'utf8')),
-          Math.max(1, Math.min(session.startupTimeoutMs * 5, expiresAt - Date.now())),
+          'gateway',
+          async () => {
+            requireUnexpired(expiresAt);
+            return operatorReady(logs, /^USDC_SESSION_GATEWAY_READY:/m);
+          },
+          remainingMs(startupDeadline),
         ),
       ]);
-      const runner = launchSessionChild(
-        children,
-        logs,
-        'execution',
-        entry,
-        [
-          'run',
-          '--directory',
-          config.directory,
-          '--user-store',
-          config.store,
-          '--api-base',
-          config.apiBase,
-          '--hub-url',
-          config.hubUrl,
-          '--authority-file',
-          config.authorityPath,
-          '--run-id',
-          config.runId,
-          '--output',
-          config.output,
-        ],
-        {
-          PATH: process.env['PATH'],
-          HOME: process.env['HOME'],
-          TMPDIR: process.env['TMPDIR'],
-          XLN_ORCHESTRATOR_PID: String(process.pid),
-        },
-      );
+      requireUnexpired(expiresAt);
+      const runner = launchExecution(children, logs, config);
+      await Promise.race([interrupted, releaseWhenReady(children, runner, logs, startupDeadline, expiresAt)]);
       await Promise.race([
         interrupted,
         waitSessionReady(
@@ -88,7 +155,7 @@ const supervise = async (config: ExecutionConfig, session: SessionConfig, expire
               throw new Error(`USDC_EXECUTION_CHILD_FAILED:${join(logs, 'execution.log')}`);
             return false;
           },
-          Math.max(1, expiresAt - Date.now() + 90_000),
+          remainingMs(expiresAt + 90_000),
         ),
       ]);
       console.log(`USDC_EXECUTION_SUPERVISED_COMPLETE:${config.runId}:${config.output}`);
@@ -101,7 +168,15 @@ const supervise = async (config: ExecutionConfig, session: SessionConfig, expire
         process.off('SIGTERM', onStop);
       }
     },
+  ).catch(error =>
+    throwAfter(error, () => {
+      const failure =
+        reasonText(error).match(/^(?:USDC_|STAND_LOCK_)[A-Z_]+/)?.[0] ?? 'USDC_EXECUTION_SUPERVISION_FAILED';
+      appendFileSync(launcher, `error: ${failure}\n`);
+      writeFileSync(join(logs, 'exit-status'), '1\n', { mode: 0o600, flag: 'wx' });
+    }),
   );
+  writeFileSync(join(logs, 'exit-status'), '0\n', { mode: 0o600, flag: 'wx' });
 };
 
 export const runSupervised = async (config: ExecutionConfig, session: SessionConfig): Promise<void> => {

@@ -7,12 +7,12 @@ export const RPC_RECEIPT_BATCH_METHOD = 'xln_getReceiptBatch';
 // The gateway deadline includes admission, provider pacing and the response.
 const GATEWAY_ARRAY_READ_TIMEOUT_MS = 60_000;
 
-const createGatewayArrayReader = (rpcUrl: string, method: string, timeout: number) => {
+const createGatewayArrayReader = (rpcUrl: string, method: string, signal?: AbortSignal) => {
   if (!rpcUrl) throw new Error('J_BLOCK_RANGE_RPC_URL_MISSING');
   return async (params: unknown[]) => {
     const replies = await sendRpcBatch(rpcUrl, [{
       jsonrpc: '2.0', id: 1, method, params,
-    }], timeout);
+    }], GATEWAY_ARRAY_READ_TIMEOUT_MS, signal);
     const reply = replies.get(1);
     if (reply?.error?.code !== undefined && TRANSIENT_RPC_HTTP_STATUSES.has(reply.error.code)) {
       throw new RpcTransportUnavailableError(`J_WATCHER_GATEWAY_HTTP_${reply.error.code}:${method}`);
@@ -24,12 +24,12 @@ const createGatewayArrayReader = (rpcUrl: string, method: string, timeout: numbe
   };
 };
 
-export const createRpcBlockRangeReader = (rpcUrl: string): RpcBlockRangeReader => {
-  const read = createGatewayArrayReader(rpcUrl, RPC_BLOCK_RANGE_METHOD, GATEWAY_ARRAY_READ_TIMEOUT_MS);
+export const createRpcBlockRangeReader = (rpcUrl: string, signal?: AbortSignal): RpcBlockRangeReader => {
+  const read = createGatewayArrayReader(rpcUrl, RPC_BLOCK_RANGE_METHOD, signal);
   return (from, to) => read([from, to]);
 };
 
-export const createRpcReceiptBatch = (rpcUrl: string, maxBlocks: number): RpcReceiptBatch => {
-  const read = createGatewayArrayReader(rpcUrl, RPC_RECEIPT_BATCH_METHOD, GATEWAY_ARRAY_READ_TIMEOUT_MS);
+export const createRpcReceiptBatch = (rpcUrl: string, maxBlocks: number, signal?: AbortSignal): RpcReceiptBatch => {
+  const read = createGatewayArrayReader(rpcUrl, RPC_RECEIPT_BATCH_METHOD, signal);
   return { maxBlocks, read: heights => read([heights]) };
 };

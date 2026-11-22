@@ -4,6 +4,15 @@ import { isLoopbackUrl } from '../../../../../core/network/p2p/loopback-url';
 import { readExistingIdentities } from '../../identities';
 
 export const roles = ['hub', 'mm', 'user'] as const;
+export const sessionWatcherEnv = (): NodeJS.ProcessEnv => ({
+  XLN_J_WATCHER_RPC_MAX_BLOCKS_PER_POLL: process.env['XLN_J_WATCHER_RPC_MAX_BLOCKS_PER_POLL'],
+  XLN_J_WATCHER_RPC_MAX_BLOCKS_PER_POLL_11155111: process.env['XLN_J_WATCHER_RPC_MAX_BLOCKS_PER_POLL_11155111'],
+  XLN_J_WATCHER_RPC_MAX_BLOCKS_PER_POLL_421614: process.env['XLN_J_WATCHER_RPC_MAX_BLOCKS_PER_POLL_421614'],
+  XLN_J_WATCHER_RPC_HEADER_BATCH_CALLS: process.env['XLN_J_WATCHER_RPC_HEADER_BATCH_CALLS'],
+  XLN_J_WATCHER_RPC_BLOCK_RANGE_421614: process.env['POC_HYPERSYNC_ARBITRUM_HEADERS'],
+  XLN_J_WATCHER_RPC_RECEIPT_BATCH_CALLS_11155111: process.env['POC_HYPERRPC_ETHEREUM_RECEIPT_BATCH_CALLS'],
+});
+
 export type Role = (typeof roles)[number];
 export type SessionConfig<Store = string> = {
   directory: string;

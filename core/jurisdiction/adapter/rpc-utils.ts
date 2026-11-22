@@ -110,6 +110,42 @@ const decodeRpcBatchResponse = (value: unknown): RpcBatchResponse => {
 
 const DEFAULT_RPC_BATCH_TIMEOUT_MS = 5_000;
 
+/** Keep the provider's RPC codecs while a read owner controls the HTTP lifetime. */
+export const bindRpcReadCancellation = (connection: ethers.FetchRequest, owner: AbortSignal): ethers.FetchRequest => {
+  connection.getUrlFunc = async request => {
+    const protocol = new URL(request.url).protocol;
+    if ((protocol !== 'http:' && protocol !== 'https:') ||
+      (protocol !== 'https:' && request.credentials && !request.allowInsecureAuthentication))
+      throw new Error('RPC_READ_TRANSPORT_UNSUPPORTED');
+    const deadline = AbortSignal.timeout(request.timeout);
+    const signal = AbortSignal.any([owner, deadline]);
+    try {
+      const response = await fetch(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body: request.body ? Uint8Array.from(request.body) : null,
+        redirect: 'manual',
+        signal,
+      });
+      if (TRANSIENT_RPC_HTTP_STATUSES.has(response.status)) {
+        await response.body?.cancel();
+        throw new RpcTransportUnavailableError(`RPC_READ_HTTP_${response.status}`);
+      }
+      return {
+        statusCode: response.status,
+        statusMessage: response.statusText,
+        headers: Object.fromEntries(response.headers),
+        body: new Uint8Array(await response.arrayBuffer()),
+      };
+    } catch (error) {
+      if (error instanceof RpcTransportUnavailableError) throw error;
+      const reason = owner.aborted ? 'CANCELLED' : deadline.aborted ? 'TIMEOUT' : 'UNREACHABLE';
+      throw new RpcTransportUnavailableError(`RPC_READ_${reason}`, { cause: error });
+    }
+  };
+  return connection;
+};
+
 export const isDebugEventEmitter = (value: unknown): value is DebugEventEmitter =>
   typeof value === 'object' &&
   value !== null &&
@@ -122,13 +158,16 @@ export const sendRpcBatch = async (
   rpcUrl: string,
   batch: RpcBatchRequest[],
   timeoutMs = DEFAULT_RPC_BATCH_TIMEOUT_MS,
+  owner?: AbortSignal,
 ): Promise<Map<number, RpcBatchResponse>> => {
   if (batch.length === 0) return new Map();
   const controller = new AbortController();
+  const signal = owner ? AbortSignal.any([controller.signal, owner]) : controller.signal;
   const timeoutHandle = timeoutMs > 0 ? setTimeout(() => controller.abort(), timeoutMs) : null;
   const transportFailure = (error: unknown): RpcTransportUnavailableError =>
     new RpcTransportUnavailableError(
-      (error as Error)?.name === 'AbortError' ? `RPC_BATCH_TIMEOUT:${timeoutMs}` : 'RPC_BATCH_UNREACHABLE',
+      owner?.aborted ? 'RPC_BATCH_CANCELLED'
+        : (error as Error)?.name === 'AbortError' ? `RPC_BATCH_TIMEOUT:${timeoutMs}` : 'RPC_BATCH_UNREACHABLE',
       { cause: error },
     );
   let json: unknown;
@@ -141,7 +180,7 @@ export const sendRpcBatch = async (
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(batch),
-        signal: controller.signal,
+        signal,
       });
     } catch (error) {
       throw transportFailure(error);
@@ -154,7 +193,7 @@ export const sendRpcBatch = async (
     try {
       json = await response.json();
     } catch (error) {
-      if ((error as Error)?.name === 'AbortError') throw transportFailure(error);
+      if (signal.aborted || (error as Error)?.name === 'AbortError') throw transportFailure(error);
       throw new Error('RPC_BATCH_INVALID_RESPONSE', { cause: error });
     }
   } finally {

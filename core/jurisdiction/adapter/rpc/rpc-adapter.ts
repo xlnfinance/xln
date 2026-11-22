@@ -22,13 +22,9 @@ import { createRpcSubmitTx } from './write/rpc-submission';
 import { createRpcTransactionSequencer } from './write/rpc-transaction-sequencer';
 import { createRpcWalletWriteMethods } from './wallet/rpc-wallet-writes';
 import { createRpcWatcherController } from './watcher/rpc-watcher-controller';
-import type { RpcWatcherServices } from './watcher/rpc-watcher-types';
 import { createRpcWriteMethods } from './write/rpc-write-methods';
 import { prepareDurableTransaction } from './write/prepared/durable-transaction';
-import { watcherPollWindowLimit } from '../watcher/observe/watcher-poll-policy';
-import { readBooleanEnv, readPositiveIntegerEnv } from '../../../config/environment';
-import { MAX_RPC_BATCH_CALLS } from '../rpc-utils';
-import { createRpcBlockRangeReader, createRpcReceiptBatch } from './watcher/rpc-watcher-block-range';
+import { openRpcWatcherReadScope, readRpcWatcherProfile } from './watcher/rpc-watcher-read-scope';
 
 export const isRpcWatcherTransientError = (error: unknown): boolean => {
   for (let current = error, depth = 0; current !== undefined && depth < 8; depth += 1) {
@@ -38,41 +34,13 @@ export const isRpcWatcherTransientError = (error: unknown): boolean => {
   return isRpcTransportUnavailable(error) || isTransientRpcUnavailableError(error);
 };
 
-const readRpcWatcherOptions = (
-  config: JAdapterConfig,
-): Pick<RpcWatcherServices, 'pollWindowLimit' | 'headerBatchCalls' | 'readReceiptBlockRange' | 'receiptBatch'> => {
-  if (config.mode !== 'rpc') return {};
-  const pollLimitName = 'XLN_J_WATCHER_RPC_MAX_BLOCKS_PER_POLL';
-  const configuredLimit = process.env[`${pollLimitName}_${config.chainId}`] ?? process.env[pollLimitName];
-  const batchLimitName = 'XLN_J_WATCHER_RPC_HEADER_BATCH_CALLS';
-  const headerBatchCalls = process.env[batchLimitName] === undefined
-    ? undefined
-    : readPositiveIntegerEnv(batchLimitName, MAX_RPC_BATCH_CALLS);
-  if (headerBatchCalls !== undefined && headerBatchCalls > MAX_RPC_BATCH_CALLS)
-    throw new Error('RPC_BATCH_CALL_LIMIT_INVALID');
-  const receiptSizeName = `XLN_J_WATCHER_RPC_RECEIPT_BATCH_CALLS_${config.chainId}`;
-  const receiptBatchCalls = process.env[receiptSizeName] === undefined
-    ? undefined : readPositiveIntegerEnv(receiptSizeName, MAX_RPC_BATCH_CALLS);
-  if (receiptBatchCalls !== undefined && receiptBatchCalls > MAX_RPC_BATCH_CALLS)
-    throw new Error('RPC_RECEIPT_BATCH_CALL_LIMIT_INVALID');
-  return {
-    ...(configuredLimit === undefined ? {} : { pollWindowLimit: watcherPollWindowLimit(config.mode, configuredLimit) }),
-    ...(headerBatchCalls === undefined ? {} : { headerBatchCalls }),
-    ...(readBooleanEnv(`XLN_J_WATCHER_RPC_BLOCK_RANGE_${config.chainId}`, false)
-      ? { readReceiptBlockRange: createRpcBlockRangeReader(config.rpcUrl ?? '') }
-      : {}),
-    ...(receiptBatchCalls !== undefined
-      ? { receiptBatch: createRpcReceiptBatch(config.rpcUrl ?? '', receiptBatchCalls) }
-      : {}),
-  };
-};
-
 export async function createRpcAdapter(
   config: JAdapterConfig,
   provider: ethers.JsonRpcProvider,
   signer: Signer,
+  openWatcherProvider: (signal: AbortSignal) => ethers.JsonRpcProvider,
 ): Promise<JAdapter> {
-  const watchOptions = readRpcWatcherOptions(config);
+  const watchOptions = readRpcWatcherProfile(config);
   const traceEnabled = process.env['JADAPTER_TRACE'] === '1';
   const trace = (phase: string, extra?: Record<string, unknown>): void => {
     if (traceEnabled) {
@@ -104,31 +72,9 @@ export async function createRpcAdapter(
     mintDebugEnabled: process.env['XLN_JADAPTER_MINT_DEBUG'] === '1',
     isQuiet: () => quietLogs,
   });
-  const watcher = createRpcWatcherController({
-    provider,
-    mode: config.mode,
-    chainId: config.chainId,
-    ...(config.rpcUrl ? { rpcUrl: config.rpcUrl } : {}),
-    ...(config.watchPollMs === undefined ? {} : { watchPollMs: config.watchPollMs }),
-    ...watchOptions,
-    get depositoryAddress() { return stack.addresses.depository; },
-    get entityProviderAddress() { return stack.addresses.entityProvider; },
-    getDepository: () => stack.depository,
-    getEntityProvider: () => stack.entityProvider,
-    getLiveDepositoryAddress: stack.getDepositoryAddress,
-    getLiveEntityProviderAddress: stack.getEntityProviderAddress,
-    assertStackBindingVerified: () => {
-      if (!stack.bindingVerified) {
-        throw new Error(`J_STACK_BINDING_UNVERIFIED:rpc:chainId=${config.chainId}`);
-      }
-    },
-    readCurrentBlockNumber: chainIo.readCurrentBlockNumber,
-    readSafeBlockNumber: chainIo.readSafeBlockNumber,
-    readBlockHeaders: chainIo.readBlockHeaders,
-    sendAuthenticatedBatch: chainIo.sendAuthenticatedBatch,
-    resolveFinalityDepth: chainIo.resolveFinalityDepth,
-    isTransientRpcUnavailable: isRpcWatcherTransientError,
-  });
+  const watcher = createRpcWatcherController(signal =>
+    openRpcWatcherReadScope(config, openWatcherProvider(signal), signer, stack, watchOptions, signal, isRpcWatcherTransientError),
+  );
   const lifecycle = createRpcLifecycleMethods({
     provider,
     chainId: config.chainId,

@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import type { ChildProcess } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { hexlify, JsonRpcProvider, NonceManager, Wallet, zeroPadValue } from 'ethers';
+import { hexlify, JsonRpcProvider, NonceManager, toBeHex, Wallet, zeroPadValue } from 'ethers';
 import { Depository__factory, ERC20Mock__factory } from '../../../../jurisdictions/typechain-types';
 import { readVaultSeed } from '../../../../jurisdictions/scripts/usdc-cross-j-preflight/identities';
 import { STAND_LOCK_TOKEN_ENV } from '../../../../tools/stand-lock';
@@ -11,6 +11,7 @@ import { generateLazyEntityId } from '../../../entity/factory';
 import { prepareSignedBatch } from '../../../hanko/batch';
 import { buildExternalTokenToReserveBatch } from '../../../jurisdiction/adapter/events/contract-codec';
 import { createEmptyBatch } from '../../../jurisdiction/machine/batch';
+import { depositoryEntityNonceSlot } from '../../../jurisdiction/adapter/rpc/state-anchor/rpc-storage-slots';
 import { safeStringify } from '../../../protocol/serialization';
 import { createUsdcFixture, stopFixtureChildren, until } from './usdc-session/fixture';
 import { executionEntry as entry, issueAuthority, readReport, type UsdcFixture } from './usdc-session/approval';
@@ -78,11 +79,14 @@ test('supervised execution guards the first approval and rechecks backing after 
   const sourceSponsor = new NonceManager(Wallet.fromPhrase(mnemonic, source));
   const targetSponsor = new NonceManager(Wallet.fromPhrase(mnemonic, target));
   const users = identities.find(identity => identity.role === 'user')!.chains;
-  const targetHub = identities.find(identity => identity.role === 'hub')!.chains[1]!;
+  const [sourceHub, targetHub] = identities.find(identity => identity.role === 'hub')!.chains;
+  if (!sourceHub || !targetHub) throw new Error('USDC_EXECUTION_TEST_HUB_CHAINS_MISSING');
+  const hubNonceSlot = toBeHex(depositoryEntityNonceSlot(sourceHub.entityId), 32);
   const reserve = reserveOperators(fixture, target, targetSponsor);
   let drainBeforeCollateral = false;
   let drainBeforeApproval = false;
   let sourceArchiveUnavailable = false;
+  let holdHubProof: { seen: boolean; release: Promise<void> } | undefined;
   let sourceSubmissions = 0;
   let targetSubmissions = 0;
   let firstApprovalWire: string | undefined;
@@ -109,6 +113,15 @@ test('supervised execution guards the first approval and rechecks backing after 
       await reserve.remove(200_000n);
     },
     async call => {
+      if (
+        holdHubProof &&
+        call.method === 'eth_getProof' &&
+        Array.isArray(call.params[1]) &&
+        call.params[1].includes(hubNonceSlot)
+      ) {
+        holdHubProof.seen = true;
+        await holdHubProof.release;
+      }
       if (drainBeforeApproval && call.method === 'eth_estimateGas') {
         drainBeforeApproval = false;
         await reserve.remove(200_000n);
@@ -172,6 +185,32 @@ test('supervised execution guards the first approval and rechecks backing after 
       active = child;
       child.once('exit', resolve).once('error', reject);
     });
+  const holdHubUntilUserReady = async (name: string, holdThroughExpiry = false) => {
+    const gate = Promise.withResolvers<void>();
+    holdHubProof = { seen: false, release: gate.promise };
+    const exiting = run(name);
+    const log = join(root, `${name}.log`);
+    try {
+      await until('parallel-user-catch-up', async () => {
+        const text = readFileSync(log, 'utf8');
+        if (active?.exitCode !== null) throw new Error(text);
+        const logs = text.match(/^USDC_EXECUTION_LOG_DIRECTORY:(.+)$/m)?.[1];
+        if (!logs || !holdHubProof?.seen || !existsSync(join(logs, 'execution.log'))) return false;
+        const userLog = readFileSync(join(logs, 'execution.log'), 'utf8');
+        if (!userLog.includes('USDC_EXECUTION_USER_CAUGHT_UP')) return false;
+        expect(userLog).not.toContain('USDC_POC_STAGE:execution-user-relay-connected');
+        expect(readFileSync(join(logs, 'supervisor.log'), 'utf8')).not.toContain('USDC_SESSION_READY:');
+        return true;
+      });
+      expect(sourceSubmissions).toBe(0);
+      expect(targetSubmissions).toBe(0);
+      if (holdThroughExpiry) await exiting;
+    } finally {
+      holdHubProof = undefined;
+      gate.resolve();
+    }
+    expect(await exiting).not.toBe(0);
+  };
   const interruptRun = async (name: string, payer: string, nonce: number, provider: JsonRpcProvider, mined = true) => {
     const armed: NonNullable<typeof cut> = { payer, nonce, output: join(root, `${name}.json`) };
     cut = armed;
@@ -225,7 +264,25 @@ test('supervised execution guards the first approval and rechecks backing after 
     expect(await run('bad-catalog')).not.toBe(0);
     expect(readFileSync(join(root, 'bad-catalog.log'), 'utf8')).toContain('USDC_EXECUTION_AUTHORITY_CANDIDATE_CHANGED');
     writeFileSync(catalog, original);
-    expect(await run('low-backing')).not.toBe(0);
+    const originalAuthority = readFileSync(authority, 'utf8');
+    try {
+      writeFileSync(authority, safeStringify({ ...readReport(authority), expiresAt: Date.now() + 12_000 }));
+      await holdHubUntilUserReady('expired-during-recovery', true);
+      const expiredLog = readFileSync(join(root, 'expired-during-recovery.log'), 'utf8');
+      const expiredDirectory = expiredLog.match(/^USDC_EXECUTION_LOG_DIRECTORY:(.+)$/m)?.[1];
+      if (!expiredDirectory) throw new Error('USDC_EXECUTION_TEST_LOG_DIRECTORY_MISSING');
+      expect(expiredLog).toContain('USDC_EXECUTION_AUTHORITY_EXPIRED');
+      expect(expiredLog).not.toMatch(/^error: USDC_SESSION_FORCED_STOP/m);
+      expect(readFileSync(join(expiredDirectory, 'supervisor.log'), 'utf8')).not.toMatch(/^error: USDC_SESSION_FORCED_STOP/m);
+      expect(readFileSync(join(expiredDirectory, 'execution.log'), 'utf8')).toContain(
+        'USDC_EXECUTION_USER_STARTUP_INTERRUPTED',
+      );
+      expect(sourceSubmissions).toBe(0);
+      expect(targetSubmissions).toBe(0);
+    } finally {
+      writeFileSync(authority, originalAuthority);
+    }
+    await holdHubUntilUserReady('low-backing');
     const initialStop = readReport(join(root, 'low-backing.json'));
     expect(initialStop['reason']).toContain('USDC_EXECUTION_TARGET_BACKING_INSUFFICIENT');
     expect(initialStop['lastConfirmedStep']).toBeNull();
@@ -314,6 +371,20 @@ test('supervised execution guards the first approval and rechecks backing after 
     expect(exitStatus['lastConfirmedStep']).toBe('withdrawal');
     expect((exitStatus['slots'] as unknown[])[4]).toMatchObject({ hash: exit, status: 'confirmed' });
     expect(await run('resumed')).toBe(0);
+    const resumedLog = readFileSync(join(root, 'resumed.log'), 'utf8');
+    const journeyLogs = resumedLog.match(/^USDC_EXECUTION_LOG_DIRECTORY:(.+)$/m)?.[1];
+    if (!journeyLogs) throw new Error('TEST_EXECUTION_LOG_DIRECTORY_REQUIRED');
+    const progress = Bun.spawnSync([
+      process.execPath,
+      'jurisdictions/scripts/usdc-cross-j-preflight/operators/session/progress.ts',
+      journeyLogs,
+    ]);
+    const progressText = progress.stdout.toString();
+    expect(progress.exitCode).toBe(0);
+    expect(progressText).toContain('Launcher exited (0)');
+    expect(progressText).toContain('Run demo-01 | authority expires');
+    expect(progressText).toContain('User  last completed stage');
+    expect(progressText.match(/nonce \d+  confirmed  0x[a-f0-9]{64}/gi)).toHaveLength(5);
     const report = readReport(join(root, 'resumed.json'));
     expect(stopped['preflight']).toMatchObject({ quote: { net: 899_801n } });
     expect(report['preflight']).toEqual(stopped['preflight']);

@@ -122,8 +122,14 @@ bun jurisdictions/scripts/usdc-cross-j-preflight/execution/index.ts run \
   --output "$POC_RUN_REPORT"
 ```
 
-This invocation owns the gateway and supervisor and restores the selected Hub/MM
-stores. It checks the signed payout economics, backing, balances, and nonce
+This invocation owns the gateway and supervisor. Once the gateway verifies both
+chains, the financial child restores the user WAL while the supervisor restores
+the Hub and MM stores. The user keeps delivery paused until its catch-up and
+operator readiness both complete. It then authenticates the latest confirmed
+suffix before opening delivery on the same Runtime. Authority expiry during
+startup stops both branches.
+
+The financial child checks the signed payout economics, backing, balances, and nonce
 slots before the first approval. After estimating approval gas it verifies the
 same maker quote, the signed tariff and backing at a fresh chain point, then
 records those checks with the approved wire. It checks the quote and backing

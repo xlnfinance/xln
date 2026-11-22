@@ -5,7 +5,7 @@ import { safeStringify } from '../../../../../core/protocol/serialization';
 import { requireBoundaryRecord } from '../../../../../core/protocol/boundary-validation';
 import { decodeJurisdictionsData } from '../../../../../core/jurisdiction/adapter/kernel/jurisdiction-loader';
 import { readExistingIdentities, readVaultSeed } from '../../identities';
-import { readSessionConfig, sessionRoles, type Role } from './config';
+import { readSessionConfig, sessionRoles, sessionWatcherEnv, type Role } from './config';
 import { acquireSessionStores, assertCommittedSessionStores } from './stores';
 import {
   assertSessionChildrenLive,
@@ -21,12 +21,8 @@ const config = readSessionConfig(process.argv.slice(2));
 const selectedRoles = sessionRoles(config);
 const release = acquireSessionStores(config);
 const children: ManagedChild[] = [];
-let stopping = false;
-let starting = true;
-const stop = (): void => {
-  stopping = true;
-  if (starting) for (const { child } of children) child.kill('SIGTERM');
-};
+const shutdown = new AbortController();
+const stop = (): void => shutdown.abort();
 process.once('SIGTERM', stop);
 process.once('SIGINT', stop);
 try {
@@ -51,12 +47,7 @@ try {
     XLN_LOG_LEVEL: 'info',
     XLN_STORAGE_SYNC_WRITES: '1',
     ...(config.authorityFile ? { XLN_EVM_FEE_CEILING_WEI: '0' } : {}),
-    XLN_J_WATCHER_RPC_MAX_BLOCKS_PER_POLL: process.env['XLN_J_WATCHER_RPC_MAX_BLOCKS_PER_POLL'],
-    XLN_J_WATCHER_RPC_MAX_BLOCKS_PER_POLL_11155111: process.env['XLN_J_WATCHER_RPC_MAX_BLOCKS_PER_POLL_11155111'],
-    XLN_J_WATCHER_RPC_MAX_BLOCKS_PER_POLL_421614: process.env['XLN_J_WATCHER_RPC_MAX_BLOCKS_PER_POLL_421614'],
-    XLN_J_WATCHER_RPC_HEADER_BATCH_CALLS: process.env['XLN_J_WATCHER_RPC_HEADER_BATCH_CALLS'],
-    XLN_J_WATCHER_RPC_BLOCK_RANGE_421614: process.env['POC_HYPERSYNC_ARBITRUM_HEADERS'],
-    XLN_J_WATCHER_RPC_RECEIPT_BATCH_CALLS_11155111: process.env['POC_HYPERRPC_ETHEREUM_RECEIPT_BATCH_CALLS'],
+    ...sessionWatcherEnv(),
     POC_API_BASE: config.apiBase,
   };
   if (!config.externalGateway) {
@@ -115,7 +106,9 @@ try {
         throw new Error(`USDC_SESSION_GATEWAY_CHAIN_MISMATCH:${path}`);
     }
     return true;
-  });
+  }, config.startupTimeoutMs, shutdown.signal);
+  shutdown.signal.throwIfAborted();
+  console.log(`USDC_SESSION_GATEWAY_READY:${runDirectory}`);
   const identities = readExistingIdentities(config.directory);
   const roleEnv = (role: Role): NodeJS.ProcessEnv => ({
     ...baseEnv,
@@ -136,9 +129,9 @@ try {
       [config.directory, role, join(runDirectory, `${role}-restored.json`)],
       roleEnv(role),
     );
-    await waitSessionChild(inspection);
+    await waitSessionChild(inspection, shutdown.signal);
     children.splice(children.indexOf(inspection), 1);
-    if (stopping) throw new Error('USDC_SESSION_START_INTERRUPTED');
+    shutdown.signal.throwIfAborted();
   }
   const hubs = identities
     .find(identity => identity.role === 'hub')!
@@ -201,6 +194,7 @@ try {
       await waitSessionReady(children, 'hub-api', async () =>
         (await readSessionStatus(port, '/api/info'))?.['runtimeId'] === hubs[0]!.signerId,
         config.startupTimeoutMs,
+        shutdown.signal,
       );
     }
     // Each Runtime drains its own WAL and J history. MM uses the Hub's
@@ -218,6 +212,7 @@ try {
         return health['ok'] === true && reserves['ok'] === true && adapter['ready'] === true;
       },
       config.startupTimeoutMs,
+      shutdown.signal,
     ));
   }
   if (selectedRoles.includes('user')) {
@@ -230,10 +225,10 @@ try {
       [config.directory, config.apiBase, userReady],
       roleEnv('user'),
     );
-    readiness.push(waitSessionReady(children, 'user', async () => existsSync(userReady), config.startupTimeoutMs));
+    readiness.push(waitSessionReady(children, 'user', async () => existsSync(userReady), config.startupTimeoutMs, shutdown.signal));
   }
   await Promise.all(readiness);
-  if (stopping) throw new Error('USDC_SESSION_START_INTERRUPTED');
+  shutdown.signal.throwIfAborted();
   writeFileSync(
     join(runDirectory, 'session.json'),
     safeStringify(
@@ -254,11 +249,12 @@ try {
     { flag: 'wx', mode: 0o600 },
   );
   console.log(`USDC_SESSION_READY:${runDirectory}`);
-  starting = false;
-  while (!stopping) {
+  while (!shutdown.signal.aborted) {
     assertSessionChildrenLive(children);
     await Bun.sleep(100);
   }
+} catch (error) {
+  if (error !== shutdown.signal.reason) throw error;
 } finally {
   try {
     await stopSessionChildren(children);

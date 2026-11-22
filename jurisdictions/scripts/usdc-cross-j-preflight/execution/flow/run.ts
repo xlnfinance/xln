@@ -1,23 +1,19 @@
 import { join } from 'node:path';
 import { Contract, JsonRpcProvider } from 'ethers';
-import * as runtime from '../../../../../core/runtime';
 import {
   bootUser,
   closeUser,
   openPocAccount,
   userReplica,
-  waitFor,
   type PocUser,
 } from '../../../../../core/scenarios/usdc-poc/user';
 import { runOrderId } from '../../../../../core/scenarios/usdc-poc/journey/context';
 import { ensureSourceCollateral } from '../../../../../core/scenarios/usdc-poc/journey/ingress';
 import { executeCrossSwap, resumeCrossSwap } from '../../../../../core/scenarios/usdc-poc/cross-swap';
 import { runtimeProof } from '../../../../../core/scenarios/usdc-poc/recovery/evidence';
-import { drainJWatcherBacklog } from '../../../../../core/jurisdiction/adapter/operations/backlog-drain';
 import { deriveRuntimeAdapterCapabilityToken } from '../../../../../core/api/runtime-adapter/security/auth';
 import { readVaultSeed } from '../../identities';
 import { acquireStoreOwnership } from '../../operators/session/stores';
-import { assertRestoredSession } from '../../operators/session/inspect';
 import {
   authorityDigest,
   readAuthority,
@@ -34,6 +30,7 @@ import type { ExecutionConfig } from '../config';
 import { connectExecutionProviders, type ExecutionProviders } from '../providers';
 import { preflightFreshRun, requireTargetBacking, refreshApprovalBacking } from './preflight';
 import { finishPayout } from './payout';
+import { activateUser } from './operator-barrier';
 import {
   reasonText,
   runReportEvidence,
@@ -78,22 +75,6 @@ const openUser = async (config: ExecutionConfig, authority: ExecutionAuthority):
     },
   };
   return bootUser(config.apiBase, join(config.directory, 'user'), true, config.runId, connection);
-};
-
-const activateUser = async (user: PocUser, config: ExecutionConfig): Promise<void> => {
-  await assertRestoredSession(user.env, config.directory, 'user');
-  runtime.setRuntimeDeliveryReady(user.env, false);
-  runtime.startJurisdictionWatchers(user.env);
-  await drainJWatcherBacklog(user.env, env => runtime.processRuntime(env));
-  runtime.startP2P(user.env, { relayUrls: [config.apiBase.replace('http', 'ws') + '/relay'], gossipSet: 'hubs' });
-  runtime.startRuntimeLoop(user.env, {
-    onFatal: ({ message }) => {
-      console.error(message);
-      process.exit(1);
-    },
-  });
-  runtime.setRuntimeDeliveryReady(user.env, true);
-  await waitFor('execution-user-relay-connected', () => runtime.getP2P(user.env)?.isConnected() === true);
 };
 
 const requirePreviousRun = async (
@@ -215,7 +196,7 @@ const executeAndReport = async (
     await requireRunIdentity(user, authority, runIndex, providers[0]!);
     await requireSourcePrincipal(user, authority, providers[0]!.current);
     if (observeRestored) observeRestored(user);
-    await activateUser(user, config);
+    await activateUser(user, config, requireAuthority);
     const approved = await reconcileSourceApproval(authority, providers[0]!, runIndex, user.env);
     if (!approved) preflight = await preflightFreshRun(user, authority, providers, runIndex);
     requireAuthority();

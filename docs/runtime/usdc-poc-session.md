@@ -174,25 +174,39 @@ retained startup observations; use process/HTTP health for current liveness.
 They are never read as replacement financial state during recovery.
 
 From the repository root, point the progress command at a job directory
-containing `launcher.log`, or at the `restore-*` directory printed by the
-launcher.
+containing `launcher.log`, the `restore-*` directory printed by the session,
+or the `journey-*` directory printed by supervised execution.
 
 ```sh
 bun jurisdictions/scripts/usdc-cross-j-preflight/operators/session/progress.ts "$POC_SESSION_DIRECTORY"
 bun jurisdictions/scripts/usdc-cross-j-preflight/operators/session/progress.ts "$POC_SESSION_DIRECTORY" --watch
 ```
 
-The command reads local logs and startup proofs. For each operator and chain,
-it shows the first scanned block, the latest authenticated height and
-the certified cursor reported before that range. The WAL frame is the one
-restored at startup. The authenticated height can advance ahead of durable
-scan progress. `--watch` refreshes every 10 seconds. Press Ctrl+C to stop
-watching. For managed jobs, the monitor also stops after reading `exit-status`.
+The command reads local logs and startup proofs. It shows the last recorded
+phase for Hub, MM and user. Per chain it shows authenticated and committed
+cursors and blocks remaining to the captured startup target when present.
+The WAL frame is the one restored at startup. The authenticated height can
+advance ahead of durable scan progress.
 
-SIGTERM/SIGINT stops every owned child before releasing store ownership. An
-unexpected child exit stops the session. If the supervisor is killed, the
-existing parent-liveness mechanism stops Hub/MM and also the user and gateway.
-An external gateway remains owned by its external supervisor.
+With `POC_HEADER_BATCH_TIMING=1` at launch, the command shows the latest
+available queue wait and upstream read time for header batches, HyperRPC
+receipts and HyperSync ranges. A supervised journey also shows the authority
+deadline and the last known state of each transaction slot. A gateway response
+records acceptance by the RPC. Confirmed and reverted states come from receipt
+reconciliation. The monitor makes no RPC requests.
+
+`--watch` refreshes every 10 seconds. Press Ctrl+C to stop watching. Managed
+jobs and supervised journeys also stop watching after recording `exit-status`.
+
+SIGTERM/SIGINT stops the owned Runtimes before the managed gateway and releases
+store ownership after the children exit. Watcher shutdown aborts active reads
+and removes cancelled gateway requests from the queue. The Runtime waits for
+the stopped poll and the active frame before closing storage. If Hub or MM
+stops while J catch-up is still fencing delivery, recovery resumes from the
+committed WAL prefix and republishes its outbox. Submission and receipt reads
+have their own lifecycle. An unexpected child exit stops the session.
+If the supervisor is killed, the parent-liveness mechanism stops Hub, MM, user
+and gateway. An external supervisor retains ownership of its gateway.
 
 ## Verification and scope
 
