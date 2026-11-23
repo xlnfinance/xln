@@ -2,6 +2,7 @@ import { ethers } from 'ethers';
 import { readPositiveIntegerEnv } from '../../../../core/config/environment';
 import { RpcTransportUnavailableError, TRANSIENT_RPC_HTTP_STATUSES } from '../../../../core/jurisdiction/adapter/kernel/failure';
 import { MAX_RPC_BATCH_CALLS, sendRpcBatch, type RpcBatchRequest } from '../../../../core/jurisdiction/adapter/rpc-utils';
+import { safeStringify } from '../../../../core/protocol/serialization';
 import { createHeaderReadQueue, requireLiveHeaderClient } from './header-read-queue';
 import { createReadPacer } from './read-pacing';
 
@@ -60,7 +61,7 @@ export const createHyperRpcReceiptReader = () => {
         result = error instanceof RpcTransportUnavailableError && error.message.endsWith('_429') ? '429' : 'error';
         throw error;
       } finally {
-        if (trace) process.stderr.write(`USDC_HYPERRPC_RECEIPTS:${JSON.stringify({
+        if (trace) process.stderr.write(`USDC_HYPERRPC_RECEIPTS:${safeStringify({
           items: batch.length, sentAt: Math.round(started), queueMs,
           ms: Math.round(performance.now() - started), result,
         })}\n`);

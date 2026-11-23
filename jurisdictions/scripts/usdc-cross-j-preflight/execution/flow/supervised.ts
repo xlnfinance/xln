@@ -1,5 +1,6 @@
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { safeStringify } from '../../../../../core/protocol/serialization';
 import { acquireStandLock, inheritedStandLock } from '../../../../../tools/stand-lock';
 import { runStandChild } from '../../../../../tools/stand/run';
 import { sessionArgs, sessionWatcherEnv, type SessionConfig } from '../../operators/session/config';
@@ -102,7 +103,7 @@ const supervise = async (config: ExecutionConfig, session: SessionConfig, expire
   mkdirSync(root, { recursive: true, mode: 0o700 });
   const logs = mkdtempSync(join(root, 'journey-'));
   const launcher = join(logs, 'launcher.log');
-  writeFileSync(launcher, runProgressMarker + JSON.stringify({ runId: config.runId, expiresAt }) + '\n', {
+  writeFileSync(launcher, runProgressMarker + safeStringify({ runId: config.runId, expiresAt }) + '\n', {
     mode: 0o600,
     flag: 'wx',
   });

@@ -92,7 +92,7 @@ try {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           signal: AbortSignal.timeout(1_000),
-          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
+          body: safeStringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
         });
       } catch {
         return false;

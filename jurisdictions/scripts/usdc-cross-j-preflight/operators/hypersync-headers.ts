@@ -2,6 +2,7 @@ import { ethers } from 'ethers';
 import { BLOCKCHAIN } from '../../../../core/config/constants';
 import { RpcTransportUnavailableError, TRANSIENT_RPC_HTTP_STATUSES } from '../../../../core/jurisdiction/adapter/kernel/failure';
 import { requireBoundaryRecord } from '../../../../core/protocol/boundary-validation';
+import { safeStringify } from '../../../../core/protocol/serialization';
 import { createHeaderReadQueue, requireLiveHeaderClient } from './header-read-queue';
 import { createReadPacer } from './read-pacing';
 
@@ -88,7 +89,7 @@ const queryPage = (token: string, from: number, end: number, signal: AbortSignal
     method: 'POST',
     redirect: 'error',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-    body: JSON.stringify({
+    body: safeStringify({
       from_block: from, to_block: end, include_all_blocks: true, join_mode: 'JoinNothing', transactions: [{}],
       field_selection: { block: Object.keys(headerFields), transaction: ['block_number', 'block_hash', 'transaction_index', 'hash'] },
     }),
@@ -109,7 +110,7 @@ const tracePage = (from: number, to: number, next: number, response: Response) =
     const value = response.headers.get(`x-ratelimit-${name}`);
     return value !== null && /^\d{1,12}$/.test(value) ? [[name, Number(value)]] : [];
   }));
-  process.stderr.write(`USDC_HYPERSYNC_PAGE:${JSON.stringify({ from, to, next, status: response.status, ...rate })}\n`);
+  process.stderr.write(`USDC_HYPERSYNC_PAGE:${safeStringify({ from, to, next, status: response.status, ...rate })}\n`);
 };
 
 export const createHyperSyncHeaderReader = (token: string) => {
@@ -149,7 +150,7 @@ export const createHyperSyncHeaderReader = (token: string) => {
         height = page.next;
       }
       if (trace)
-        process.stderr.write(`USDC_HYPERSYNC_RANGE_TIMING:${JSON.stringify({ queueMs, upstreamMs: Math.round(upstreamMs) })}\n`);
+        process.stderr.write(`USDC_HYPERSYNC_RANGE_TIMING:${safeStringify({ queueMs, upstreamMs: Math.round(upstreamMs) })}\n`);
       return blocks;
     } finally {
       release();

@@ -1,3 +1,5 @@
+import { safeStringify } from '../../../../../core/protocol/serialization';
+
 export const runProgressMarker = 'USDC_EXECUTION_PROGRESS_RUN:';
 export const slotProgressMarker = 'USDC_EXECUTION_PROGRESS_SLOT:';
 
@@ -19,4 +21,4 @@ export type ProgressSlot = Readonly<{
 }>;
 
 export const logProgressSlot = (runId: string, { step, chainId, nonce, hash, status }: ProgressSlot): void =>
-  console.log(slotProgressMarker + JSON.stringify({ runId, step, chainId, nonce, hash, status }));
+  console.log(slotProgressMarker + safeStringify({ runId, step, chainId, nonce, hash, status }));
