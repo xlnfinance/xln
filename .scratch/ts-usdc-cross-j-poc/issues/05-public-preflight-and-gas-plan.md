@@ -69,8 +69,8 @@ was true when the demo started and settled.
 | Ethereum Sepolia |   12,164,043 | `0x55ffb0d13a691389d20c2ae5331c56971f466d13650ff11b7945e938651bc725` |        1.000000 USDC |    0.000001 USDC |    0.000000 USDC |             1.000000 USDC |
 | Arbitrum Sepolia |  330,535,304 | `0x2bbc8230ac1fd6f6960ef1c4b173d128779a80d75517538f9185315c6c2fc79c` |        5.000000 USDC |    0.100199 USDC |    0.899801 USDC |             0.000000 USDC |
 
-Both demo user reserves were zero. Ticket 12 requires the original reserves
-to be observed, committed to the original WALs and matched after restore.
+Both demo user reserves were zero. The original reserve observation and
+same-store restore effort is recorded in [12](12-public-rpc-capacity-and-funded-catchup.md#original-november-17-stand).
 
 Offline replay of copied demo stores recovered user Runtime frame 67 and Hub
 Runtime frame 221. Their signed Account roots and cached Hankos matched on

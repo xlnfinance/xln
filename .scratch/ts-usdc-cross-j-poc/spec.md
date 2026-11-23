@@ -48,10 +48,16 @@ remainder, zero open Pulls and zero pending Account ACKs at completion.
   verifies receipts and WAL after interruption or authority expiry. It reports
   a competing transaction at an authorized nonce with its hash and block,
   preserving the independent results for the other slots.
-- **Deferred work.** The paused restore in
-  [12](issues/12-public-rpc-capacity-and-funded-catchup.md) blocks original
-  funding verification in [11](issues/11-separate-operator-funding.md), which
-  precedes the [five-run and recovery budget](issues/14-five-run-and-recovery-gas-plan.md).
+- **Two sequential public journeys.** [14](issues/14-five-run-and-recovery-gas-plan.md)
+  is complete on one fresh stand. Both journeys deposited 1 USDC and paid
+  0.899801 USDC externally, with ten confirmed receipts and signed WAL evidence.
+  The original campaign record retains the run 3 stop after Ethereum R2C
+  and the Hub's Account frame timestamp-skew rejection.
+- **Operator funding and funded restore.** [11](issues/11-separate-operator-funding.md)
+  reconciles the six authorized operator funding transactions for the
+  November 17 stand. [12](issues/12-public-rpc-capacity-and-funded-catchup.md)
+  verifies the funded Runtime restore on `ticket15-fresh-pQmqWH` and retains
+  the November 17 stand's stopped catch-up as historical evidence.
 
 ## Accepted operating model
 

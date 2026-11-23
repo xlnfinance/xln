@@ -22,9 +22,9 @@ Ticket-11 update, 2026-11-17: the separate
 [six authorized public transactions](../evidence/ts-usdc-cross-j-poc/local-evidence.md#operator-funding-publicjson):
 1/5-USDC Hub capital and exact Hub ETH topups, inside the numeric ceilings below.
 The prior inventory/economic projections remain historical planning inputs.
-Canonical funded Runtime observation waits for [RPC blocker 12](../../.scratch/ts-usdc-cross-j-poc/issues/12-public-rpc-capacity-and-funded-catchup.md);
-the complete five-run journey budget remains pending in 05. No additional
-funding or expense is authorized by the owner's latest decision.
+At that point, authenticated observation for the first stand was pending.
+[Ticket 12](../../.scratch/ts-usdc-cross-j-poc/issues/12-public-rpc-capacity-and-funded-catchup.md)
+records that stopped attempt and the funded restore accepted for the demo.
 
 ## Proposed funding scope
 

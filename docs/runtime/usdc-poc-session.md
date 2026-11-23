@@ -157,13 +157,12 @@ catch-up. The default is 60,000 ms. The launcher accepts safe integer
 budgets of at least 60,000 ms per operator readiness wait. The stalled
 drain guard and authenticated history checks remain active throughout.
 
-For [ticket 12](../../.scratch/ts-usdc-cross-j-poc/issues/12-public-rpc-capacity-and-funded-catchup.md),
-select `--operators-only` with the managed read-only gateway and use
+The [original stand attempt](../../.scratch/ts-usdc-cross-j-poc/issues/12-public-rpc-capacity-and-funded-catchup.md#original-november-17-stand)
+used `--operators-only` with the managed read-only gateway and
 `--startup-timeout-ms 21600000` to give each operator up to six hours.
-Give the outer stand lease time for gateway and Hub API startup, concurrent
-readiness waits, and shutdown. The launch stays on the existing Hub and MM
-stores. The user store path identifies the preparation while its database
-stays closed.
+Its outer lease covered gateway and Hub API startup, readiness waits and
+shutdown. It used the existing Hub and MM stores and kept the user database
+closed.
 
 ## Observation and shutdown
 

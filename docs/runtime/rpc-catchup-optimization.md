@@ -4,10 +4,8 @@ Status: deferred candidates, not an implementation plan.
 Recorded: 2026-11-17, from the current TypeScript working tree and retained PoC evidence.
 
 The owner separated these ideas from [PoC ticket 12](../../.scratch/ts-usdc-cross-j-poc/issues/12-public-rpc-capacity-and-funded-catchup.md).
-Ticket 12 owns authenticated observation of the existing operator deposits and
-exact restore of the original funded Runtimes. None of the ideas below is an
-additional acceptance gate. A minimal transport fix may enter 12 only if it
-resolves its first demonstrated failure. No new RPC purchase or transfer is authorized.
+Ticket 12 records funded restore on the public demo and the earlier catch-up
+attempt on the original stand. The ideas below remain deferred research.
 
 ## Evidence and unknowns
 

@@ -52,8 +52,9 @@ It does not execute a user deposit, Cross-J swap or payout.
 The [six authorized public funding transactions](../evidence/ts-usdc-cross-j-poc/local-evidence.md#operator-funding-publicjson)
 have now executed from the existing deployer/funder: 1/5-USDC Hub reserves and
 0.001/0.0001-ETH Hub signer topups. User and MM wallets/reserves were not funded.
-The identities above are unchanged. Ticket 11 stays open for canonical Runtime
-observation under [the RPC blocker](../../.scratch/ts-usdc-cross-j-poc/issues/12-public-rpc-capacity-and-funded-catchup.md).
+Ticket 11 is complete for this funding. The original Runtime observation
+attempt and the accepted restore of the funded demo are recorded in
+[ticket 12](../../.scratch/ts-usdc-cross-j-poc/issues/12-public-rpc-capacity-and-funded-catchup.md).
 
 ## Deferred choices and authority
 

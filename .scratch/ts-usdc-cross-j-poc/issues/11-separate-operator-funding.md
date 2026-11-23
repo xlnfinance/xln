@@ -2,33 +2,36 @@
 
 Type: implementation
 Category: enhancement
-Completed: no
-Status: ready-for-human
-Blocked by: 09 - Start and restore funded PoC Runtimes without replacing identities or state; 10 - Prepare an explicit operator-capital and payer-specific gas decision; 12 - Restore the original funded PoC Runtimes
+Completed: yes
+Status: ready-for-agent
+Blocked by: None
+
+## Accepted scope
+
+On 2026-11-23 the owner accepted the separately authorized and reconciled
+operator funding as completion of this ticket. The funded Runtime restore for
+the public PoC is recorded in [12](12-public-rpc-capacity-and-funded-catchup.md).
+The stopped restore of the November 17 stand remains in the campaign history.
 
 ## Problem
 
-The prepared Hub reserves are zero in the retained public snapshot. The owner
+The prepared Hub reserves were zero in the initial public snapshot. The owner
 required separate funding before ticket 05 can finish. Wallet funds and signed
 credit alone do not create the target collateral needed for external payout.
 
-## Preconditions
+## Original approvals and funding plan
 
-The owner must approve the concrete funding packet from 10: token amounts,
-payers, recipients, networks and numeric ETH limits, including replacement or
-recovery allowance where required. The owner has now explicitly authorized the
-six exact funding transactions and numeric limits in the
+The owner approved the concrete funding packet from 10, including amounts,
+payers, recipients, networks and numeric ETH limits. The six exact funding
+transactions and their limits are in the
 [execution authorization](../../../docs/evidence/ts-usdc-cross-j-poc/local-evidence.md#operator-funding-authorizationjson).
-That authorization supersedes the earlier read-only restriction; user funding,
-journeys and new-nonce recovery remain outside its scope.
+That authorization superseded the earlier read-only restriction. User funding,
+journeys and new-nonce recovery were outside its scope.
 
 The owner selected preparation of a five-run budget: source Hub reserve 1 USDC
-(the retained provisional buffer), target Hub reserve 5 USDC, with the user's
-five individual 1-USDC deposits kept outside this ticket. The unsigned target
-approval, batch and signing digest have changed from the earlier one-USDC plan;
-review the current packet. Funding is once per series, never once per run.
-This planning selection does not approve signatures, transfers or numeric ETH
-limits, and the current Hub ETH topups do not certify five-run journey gas.
+(the retained provisional buffer) and target Hub reserve 5 USDC. The plan
+provided one round of operator funding for the series. The user's individual
+1-USDC deposits had a separate authorization.
 
 ## Acceptance criteria
 
@@ -39,25 +42,30 @@ limits, and the current Hub ETH topups do not certify five-run journey gas.
       authorizing or broadcasting public funding.
 - [x] Revalidate the approved candidate, current chain/contract/token bindings,
       payer balances, exact calls and authority immediately before signing.
-- [ ] Use the restore-capable launcher from 09 with the selected persistent
-      identities/stores. Stop or reject conflicting Runtime owners.
 - [x] Execute only separately approved operator funding and gas transfers.
       Record receipts, actual native spend and identified before/after balances.
       Do not perform the user's deposit or Cross-J journey in this ticket.
-- [ ] Prove the funded reserves through canonical authenticated J observation
-      in the owning Runtime; reconcile wallet debit, reserve credit, debts and
-      backing without treating unsecured credit as deposited capital.
-- [x] Restore and verify state if interrupted; do not repeat a transfer whose
-      receipt or canonical observation is unresolved.
-- [ ] Hand funded identities and evidence back to 05 for fresh executable
-      quote, exact target credit and complete funding/gas reconciliation.
+- [x] Reconcile funder debits, on-chain Hub reserve credits, backing, debts,
+      signer ETH topups and nonce progression from the approved receipts.
+- [x] Verify interrupted funding locally with the same manifest and nonce
+      slots, and reconcile accepted transfers without another debit.
+
+## Completion evidence
+
+All six authorized calls confirmed. Ethereum Sepolia credited 1 USDC to the
+source Hub and 0.001 ETH to its signer. Arbitrum Sepolia credited 5 USDC to the
+target Hub and 0.0001 ETH to its signer. The post-funding audit reconciled the
+approved calls, actual gas, backing and debts. The funding window consumed
+nonces 106–108 and 30–32 on the respective networks.
+
+- [Six transaction hashes and the local receipt record](../../../docs/evidence/ts-usdc-cross-j-poc/local-evidence.md#operator-funding-publicjson)
+- [Post-funding balance and reserve audit](../../../docs/evidence/ts-usdc-cross-j-poc/operator-funding-balances-public.json)
 
 ## Comments
 
-Latest owner decision, 2026-11-17: record the remaining RPC/catch-up blocker in
-[12](12-public-rpc-capacity-and-funded-catchup.md), keep this ticket incomplete,
-and incur no new expenses. Public Runtime attempts are stopped. Funding is
-already executed; this decision does not request or authorize another transfer.
+Owner decision on 2026-11-17: record the original stand's catch-up blocker in
+[12](12-public-rpc-capacity-and-funded-catchup.md) and stop Runtime attempts
+without further expense. The six funding transactions had already executed.
 
 Final [post-funding balance audit](../../../docs/evidence/ts-usdc-cross-j-poc/operator-funding-balances-public.json)
 reconciles backing/reserves of 1/5 USDC, zero debts, unchanged User/MM wallets,
@@ -79,8 +87,8 @@ The execution candidate digest is
 `d84d264559ae425aabd002145636f2a385c8128cc3d26a04902e524025d6429a`.
 Subsequent gateway availability/header-transport fixes belong to the Runtime
 observation candidate; they do not rewrite that executed grant or authorize
-another transfer. Ticket 11 remains incomplete until funded Runtime observation
-and same-store restore are retained. The old fresh-attempt probe must not run.
+another transfer. At the time, the ticket also tracked reserve observation and
+same-store restore for the original stand.
 
 Explicit owner authorization, 2026-11-17: the owner selected the full permission
 sentence for the six testnet transactions, identified funder and Hub recipients,
@@ -132,11 +140,7 @@ financial tests / 150 assertions; aggregate check green (3 short, 38 source,
 10 soundcheck gates), deployment types green, frozen core unchanged. The
 interruption criterion above is established for these named local cuts.
 
-`Completed: no` remains until actual public funding, authenticated reserve observation
-in the original public Runtime stores, and the funded handoff to 05 are pending.
-At that earlier preparation stage, public signatures and financial broadcasts
-had not been authorized or performed; the explicit execution authorization above
-is the current authority.
+The earlier preparation phase preceded public authorization and execution.
 The [refreshed unsigned proposal](../../../docs/evidence/ts-usdc-cross-j-poc/operator-funding-proposal.json)
 binds the implemented candidate, sealed code, exact recipients, nonce domains,
 unsigned batch digests and current estimates. Its manifest remains `approved: false`.

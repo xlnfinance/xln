@@ -1,7 +1,7 @@
 # Prepare and execute operator funding
 
-Ticket 11 provisions the existing Hub Entities and proves their funded state
-through the original Runtime WAL and authenticated J observation. It uses the
+Ticket 11 records the completed, separately authorized Hub funding and its
+on-chain reconciliation. It uses the
 [recorded identity separation](usdc-poc-identities.md). The user's deposits,
 Cross-J operations and payouts remain outside this funding invocation.
 
@@ -12,11 +12,9 @@ The instructions below describe the original ticket 11 grant.
 The approved public funding has now executed: [six confirmed receipts](../evidence/ts-usdc-cross-j-poc/local-evidence.md#operator-funding-publicjson),
 1/5-USDC Hub reserves and 0.001/0.0001-ETH Hub topups. Actual gas fees were
 0.000069654310652745 / 0.000004927532416 ETH. The original execution grant's six
-nonce slots are consumed; do not prepare another prefunding campaign. Canonical
-funded Runtime observation and restore remain the unfinished part of ticket 11.
-The owner chose to retain the [RPC/catch-up blocker in ticket 12](../../.scratch/ts-usdc-cross-j-poc/issues/12-public-rpc-capacity-and-funded-catchup.md)
-and keep 11 open, without new expenses. Public Runtime attempts are stopped.
-Future work reuses the existing reserves and receipts; it does not repeat funding.
+nonce slots are consumed. The first stand's catch-up was stopped before the
+reserve observations. The funded restore accepted for the PoC used the
+demo stand's own WALs. [Funded restore and original stand history](../../.scratch/ts-usdc-cross-j-poc/issues/12-public-rpc-capacity-and-funded-catchup.md)
 
 ## Scope and authority
 
@@ -211,16 +209,12 @@ and fee limits. New-nonce retries/cancellations and forced disputes need a
 separately reviewed remaining-obligation packet; unused budget is not permission
 to add operations.
 
-`status: funded-on-chain` certifies the calls in the approved packet. Restore the original
-Hub/MM stores through ticket 09 and let their authenticated J observation commit
-the reserve changes to Runtime WAL. Compare retained identities, roots, Accounts
-and reserve values across restore. Never write reserves manually or replace the
-funded stores with a fresh operator-probe attempt.
-
-Ticket 11 closes only after actual funding and canonical Runtime observation are
-retained. Ticket 05 then checks funded executable depth, quotes, tariffs, user
-credit and complete journey/recovery costs. Ticket 06 requires separate journey
-authority before the user's first public deposit.
+`status: funded-on-chain` certifies the calls in the approved packet. For funded
+Runtime observation, restore the owning Hub/MM stores through ticket 09 and
+let authenticated J observation commit the reserve changes to Runtime WAL.
+Compare retained identities, roots, Accounts and reserve values across
+restore. Never write reserves manually or replace funded stores with a fresh
+operator-probe attempt. The public user journey has separate spending authority.
 
 ## Local verification
 
@@ -235,21 +229,22 @@ On that candidate the funding suites passed 23 tests and 151 assertions,
 including the original six-call and nine-call packages and their WAL
 restores. Deployment TypeScript and `bun run check` passed.
 
-The [current observation-candidate verification](../evidence/ts-usdc-cross-j-poc/local-evidence.md#operator-funding-observation-verificationjson)
+The [original observation-candidate verification](../evidence/ts-usdc-cross-j-poc/local-evidence.md#operator-funding-observation-verificationjson)
 retains 54 passing owning tests / 300 assertions, including all four real-node
 financial scenarios. A subsequent test-only serializer correction passed its
 seven owning tests and the final aggregate check: 3 short, 38 source and
 10 soundcheck gates, frozen core unchanged. The artifact distinguishes the
 executed public funding candidate from the later observation/transport candidate
-and records their exact hashes. Public funded Runtime proof remains incomplete.
+and records their exact hashes. The original stand's public catch-up stopped
+before its funded Runtime observations.
 
 The [retained executor evidence](../evidence/ts-usdc-cross-j-poc/local-evidence.md#operator-funding-executorjson)
 binds the earlier dirty executor candidate, six private funding receipts, two crash cuts and exact funded
 Hub WAL restore. The final related financial suite passed 4 tests / 150 assertions;
 the authority/preparation suite passed 34 tests / 78 assertions. The aggregate
 `bun run check` passed 3 short, 38 source and 10 soundcheck gates, including the
-unchanged frozen core. These are local verification results, not closure of
-ticket 11's public funding and Runtime-observation criteria.
+unchanged frozen core. The six public receipts and balance audit provide the
+separate public funding proof for ticket 11.
 
 The owning scenario uses two private Anvil nodes with the selected public IDs,
 actual contracts and token transfers. It kills the funding process after source

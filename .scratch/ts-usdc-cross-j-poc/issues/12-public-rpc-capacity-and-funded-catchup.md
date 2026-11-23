@@ -1,19 +1,49 @@
-# 12: Restore the original funded PoC Runtimes
+# 12: Verify funded Runtime restore for the public USDC PoC
 
 Type: implementation
 Category: bug
-Completed: no
-Status: ready-for-human
+Completed: yes
+Status: ready-for-agent
 Blocked by: 09 - Start and restore funded PoC Runtimes without replacing identities or state
 
-## Problem
+## Accepted scope
+
+On 2026-11-23 the owner accepted funded Runtime restore of the public demo as
+completion of this ticket. The funded demonstration used the Hub, MM and user
+stores of `ticket15-fresh-pQmqWH`. The November 17 stand's unfinished catch-up
+remains in the historical record below.
+
+## Acceptance criteria
+
+- [x] Restore the funded demo's existing Hub, MM and user vaults and WALs with
+      the canonical launcher. Verify authenticated readiness on both networks.
+- [x] Match both demo funding receipts to committed `ReserveUpdated`
+      observations in the restored Hub WAL, and verify sufficient backing
+      and an executable quote for the full 1 USDC.
+- [x] Reuse those stores for the approved public journey and verify the
+      external payout, signed Account commitments and post-run WAL integrity.
+
+## Completion evidence
+
+On clean candidate `1ce560d95`, the read-only restore checked 118 WAL frames,
+matched both funding receipts to committed Hub reserve observations, and
+confirmed both operators ready and an executable quote for 1 USDC. The
+authorized journey then restored the same funded stores and withdrew
+0.899801 USDC on Arbitrum Sepolia. The post-run replay verified 237 WAL frames.
+
+- [Funded Hub/MM readiness, reserve observations and quote](../../../docs/evidence/ts-usdc-cross-j-poc/ticket15-fresh-pqmqwh-reserves-and-quote.json)
+- [Public journey and approved manifest binding](../../../docs/evidence/ts-usdc-cross-j-poc/ticket15-fresh-pqmqwh-journey-executed.json)
+- [Signed Account and Cross-J evidence](../../../docs/evidence/ts-usdc-cross-j-poc/ticket15-fresh-pqmqwh-journey-signed-trace.json)
+- [Post-run WAL integrity](../../../docs/evidence/ts-usdc-cross-j-poc/ticket15-fresh-pqmqwh-journey-wal.json)
+
+## Original November 17 stand
 
 Ticket 11's six authorized public transactions are confirmed. The source/target
 Hub reserves contain 1/5 USDC and their signer wallets received 0.001/0.0001 ETH.
-No additional prefunding is required to resolve this blocker.
+The existing receipts cover the confirmed deposits and signer topups.
 
-The original Hub/MM Runtimes have not yet committed authenticated observations
-of those deposits. Retained attempts encountered unavailable historical state
+The retained original Hub/MM sessions stopped before committing authenticated
+observations of those deposits. Attempts encountered unavailable historical state
 proofs, upstream 429 responses and batch timeouts, then stopped during catch-up.
 The protected archive supplied the tested old proof. One null deployment-receipt
 response does not establish that receipts generally require archive state.
@@ -27,30 +57,30 @@ PoC Runtimes. General RPC capacity and synchronization optimization are outside
 its completion criteria. Discuss the execution approach below before proceeding;
 this scope update does not start a Runtime or change financial authority.
 
-## Acceptance criteria
+### Original stand restore criteria
 
-- [ ] Restore the original Hub/MM vaults and stores through ticket 09, without
-      conflicting owners. Stop their Runtime owners before changing RPC bindings.
-      Keep the gateway read-only and the user store unchanged.
-      Explicitly bind existing RPCs with the historical-proof and receipt
-      capabilities required by the canonical restore path; retain chain IDs and
-      endpoint fingerprints without keys.
-- [ ] Complete authenticated catch-up for these Runtimes. Record initial/final
-      committed and authenticated frontiers and the captured chain targets,
-      distinguishing live scan progress from WAL commits. Preserve proof,
-      finality and history-completeness checks. Never reset stores, skip history
-      or substitute a latest balance query for authenticated observation.
-- [ ] Commit authenticated observations of the 1/5-USDC Hub reserves to their
-      original WALs and compare exact roots, Accounts, cached Hankos and ordered
-      outbox across a subsequent restore. Keep the user store unchanged.
-- [ ] Reconcile current backing, reserves/debts, six signer balances and funder
-      nonces against the six existing receipts. Funding slots 106-108 / 30-32
-      must not be reused or replaced with another deposit.
-- [ ] Retain the public evidence and the applicable focused/full verification
-      for the observation candidate, then return it to 11. Ticket 05 still owns
-      executable quotes, exact user credit and complete journey/recovery gas.
+These were the criteria of the initial restore effort.
 
-## Execution approach
+- Restore the original Hub/MM vaults and stores through ticket 09, without
+  conflicting owners. Stop their Runtime owners before changing RPC bindings.
+  Keep the gateway read-only and the user store unchanged. Explicitly bind
+  existing RPCs with the required historical-proof and receipt capabilities.
+  Retain chain IDs and endpoint fingerprints without keys.
+- Complete authenticated catch-up for these Runtimes. Record initial/final
+  committed and authenticated frontiers and the captured chain targets,
+  distinguishing live scan progress from WAL commits. Preserve proof,
+  finality and history-completeness checks. Never reset stores, skip history
+  or substitute a latest balance query for authenticated observation.
+- Commit authenticated observations of the 1/5-USDC Hub reserves to their
+  original WALs and compare exact roots, Accounts, cached Hankos and ordered
+  outbox across a subsequent restore. Keep the user store unchanged.
+- Reconcile backing, reserves/debts, six signer balances and funder
+  nonces against the six existing receipts. Funding slots 106–108 / 30–32
+  must not be reused or replaced with another deposit.
+- Retain the public evidence and the applicable focused/full verification
+  for the observation candidate and attach it to the original funding record.
+
+### Execution approach for the original stand
 
 The [restore launcher](../../../docs/runtime/usdc-poc-session.md#what-startup-verifies)
 starts Hub first and waits for authenticated catch-up and reserve readiness
@@ -58,7 +88,7 @@ before starting MM. The two-chain local funded restore passed with 43 assertions
 With the Hub port occupied, the regression caught MM starting on the old order
 and verified that MM stays stopped with the new order. The `--hub-only` local
 check also verified a managed read-only gateway and a single Hub process.
-Both operators must subsequently work together and restore through the canonical path.
+The original attempt aimed to get both operators ready through that path.
 
 Use existing RPC access first. Observe whether the gap shrinks before choosing
 an implementation change. If a concrete transport failure prevents progress,
@@ -74,7 +104,7 @@ frontiers for discussion. Do not broaden this ticket into a capacity project.
 
 Deferred candidates and their verification constraints are recorded in
 [RPC catch-up optimization ideas](../../../docs/runtime/rpc-catchup-optimization.md).
-They do not expand this ticket's acceptance criteria.
+These ideas remain outside the accepted scope of this ticket.
 
 - Generalized throughput targets, large-scale RPC benchmarks or a new RPC plan.
 - Fast sync, re-anchoring existing WAL state or changing restore trust guarantees.
@@ -157,12 +187,12 @@ deployment block is 12128807. Capture fresh head/finalized frontiers when
 resuming; these numbers are identified historical observations, not cursors to
 write into state.
 
-The [current verification artifact](../../../docs/evidence/ts-usdc-cross-j-poc/local-evidence.md#operator-funding-observation-verificationjson)
+The [original verification artifact](../../../docs/evidence/ts-usdc-cross-j-poc/local-evidence.md#operator-funding-observation-verificationjson)
 retains 54 passing owning tests / 300 assertions, including four real-node
 financial scenarios, and the final green aggregate check (3 short, 38 source,
 10 soundcheck gates; frozen core unchanged). The exact candidate binding also
 records the subsequent test-only serializer correction and its seven green tests.
-These private results do not close the public restore acceptance criteria.
+These results document private-chain verification of the original candidate.
 
 Existing gateway backpressure and availability classification remain in place.
 The queue removes cancelled waiters and checks cancellation again before
@@ -175,18 +205,11 @@ beyond the two-hour startup budget at the time. Both runs reauthenticated
 the retained local suffix before extending the Arbitrum scan. The canonical
 stalled-drain guard applies throughout startup.
 
-## Dependency note
-
-This ticket depends on the completed restore implementation in 09, not on
-completion of 11. The funding portion of 11 already exists as immutable receipt
-evidence. Ticket 11 waits for this ticket's observation proof; there is no
-dependency cycle and no authority to repeat funding.
-
 ## Comments
 
 The owner selected the narrower scope, then approved implementing and locally
-verifying sequential Hub/MM startup. Public catch-up remains pending under the
-existing authority and spending limits.
+verifying sequential Hub/MM startup. The public catch-up was a separate
+verification step for the original stand.
 
 The 2026-11-18 original Hub run used HyperSync JSON for Arbitrum headers
 and HyperRPC for Ethereum receipts. It authenticated 8,185 Arbitrum and
@@ -205,14 +228,13 @@ budget. The outer stand lease is capped at 12 h 5 min. Startup
 inspection restored Hub at WAL frame 70 and MM at frame 29. The
 two-chain local restore verification passed 43 assertions, including
 a normal launcher start with the six-hour budget. Public operator
-readiness, funded observations and exact subsequent restore are pending.
+readiness, funded observations and exact subsequent restore were pending.
 Local launcher log `.logs/ts-usdc-cross-j-poc/public/sessions/ticket-12-continuous-Ve43cB/launcher.log`.
 
 The owner stopped the run at 18:09:56 UTC and deferred ticket 12.
 The stand was released. At Hub WAL frame 96 the saved scan reaches
 Ethereum block 12,151,302 and Arbitrum block 329,929,917.
 The Entity-certified cursors are 12,149,976 and 329,895,132. MM stayed
-at WAL frame 29. The funded reserve observations and subsequent
-exact-restore evidence remain outstanding. Resume only when the owner
-reopens the work.
+at WAL frame 29. The stopped session ended before the funded reserve
+observations and subsequent exact restore of those stores.
 [Stopped session evidence](../../../docs/evidence/ts-usdc-cross-j-poc/rpc-catchup-results.md#continuous-hubmm-run-stopped-by-the-owner)

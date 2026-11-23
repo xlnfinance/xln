@@ -79,15 +79,19 @@ external payout on Arbitrum Sepolia. The WAL records the signed Cross-J. The
 binds the result to the approved manifest. The [specification](spec.md#scope-after-the-accepted-demo)
 records what remains outside the single-run closure.
 
-- [14](issues/14-five-run-and-recovery-gas-plan.md) owns the five-run plan and
-  cumulative recovery gas. The selected capital baseline is a 1-USDC source
-  Hub buffer, 5 USDC of target Hub reserve and five 1-USDC user deposits.
-- The original stand's [six funding receipts](../../docs/evidence/ts-usdc-cross-j-poc/local-evidence.md#operator-funding-publicjson)
-  remain under [11](issues/11-separate-operator-funding.md). It has a confirmed
-  1/5-USDC reserve allocation and 0.001/0.0001-ETH signer topups. The owner paused
-  [12](issues/12-public-rpc-capacity-and-funded-catchup.md) with authenticated
-  observation of that funding and exact restore of the original stores pending.
-  General RPC optimization remains in the [separate research](../../docs/runtime/rpc-catchup-optimization.md).
+- [14](issues/14-five-run-and-recovery-gas-plan.md) is complete for two
+  sequential public 1-USDC journeys on one fresh stand. Ten receipts and
+  the signed WAL traces verify 1.799602 USDC in total external payouts.
+  The original campaign record retains the separate run 3 stop after R2C
+  and the timestamp-skew rejection at the Hub.
+- [11](issues/11-separate-operator-funding.md) is complete with six confirmed
+  operator funding receipts, a 1/5-USDC reserve allocation and 0.001/0.0001-ETH
+  signer topups for the November 17 stand.
+- [12](issues/12-public-rpc-capacity-and-funded-catchup.md) is complete with
+  funded restore, authenticated reserve observation and a public payout on
+  `ticket15-fresh-pQmqWH`. The November 17 stand's stopped catch-up is recorded
+  in [the original restore history](issues/12-public-rpc-capacity-and-funded-catchup.md#original-november-17-stand).
+  RPC optimization remains [separate research](../../docs/runtime/rpc-catchup-optimization.md).
 
 The [specification](spec.md) retains the financial outcome and release
 evidence standard. Refresh quote, signed tariff, liquidity, credit and payer
@@ -116,15 +120,13 @@ and the explicit owner decisions above.
 | [08](issues/08-public-financial-cli.md)                   | Public configuration and authorized execution in the canonical CLI | Complete locally        |
 | [09](issues/09-funded-runtime-restore.md)                 | Start and restore funded Runtimes                                  | 04, complete locally    |
 | [10](issues/10-operator-capital-and-gas-plan.md)          | Capital and unsigned operator funding plan                         | 07, plan prepared       |
-| [11](issues/11-separate-operator-funding.md)              | Original operator funding and canonical observation                | 09, 10 and 12, open     |
-| [12](issues/12-public-rpc-capacity-and-funded-catchup.md) | Restore original funded Runtimes and observe existing deposits     | 09, paused              |
+| [11](issues/11-separate-operator-funding.md)              | Authorized operator funding and on-chain reconciliation            | Complete                |
+| [12](issues/12-public-rpc-capacity-and-funded-catchup.md) | Restore funded demo Runtimes and verify reserve observations       | Complete                |
 | [13](issues/13-public-report-exact-nonce-receipts.md)     | Exact nonce-based public receipt reporting                         | Complete locally        |
-| [14](issues/14-five-run-and-recovery-gas-plan.md)         | Five-run and recovery gas budget                                   | 11, open                |
+| [14](issues/14-five-run-and-recovery-gas-plan.md)         | Two sequential public 1-USDC journeys on one fresh stand           | Complete                |
 | [15](issues/15-clean-candidate-public-proof.md)           | Clean committed public proof and signed Cross-J trace              | Complete                |
 | [16](issues/16-supervised-one-usdc-cli-run.md)            | Supervised one-USDC CLI run with pre-approval checks               | Complete locally        |
 | [17](issues/17-read-only-usdc-run-status.md)              | Read-only status for interrupted or completed runs                 | Complete locally        |
 
-Ticket 12 uses the existing funding receipts under the original Runtime
-identities. Following the single-run closure, its outstanding observation
-blocks the original-stand work in 11 and 14. Ticket completion records
-evidence. Public spending requires a separate grant for the exact run.
+All 17 implementation tickets are complete in the accepted PoC scope. Public
+spending requires a separate grant for the exact run.

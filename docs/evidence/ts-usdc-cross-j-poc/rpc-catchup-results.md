@@ -226,3 +226,240 @@ separate MM workload leave the total duration unverified.
   start until Entity finality advances the committed cursor.
 
 [Target capture](../../../core/jurisdiction/adapter/operations/backlog-drain.ts#L35) · [Drain completion and stall guard](../../../core/jurisdiction/adapter/operations/backlog-drain-status.ts) · [Hub/MM startup order](../../../jurisdictions/scripts/usdc-cross-j-preflight/operators/session/index.ts#L185) · [Head samples](hub-faster-profile-public.json) and [follow-up head](hub-official-arbitrum-rpc-public.json)
+
+## Ticket 15 retry with two Arbitrum header RPCs
+
+On 2026-11-21, the read-only gateway restored the original Hub on
+`ticket15-warm-FadKvT` using the working diff over `c77866445`. Numeric
+Arbitrum header batches used PublicNode and the official Arbitrum Sepolia
+RPC. HyperSync supplied bulk ranges. HyperRPC supplied Ethereum receipt
+batches and the protected archive still supplied Arbitrum receipts and proofs.
+
+The 2,047-block profile encountered an archive receipt timeout around a
+Mac clamshell sleep. After a subsequent sleep and wake, its Arbitrum window
+fell to one block. A retry with a 1,023-block cap reproduced the one-block
+window while the Mac remained awake. It ran from 20:52:02 UTC until orderly
+shutdown at about 20:55:40 UTC. The gateway recorded 15 successful numeric
+header batches from the official RPC, 14 from PublicNode, 28 successful
+HyperSync pages, and no observed HTTP 429s. The short diagnostic run below
+reproduced and identified the trigger for the window reduction.
+
+| Chain | Hub authenticated range | Blocks |
+| --- | --- | ---: |
+| Ethereum Sepolia | 12,182,771–12,183,266 | 496 |
+| Arbitrum Sepolia | 331,408,841–331,410,362 | 1,522 |
+
+The Arbitrum range began at the existing Entity-certified cursor plus one.
+The initial gateway head sample was 331,470,525. Hub delivery readiness
+stayed false, so MM and user passed offline restore inspection only. The
+session ended with zero of three live Runtime ready and released the stand
+lock. Post-stop verification checked 506 WAL frames and found zero signed
+journey attempts and zero user Cross-J admissions. Both RPC paths confirmed
+zero mined journey transactions, `0/0` latest/pending nonce for all three
+payers, 1 USDC in the Ethereum Sepolia user wallet, and 1 USDC in the
+Arbitrum Sepolia Hub reserve.
+
+### First window reduction
+
+A read-only Hub restore with temporary watcher instrumentation ran from
+20:59:51 to about 21:00:15 UTC on 2026-11-21. Both failures occurred in
+`verifyCanonicalState`, before the watcher selected a history range. The
+gateway sent both numbered header batches to the official Arbitrum Sepolia
+RPC. It had read the tip number from PublicNode.
+
+| UTC | Missing tip height | Watcher error | Window after error | Backoff |
+| --- | ---: | --- | ---: | ---: |
+| 21:00:03.371 | 331,472,169 | `J_HISTORY_HEADER_MISSING`, `error=none` | 511 | 1 s |
+| 21:00:14.132 | 331,472,207 | `J_HISTORY_HEADER_MISSING`, `error=none` | 255 | 2 s |
+
+The watcher classified both errors as transient transport unavailability.
+A 511-block history range authenticated between the failures. A separate
+direct read reproduced the provider difference on three fresh heights:
+331,472,365, 331,472,370 and 331,472,374. PublicNode returned all three
+headers. The official RPC returned HTTP 200 with JSON-RPC `result: null`
+for all three. Both sources returned the header two blocks behind each
+sample, and agreed on the hashes 32 blocks behind each sample.
+
+Keep the tip number and its canonical audit header on the same RPC.
+Historical numeric header batches can retain the second source. This
+diagnostic tested the failure and stopped at the second window reduction.
+The stand released its lock. The post-stop check verified 507 WAL frames
+with zero signed journey attempts and zero user Cross-J admissions.
+
+[Header routing](../../../jurisdictions/scripts/usdc-cross-j-preflight/operators/arbitrum-header-rpc.ts) · [Missing header handling](../../../core/jurisdiction/adapter/rpc/rpc-chain-io.ts#L318) · [Window reduction](../../../core/jurisdiction/adapter/rpc/watcher/rpc-watcher-controller.ts#L164)
+
+### Verification after routing the tip to the primary
+
+The router shares numeric header batches below the verified common startup
+block. Batches containing newer heights go to the primary that reports the
+tip number. The regression test failed on the old router when a batch
+included the common block, then passed after the routing change.
+
+On 2026-11-21 at 21:12:41 UTC, the read-only gateway served tip 331,474,927
+from PublicNode. The two RPC lanes returned the same hash for historical
+block 331,474,799. The original Hub authenticated eight consecutive
+1,023-block Arbitrum ranges, from 331,408,841 through 331,417,024, in 95 s
+including startup. The trace recorded zero `J_HISTORY_HEADER_MISSING`
+errors, zero poll window reductions and zero observed HTTP 429s. The gateway
+recorded 11 numbered-header replies from PublicNode, two from the official
+RPC and 16 successful HyperSync pages.
+
+The smoke test stopped after the eighth range and released the stand lock.
+It covered Hub catch-up. Full delivery readiness and the public journey
+remain open. The post-stop check verified 508 WAL frames with zero signed
+journey attempts and zero user Cross-J admissions.
+
+### Parallel restore with shared RPC queues
+
+On 2026-11-21, the owner stopped the sequential restore after Hub had
+authenticated 50,127 Arbitrum blocks and requested concurrent startup of
+Hub, MM and user. The parallel experiments used the original three WALs,
+the same read-only gateway and one stand lock. A temporary local launcher
+overlapped startup and retained each role's normal readiness checks.
+
+1. With the original deadlines, all three roles authenticated their first
+   Arbitrum range. Shared queue waits then caused 15 s range timeouts on
+   Arbitrum and 30 s receipt timeouts on Ethereum. All three Ethereum
+   windows fell to one block. The upstream logs showed no HTTP 429s.
+2. With a 60 s local Ethereum receipt deadline, all three roles retained
+   31-block Ethereum windows. In the sampled trace, 33 of 37 successful
+   requests took more than 30 s including the shared queue wait. Arbitrum
+   still hit its original 15 s range deadline.
+3. With 60 s local client deadlines for both methods and a 45 s HyperSync
+   gateway budget after admission, all three retained full scan windows.
+   The original 4.5 s HyperSync and 12.5 s HyperRPC dispatch spacing
+   remained in use. Of 184 Ethereum receipt replies, 176 exceeded the old
+   30 s deadline including the queue. Of 429 successful Arbitrum range
+   replies, 72 exceeded the old 15 s deadline. The run recorded zero
+   watcher window reductions and zero upstream HTTP 429s.
+
+The final experiment started at 21:53:35 UTC and ran for about 38 minutes.
+
+| Runtime | Ethereum blocks | Arbitrum blocks | Last authenticated Arbitrum block |
+| --- | ---: | ---: | ---: |
+| Hub | 1,891 | 73,656 | 331,482,496 |
+| MM | 1,891 | 79,794 | 331,485,573 |
+| User | 1,922 | 65,472 | 331,471,306 |
+
+MM completed its startup chain drain (Ethereum target 12,184,556,
+Arbitrum target 331,483,516), then started Cross-J bootstrap while Hub
+was still scanning. MM saw only Hub's Ethereum profile. After 60 s with
+no bootstrap progress, MM exited with `MARKET_MAKER_BOOTSTRAP_STALLED`
+in `bootstrap-cross`. The launcher stopped the session and forced the
+user process to exit when its 10 s shutdown grace elapsed. The stand lock
+was released. A follow-up parallel run needs to gate MM's quote bootstrap
+on Hub delivery readiness and the required Hub profiles after the concurrent
+chain scans have started.
+
+Post-stop checks verified 702 WAL frames with zero signed journey attempts
+and zero user Cross-J admissions. Both RPC paths agreed on zero mined
+journey transactions, `0/0` latest/pending for all three payers, 1 USDC
+in the source user wallet, and 1 USDC in the Arbitrum Hub reserve.
+
+[MM startup](../../../core/orchestrator/market-maker/node/mm-node-run.ts#L2502) · [Session readiness](../../../jurisdictions/scripts/usdc-cross-j-preflight/operators/session/index.ts#L165)
+
+### Full readiness after gating MM bootstrap on Hub routes
+
+The managed launcher uses concurrent chain catch-up after Hub binds its API.
+MM waits for authenticated delivery to both configured Hub Entities before
+starting the quote bootstrap watchdog. The 60 s local gateway-read deadline,
+45 s HyperSync admitted-range budget and 4.5 s HyperSync request spacing are
+part of the launcher profile.
+
+On 2026-11-21, the normal managed launcher restored `ticket15-warm-FadKvT`
+with the working diff over `c77866445`. It used the original three WALs and
+a read-only gateway. Startup finished in 3,021 s with all three Runtimes
+ready. The observer recorded these milestones in UTC:
+
+| Milestone | Time |
+| --- | --- |
+| MM completed local catch-up and waited for both Hub routes | 23:29:39 |
+| User restored and connected to the relay | 23:30:16 |
+| Hub completed catch-up, MM opened both routes and published `offers.ready` | 23:34:05 |
+
+MM waited about 266 s before the quote watchdog started. The gateway
+recorded 664 successful HyperSync pages and 243 successful HyperRPC
+receipt replies, with zero observed HTTP 429s. Hub, MM and user readiness
+were read from the running session before shutdown. The funded restore and
+supervised financial scenarios passed on two local Anvil chains, and
+`bun run check` passed on the working candidate.
+
+After the readiness snapshot, user and Hub exceeded the 10 s shutdown
+grace. The launcher forced their exit and returned code 1. Hub logged a
+mesh producer pause timeout during cleanup. The stand lock was released.
+Post-stop verification covered 776 WAL frames. It found zero signed
+journey attempts and zero user Cross-J admissions. Both public RPC paths
+confirmed zero mined journey transactions and `0/0` payer nonces. The
+source user wallet and target Hub reserve each held 1 USDC at shutdown.
+
+[MM route gate](../../../core/orchestrator/market-maker/node/mm-node-run.ts#L2407) · [Funded restore scenario](../../../core/__tests__/market/startup/usdc-funded-restore.test.ts)
+
+### Owner stopped the authorized run on 2026-11-22
+
+Run `ticket15-warm-fadkvt-1usdc-20261122` used clean commit
+`7b92e63cc1084e01d169f33a9333d2ba72f3fc0b` and the original stand and WALs.
+The unsigned manifest has SHA-256
+`d6ec0e8834a6ad5309b7a210a09831aa80c8dccd1afae81de8560e8a4dc61727`
+and is retained in the [local archive](local-evidence.md#ticket-15-earlier-attempts).
+The clean candidate passed the funded restore, supervised financial
+scenario and `bun run check` before the authorized launch.
+
+Hub and MM reached readiness at 00:29:19 UTC. The owner stopped the stand
+at 00:38 UTC while the financial CLI was restoring the user's history.
+The user authenticated 22,506 Arbitrum blocks through 331,428,340 and 434
+Ethereum blocks through 12,183,186. The stop occurred before the fresh
+quote and first signature. The process group exited and released the
+stand lock.
+
+At 00:39:04 UTC, both RPC bindings confirmed zero mined journey calls and
+`0/0` latest/pending for all three payers. The user wallet still held 1
+USDC on Ethereum Sepolia, and the target Hub reserve still held 1 USDC on
+Arbitrum Sepolia. Both user reserves and Account collateral were zero.
+The offline integrity check verified 815 WAL frames with zero signed
+journey attempts and zero Cross-J admissions. The
+[later public proof](../../../.scratch/ts-usdc-cross-j-poc/issues/15-clean-candidate-public-proof.md#completed-public-proof-on-1ce560d95)
+used a fresh stand.
+
+### Public parallel recovery sample on 2026-11-22
+
+The read-only session restored the original Hub, MM and user WALs for
+`ticket15-warm-FadKvT` with one stand lock. The checkout was
+`7b92e63cc1084e01d169f33a9333d2ba72f3fc0b` with the parallel startup
+working changes. The standard operator launcher ran all three roles
+without an execution authority. Both gateway routes rejected the
+`xln_executionAuthority` probe. The first attempt stopped after a malformed
+local timing probe. The measurements below come from the corrected attempt.
+
+The sample ran from 13:56:45 to 14:02:02 UTC. The initial heads were
+12,189,177 on Ethereum Sepolia and 331,693,688 on Arbitrum Sepolia. All
+three Runtimes authenticated ranges at the same time.
+
+| Runtime | Ethereum authenticated blocks | Arbitrum authenticated blocks |
+| --- | ---: | ---: |
+| Hub | 248 (12,182,771–12,183,018) | 11,253 (331,408,841–331,420,093) |
+| MM | 248 (12,182,752–12,182,999) | 10,230 (331,405,780–331,416,009) |
+| User | 248 (12,182,753–12,183,000) | 10,230 (331,405,835–331,416,064) |
+
+The gateway recorded 67 successful HyperSync pages, 24 successful
+HyperRPC batches and zero observed HTTP 429s in the sample. From seconds
+145 to 317, the three consumers authenticated 403 Ethereum blocks and
+19,437 Arbitrum blocks in aggregate. At those rates, the starting volumes
+of about 19,258 Ethereum and 860,611 Arbitrum block observations project
+to roughly 2 h 17 min and 2 h 7 min respectively. These are per-network
+extrapolations with concurrent RPC queues.
+
+With the configured 1,023-block windows, the initial Arbitrum volume takes
+about 843 ranges across the three consumers. The receipt reader reads
+the headers twice per range. At the 4.5 s HyperSync interval, dispatching
+that volume alone takes about 2 h 6 min. I stopped the benchmark before
+full readiness because that estimate exceeds the two-hour run budget.
+The process group exited, the stand lock was released and no EVM
+transactions were submitted.
+
+This sample measures public RPC recovery throughput. The parallel
+`execution run --stand` IPC barrier and its final user suffix check have
+local Anvil evidence. Full public readiness and a same-WAL timing
+comparison remain unmeasured.
+
+[Header verification](../../../core/jurisdiction/adapter/receipt/reader.ts#L461) ·
+[HyperSync pacing](../../../jurisdictions/scripts/usdc-cross-j-preflight/operators/hypersync-headers.ts#L130)

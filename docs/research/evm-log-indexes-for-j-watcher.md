@@ -169,9 +169,9 @@ HyperSync pages and 26 archive receipt replies. Across all four ranges,
 eight gateway header batches produced ten HyperSync pages and 28
 archive receipt replies. There were zero upstream failures, rate limits
 or client cancellations. The gateway exited cleanly. No operator Runtime
-or store was opened. Ticket 12 still requires sustained catch-up and exact
-restore of the original funded Runtimes.
-[Gateway header path](../../jurisdictions/scripts/usdc-cross-j-preflight/operators/gateway.ts#L106) · [Ticket 12 acceptance criteria](../../.scratch/ts-usdc-cross-j-poc/issues/12-public-rpc-capacity-and-funded-catchup.md#acceptance-criteria)
+or store was opened. The original stand's restore required sustained catch-up
+and exact recovery of its funded Runtimes.
+[Gateway header path](../../jurisdictions/scripts/usdc-cross-j-preflight/operators/gateway.ts#L106) · [Original restore criteria](../../.scratch/ts-usdc-cross-j-poc/issues/12-public-rpc-capacity-and-funded-catchup.md#original-stand-restore-criteria)
 
 #### Configured watcher range transport
 
@@ -193,7 +193,7 @@ HTTP 429s. The longest window took 40.010 s with paced archive reads.
 This measurement exercised the same receipt reader and gateway that the
 watcher uses. Operator processes and WALs remained closed. Full catch-up
 through the captured finality target and exact restore of the original
-funded stores remain ticket 12 acceptance criteria.
+funded stores were criteria for the original restore effort.
 [Session configuration](../runtime/usdc-poc-session.md#what-startup-verifies) · [Range RPC client](../../core/jurisdiction/adapter/rpc/watcher/rpc-watcher-block-range.ts) · [HyperSync gateway reader](../../jurisdictions/scripts/usdc-cross-j-preflight/operators/hypersync-headers.ts)
 
 #### Archive quota during the original Hub startup
@@ -377,7 +377,7 @@ PublicNode-plus-archive result, including the same three watched logs.
 The 123.6 blocks/s sample covers the two header observations and receipt
 verification during a short burst. The gateway follow-up below measures the
 quota that limits sustained throughput on the current token.
-[Reader and fence](../../core/jurisdiction/adapter/receipt/reader.ts#L394) · [Restore criteria](../../.scratch/ts-usdc-cross-j-poc/issues/12-public-rpc-capacity-and-funded-catchup.md#acceptance-criteria)
+[Reader and fence](../../core/jurisdiction/adapter/receipt/reader.ts#L394) · [Original restore criteria](../../.scratch/ts-usdc-cross-j-poc/issues/12-public-rpc-capacity-and-funded-catchup.md#original-stand-restore-criteria)
 
 #### Gateway follow-up and free-tier quota
 
@@ -405,7 +405,7 @@ other header reads and delays. Even a hypothetical 500-call batch would
 allow only about 20.8 blocks/s at the same HTTP quota. Both are below the
 roughly 40 blocks/s needed just to reach the Arbitrum deposit within two
 hours. The configured free tier establishes compatibility but lacks the
-capacity for this restore. Ticket 12 remains open. Historical
+capacity required for that original restore budget. Historical
 `eth_getProof` remains a separate archive requirement.
 [XLN batch limit](../../core/jurisdiction/adapter/rpc-utils.ts#L21) · [Startup budget](../evidence/ts-usdc-cross-j-poc/rpc-catchup-results.md#remaining-work-and-the-startup-budget) · [HyperRPC batch limit](https://docs.envio.dev/docs/HyperRPC/overview-hyperrpc#limits-and-errors)
 
@@ -549,12 +549,12 @@ network for these historical blocks. [EIP-8304](https://eips.ethereum.org/EIPS/e
    required data and return the same events when only a hint is missing. Keep
    finality, state audits, dispute references and WAL/outbox ordering in the
    eventual production path. This comparison uses disposable read results or
-   immutable copies and leaves Runtime stores unopened. [Receipt validation](../../core/jurisdiction/adapter/receipt/reader.ts#L203) · [Watcher admission](../../core/jurisdiction/adapter/rpc/watcher/rpc-watcher-ingress.ts#L194) · [Ticket 12 restore criteria](../../.scratch/ts-usdc-cross-j-poc/issues/12-public-rpc-capacity-and-funded-catchup.md#acceptance-criteria)
+   immutable copies and leaves Runtime stores unopened. [Receipt validation](../../core/jurisdiction/adapter/receipt/reader.ts#L203) · [Watcher admission](../../core/jurisdiction/adapter/rpc/watcher/rpc-watcher-ingress.ts#L194) · [Original restore criteria](../../.scratch/ts-usdc-cross-j-poc/issues/12-public-rpc-capacity-and-funded-catchup.md#original-stand-restore-criteria)
 4. Compare useful authenticated blocks/s, wall time by pass, method calls,
    HTTP requests, wire bytes, queue waits, retries, 429s, positive blooms,
    receipt reads and proof construction time. Report whether full headers
    reconstructed on each chain and how Ethereum receipt work changed. A
-   bounded trial establishes only sample parity and speed. Ticket 12 still
-   needs the original funded catch-up and exact recovery through the owning
-   checks. Keep this investigation off the demo's execution path.
+   bounded trial establishes only sample parity and speed. The original restore
+   required funded catch-up and exact recovery through the owning checks. Keep
+   this investigation off the demo's execution path.
    [Measurement guidance](../runtime/rpc-catchup-optimization.md#validation-when-an-idea-is-selected) · [Fresh demo scope](../runtime/usdc-poc-fresh-demo.md#before-the-public-demo)
