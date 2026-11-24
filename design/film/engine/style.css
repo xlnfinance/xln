@@ -1,0 +1,119 @@
+@font-face {
+  font-family: 'XLN Text';
+  font-weight: 400;
+  src: url('/docs/ru/xln-core-manual/fonts/body.ttf');
+}
+@font-face {
+  font-family: 'XLN Text';
+  font-weight: 700;
+  src: url('/docs/ru/xln-core-manual/fonts/bold.ttf');
+}
+@font-face {
+  font-family: 'XLN Display';
+  font-weight: 600;
+  src: url('/docs/ru/xln-core-manual/fonts/subheading.ttf');
+}
+@font-face {
+  font-family: 'XLN Display';
+  font-weight: 800;
+  src: url('/docs/ru/xln-core-manual/fonts/heading.ttf');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-weight: 400;
+  src: url('/docs/ru/xln-core-manual/fonts/mono.ttf');
+}
+
+:root {
+  --paper: #fbfbfa;
+  --ink: #0a0b0d;
+  --credit: #2f6f7a;
+  --collateral: #e0a02e;
+  --flight: #c58a1b;
+  --dispute: #b23b2e;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--paper);
+  overflow: hidden;
+}
+
+/* The film is authored at 1920x1080 and scaled to the window for preview. */
+#film-root {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1920px;
+  height: 1080px;
+  transform-origin: 0 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: 'XLN Text', sans-serif;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+  font-variant-numeric: tabular-nums;
+}
+
+.stage,
+.overlay {
+  position: absolute;
+  inset: 0;
+}
+
+.stage > *,
+.overlay > * {
+  position: absolute;
+}
+
+.t {
+  position: absolute;
+  white-space: pre;
+  line-height: 1.2;
+  will-change: transform, opacity;
+}
+
+.t.wrap {
+  white-space: pre-wrap;
+}
+
+svg.layer {
+  position: absolute;
+  inset: 0;
+  width: 1920px;
+  height: 1080px;
+  overflow: visible;
+}
+
+.code {
+  position: absolute;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--ink);
+}
+
+.code .head {
+  color: rgba(21, 20, 15, 0.5);
+  letter-spacing: 0.02em;
+  white-space: pre;
+}
+
+.code .line {
+  position: relative;
+  white-space: pre;
+  padding-left: 22px;
+  border-left: 4px solid transparent;
+}
+
+.code .k {
+  font-weight: 700;
+}
+
+.code .c {
+  color: rgba(21, 20, 15, 0.46);
+}
+
+.code .line.c {
+  letter-spacing: 0.3em;
+}

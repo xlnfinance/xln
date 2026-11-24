@@ -1,0 +1,198 @@
+{
+  "title": "the whole account",
+  "logline": "Finance is three machines: jurisdiction, entity, account. Bitcoin replicated the first. The account was never finished. xln builds it.",
+  "chapters": [
+    {
+      "id": "0",
+      "title": "your number",
+      "beats": [
+        {
+          "id": "0.1",
+          "onscreen": "",
+          "vo": "May 2024. Twelve thousand dollars in a savings app. Yours, right there on the screen. You press withdraw, and the only thing that moves is the button."
+        },
+        {
+          "id": "0.2",
+          "onscreen": "",
+          "vo": "The number stays lit. Behind it, two hundred and nineteen million dollars is frozen. Eight months later, most of it comes back. Not all."
+        },
+        {
+          "id": "0.3",
+          "onscreen": "",
+          "vo": "The app was not a bank. A company in between kept the list of who owned what, and its list did not match the bank's."
+        },
+        {
+          "id": "0.4",
+          "onscreen": "",
+          "vo": "All you have is a screenshot. A screenshot is a picture of someone else's record. Nine hundred years ago, a man in England walked home holding something better."
+        }
+      ]
+    },
+    {
+      "id": "1",
+      "title": "not one app",
+      "beats": [
+        {
+          "id": "1.1",
+          "onscreen": "",
+          "vo": "It is not one app. A broker: MF Global. A fund: Madoff. Banks: Cyprus, Lebanon, Silicon Valley Bank. The causes differ. The customer's position does not: you wait, months or years, while their records decide."
+        },
+        {
+          "id": "1.2",
+          "onscreen": "",
+          "vo": "The official answer is deposit insurance: the American fund holds a hundred and sixty-one billion dollars, about a cent and a half for every insured dollar, with the government behind it. Above the limit, about four dollars in ten, it promises nothing."
+        },
+        {
+          "id": "1.3",
+          "onscreen": "",
+          "vo": "Insurance answers who absorbs a loss. It puts nothing in your hands. The other way is not a bigger promise."
+        },
+        {
+          "id": "1.4",
+          "onscreen": "",
+          "vo": "Your own app is the same: a number in their records."
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "title": "three machines",
+      "beats": [
+        {
+          "id": "2.1",
+          "onscreen": "",
+          "vo": "Twelve thousand dollars the app says it owes you. That is an account: a record of what two parties owe each other. Here, one of them writes it, and one of them holds it."
+        },
+        {
+          "id": "2.2",
+          "onscreen": "",
+          "vo": "At its two ends: you, and the app. Each is an entity: anyone who acts in their own name. A person, a company, a bank, a broker."
+        },
+        {
+          "id": "2.3",
+          "onscreen": "",
+          "vo": "Above them, a book with the last word. When American banks settle with each other, the Federal Reserve keeps that book. One keeper. That is a jurisdiction."
+        },
+        {
+          "id": "2.4",
+          "onscreen": "",
+          "vo": "Three machines: a jurisdiction, entities, and the accounts between them. Every financial system you have ever used is these three, arranged.",
+          "hold": 2.4
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "title": "what Bitcoin changed",
+      "beats": [
+        {
+          "id": "3.1",
+          "onscreen": "",
+          "vo": "Now, nine pages. In October 2008 a paper proposed a book with no keeper. It launched in 2009 as Bitcoin. Thousands of computers check every line. It is the first replicated jurisdiction machine. But turn the picture around: it is still a jurisdiction machine."
+        },
+        {
+          "id": "3.2",
+          "onscreen": "",
+          "vo": "Then crypto built exchanges on top of that book. The jurisdiction was new. The entities were not. Nor the account: one line in the exchange's own table. November 2022, FTX.",
+          "hold": 1.3
+        },
+        {
+          "id": "3.3",
+          "onscreen": "",
+          "vo": "Crypto rebuilt the book. It left almost every account exactly as it was. And your money lives in the account. That is the machine nobody finished."
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "title": "the account, piece by piece",
+      "beats": [
+        {
+          "id": "4.1",
+          "onscreen": "",
+          "vo": "Now the man with the stick. Nine hundred years ago, England cut a debt as notches on a stick and split it lengthwise, a piece for each side. Shave your piece, and it no longer matches theirs. Both sides walked home holding the debt. In 2024, you walked home with a screenshot."
+        },
+        {
+          "id": "4.2",
+          "onscreen": "",
+          "vo": "But a stick proves a debt. It cannot pay one."
+        },
+        {
+          "id": "4.3",
+          "onscreen": "",
+          "vo": "To pay, money has to sit where the debtor cannot reach it alone. Crypto can do that: you lock twelve thousand in dollar tokens on a blockchain, and the exchange cannot move them without you. The token's issuer is still a keeper. The exchange no longer is."
+        },
+        {
+          "id": "4.4",
+          "onscreen": "",
+          "vo": "Both of you sign every new balance, and each keeps a copy, like the two halves of the stick. The locked money is collateral. This is a payment channel."
+        },
+        {
+          "id": "4.5",
+          "onscreen": "",
+          "vo": "And it starves. Payday: two thousand of salary arrives through the exchange. But every locked dollar is already yours. The payment hits the edge, and stops. Every dollar you receive has to be locked in advance by someone."
+        },
+        {
+          "id": "4.6",
+          "onscreen": "",
+          "vo": "Your money has always lived in half an account. The bank pays at once and signs nothing. The channel signs everything and stops at the edge. Almost nobody holds the whole account."
+        }
+      ]
+    },
+    {
+      "id": "5",
+      "title": "the whole account",
+      "beats": [
+        {
+          "id": "5.1",
+          "onscreen": "",
+          "vo": "xln builds that machine. It runs today on a test network. Three moments, in one place. From the stick: two signatures under every number. From the nine pages: your twelve thousand, locked as collateral. From the bank: credit at each end, starting at zero. The parts are old. xln puts all three in one account."
+        },
+        {
+          "id": "5.2",
+          "onscreen": "",
+          "vo": "Now the paycheck. Here you set the limit first: the exchange may owe you two thousand, not a dollar more. Your salary arrives. The payment reaches the edge, and keeps going, into credit. It lands. The exchange signed the debt."
+        },
+        {
+          "id": "5.2b",
+          "onscreen": "",
+          "vo": "On your phone, it is one screen. Day to day, you pay and get paid as before."
+        },
+        {
+          "id": "5.3",
+          "onscreen": "",
+          "vo": "Set the collateral to zero, and this is your bank account, with the bank's signature added. Set the credit to zero, and it is a payment channel. Almost every account you have ever held is this one, with a part switched off. One vocabulary for every system: jurisdiction, entity, account. We call it Unified Financial Theory. xln is all three, built as machines anyone can check.",
+          "hold": 1.2
+        },
+        {
+          "id": "5.4",
+          "onscreen": "",
+          "vo": "Now go back to the button. Once more, the exchange goes silent. Same button, same nothing. This time, by design, your app carries your signed copy to the blockchain. The exchange gets a fixed window to answer. Last time, you waited eight months. This time: a day. Silence. The contract settles, and your locked twelve thousand comes back."
+        },
+        {
+          "id": "5.5",
+          "onscreen": "",
+          "vo": "Only the collateral. The two thousand beyond it stays a signed debt: paid from the exchange's reserve, later, or never. In the app you risked twelve thousand, and nobody asked you. Here the exchange can cost you two thousand at most: the limit you chose, with its signature under it."
+        }
+      ]
+    },
+    {
+      "id": "6",
+      "title": "today",
+      "beats": [
+        {
+          "id": "6.2",
+          "onscreen": "",
+          "vo": "The stick, the nine pages and the bank were never three stories. They were one account, waiting to be assembled. After FTX, exchanges began publishing proof of what they hold. The other half is proof of what they owe: a keeper who knows the number can sign it. One who will not sign has told you something too. That is how it spreads: one account at a time. Start with yours.",
+          "hold": 1.4
+        },
+        {
+          "id": "6.3",
+          "onscreen": "",
+          "vo": "Open the app where your money is. Find the number. Now find the signature. This is what it looks like when it is there. Same number. Two signatures. Twelve thousand locked. Today this is a test network, with no real money, run by us. Our own audit still has open findings; they close before any real money arrives. Until then: open a test wallet, and try to break it. xln dot finance."
+        }
+      ]
+    }
+  ],
+  "notes": "Order: traditional finance first and no crypto until part 3; the three machines (account, entity, jurisdiction); Bitcoin as the first replicated jurisdiction machine; the primitives (tally stick, payment channel); xln as the whole account; the status and the call to act. One object, the viewer's $12,000, runs through every part. Figures come from design/film/sources.md. Gates: the dispute is 'by design' and labelled a simulation until one is shown on a public chain; the open audit findings (docs/evidence/core-audit-20261114) are named until they are closed; the film never says the account would have saved a failed firm's customers. The project's 2050 aim is a goal, not a line in the film."
+}
