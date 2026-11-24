@@ -317,6 +317,7 @@ export function Gate() {
     }
     if (vault.kind === 'test') {
       void run(async () => {
+        if (discoveryError) throw new Error(discoveryError);
         if (!vault.deviceProtection)
           throw new Error('This device no longer has this test wallet key. Restore with its recovery phrase.');
         setBusyStep('Opening your test wallet');
@@ -363,6 +364,7 @@ export function Gate() {
         {...passwordEntry}
         status={busyStep}
         onOpen={async seed => {
+          if (discoveryError) throw new Error(discoveryError);
           await passwordEntry.open(seed, stack ?? null);
         }}
         onBack={() => {

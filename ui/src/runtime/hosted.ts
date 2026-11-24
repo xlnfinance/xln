@@ -17,6 +17,7 @@ import { sendRuntimeInput } from './commands';
 import { getXLN } from './xln-loader';
 import type { RuntimeRecoveryCandidate } from './restore';
 import { connectEmbedded, getEmbeddedEnv, lockEmbeddedRuntime, requireAdapter } from './adapter';
+import { reconcileRetiredDeployVersion } from './deploy-version';
 import { readJson } from './http';
 import { waitFor } from './tx';
 import { accountDisputeConfig } from './financial/roles';
@@ -196,9 +197,14 @@ export async function loadStackJurisdictions(apiBase: string): Promise<StackJuri
 
 /** Null only when discovery succeeds with no active jurisdictions. */
 export async function detectStack(apiBase: string = window.location.origin): Promise<Stack | null> {
-  const jurisdictions = await loadStackJurisdictions(apiBase);
+  const jurisdictionsPayload = await fetchApi(apiBase, '/api/jurisdictions');
+  const jurisdictions = pickJurisdictions(jurisdictionsPayload, apiBase);
   const jurisdiction = jurisdictions[0];
   if (!jurisdiction) return null;
+  await reconcileRetiredDeployVersion(jurisdictionsPayload, {
+    development: import.meta.env.DEV,
+    hostname: window.location.hostname,
+  });
   const payload = await fetchApi(apiBase, '/api/hubs');
   if (!Array.isArray(payload['hubs'])) throw new Error('HUBS_RESPONSE_INVALID');
   const hubs: StackHub[] = payload['hubs']
