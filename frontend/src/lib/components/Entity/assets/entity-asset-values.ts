@@ -1,4 +1,4 @@
-import { accountNetBalance } from '#lib/utils/ui/accountBalance.ts';
+import { accountNetBalance } from '@xln/core/presentation/account-balance';
 import type { AccountReadView } from '#lib/components/Entity/core/entity-panel-types.ts';
 
 import { ZeroAddress } from 'ethers';

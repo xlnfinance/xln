@@ -15,7 +15,7 @@ import { useWallet } from '../runtime/views';
 import { requestFaucet, requestExternalWalletRefresh, type FaucetKind } from '../runtime/financial/external';
 import { debtGroups, enforceDebts, type DebtGroup } from '../runtime/financial/debts';
 import { getAdapter } from '../runtime/adapter';
-import { accountNetBalance } from '@xln/frontend/lib/utils/ui/accountBalance';
+import { accountNetBalance } from '@xln/core/presentation/account-balance';
 
 /**
  * Money outside the bilateral accounts: the signer's on-chain wallet with

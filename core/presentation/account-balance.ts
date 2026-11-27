@@ -1,4 +1,4 @@
-import type { DerivedDelta } from '@xln/core/api/public/runtime-module';
+import type { DerivedDelta } from '../api/public/runtime-module';
 
 /** Owned collateral plus the peer's debt, minus our drawn debt. Unused credit
  * and holds change spendable capacity, not ownership. deriveDelta has already

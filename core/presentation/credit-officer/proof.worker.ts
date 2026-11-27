@@ -1,4 +1,4 @@
-import { validCreditProof, type CreditRequest } from '@xln/core/orchestrator/credit-officer/proof';
+import { validCreditProof, type CreditRequest } from '../../orchestrator/credit-officer/proof';
 
 self.onmessage = (event: MessageEvent<{ request: CreditRequest; bits: number }>) => {
   const { request, bits } = event.data;

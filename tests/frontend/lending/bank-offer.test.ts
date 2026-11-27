@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { bankOfferFor } from '../../../ui/src/runtime/financial/lending';
+import { bankOfferFor } from '../../../core/presentation/lending';
 
 const domain = { chainId: 31337, depositoryAddress: `0x${'dd'.repeat(20)}` };
 const terms = (expiresAt: number) => ({

@@ -22,9 +22,23 @@ type ExternalRuntimeConsumer = {
 };
 
 const EXTERNAL_RUNTIME_CONSUMERS: Readonly<Record<string, readonly ExternalRuntimeConsumer[]>> = {
-  'core/lendbook/state.ts': [{
-    consumer: 'ui/src/runtime/financial/lending.ts',
-    specifier: '@xln/core/lendbook/state',
+  'core/presentation/amount.ts': [{
+    consumer: 'ui/src/runtime/format.ts',
+    specifier: '@xln/core/presentation/amount',
+    downstream: {
+      consumer: 'ui/src/components/BatchFeeWarning.tsx',
+      specifier: '../runtime/format',
+    },
+  }],
+  'core/presentation/lending.ts': [{
+    consumer: 'ui/src/screens/Lending.tsx',
+    specifier: '@xln/core/presentation/lending',
+  }, {
+    consumer: 'ui/src/components/LendingPositionSummary.tsx',
+    specifier: '@xln/core/presentation/lending',
+  }, {
+    consumer: 'ui/src/runtime/financial/lending-http.ts',
+    specifier: '@xln/core/presentation/lending',
   }],
   'core/api/server/rpc/proxy-safety.ts': [{
     consumer: 'frontend/src/routes/rpc-proxy-safety.ts',

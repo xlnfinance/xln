@@ -726,7 +726,7 @@ test('both wallets submit lending through signed Runtime admission', () => {
   expect(svelte).toContain('LENDING_SIGNER_ENTITY_MISMATCH');
   const screen = readFileSync('ui/src/screens/Lending.tsx', 'utf8');
   const repay = readFileSync('ui/src/components/LendingRepay.tsx', 'utf8');
-  const commands = readFileSync('ui/src/runtime/financial/lending.ts', 'utf8');
+  const commands = readFileSync('core/presentation/lending.ts', 'utf8');
   expect(screen).toContain('await sendEntityTxs(wallet.entityId, wallet.signerId, [tx])');
   expect(repay).toContain('await sendEntityTxs(wallet.entityId, wallet.signerId, [buildLendingRepayTx(');
   for (const kind of ['lendingOffer', 'lendingBorrow', 'lendingRepay']) {

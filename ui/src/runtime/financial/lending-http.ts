@@ -1,5 +1,5 @@
 import { getJson } from '../http';
-import { decodeLendingState, type LendingState } from './lending';
+import { decodeLendingState, type LendingState } from '@xln/core/presentation/lending';
 
 export async function fetchLendingState(input: {
   hubEntityId: string;

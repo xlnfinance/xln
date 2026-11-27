@@ -12,9 +12,9 @@
   import { requireUnknownRecord } from '#lib/utils/boundary/index.ts';
   import { LENDING_TERMS, bankOfferFor, previewLendingTerms, previewSavingsRisk, decodeLendingState,
     buildLendingOfferTx, buildLendingBorrowTx, buildLendingRepayTx, isLendingLoanRepayable,
-    type LendingState, type LendingLoan, type TermId } from '../../../../../../ui/src/runtime/financial/lending';
-  import { parseAmount, formatAmount } from '../../../../../../ui/src/runtime/format';
-  import { requestCreditFacility } from '../../../../../../ui/src/runtime/credit-officer/request';
+    type LendingState, type LendingLoan, type TermId } from '@xln/core/presentation/lending';
+  import { parseAmount, formatAmount } from '@xln/core/presentation/amount';
+  import { requestCreditFacility } from '@xln/core/presentation/credit-officer/request';
 
   export let entityId: string;
   export let replica: EntityReadView | null = null;

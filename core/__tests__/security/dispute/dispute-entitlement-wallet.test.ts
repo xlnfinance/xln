@@ -22,7 +22,7 @@ import { deriveDelta } from '../../../account/utils';
 import type { Delta } from '../../../types/account';
 import { deriveDisputeTokenFinalization, type DisputeTokenFinalization } from '../../../protocol/dispute/finalization';
 import { INT512_MAX, INT512_MIN, UINT256_MAX } from '../../../protocol/boundary/integer-ranges';
-import { accountNetBalance } from '../../../../frontend/src/lib/utils/ui/accountBalance';
+import { accountNetBalance } from '../../../presentation/account-balance';
 
 const SEED = Number(process.env['XLN_ENTITLEMENT_WALLET_SEED'] ?? 2026_1011);
 const RUNS = Number(process.env['XLN_ENTITLEMENT_WALLET_RUNS'] ?? 20_000);

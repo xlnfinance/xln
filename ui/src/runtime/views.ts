@@ -5,7 +5,7 @@ import { useApp } from './store';
 import { peekXLN } from './xln-loader';
 import { usdOf } from './financial/prices';
 import { walletTokenTotals } from './financial/token-totals';
-import { accountNetBalance } from '@xln/frontend/lib/utils/ui/accountBalance';
+import { accountNetBalance } from '@xln/core/presentation/account-balance';
 import { disputeView, settlementView, type AccountDoc, type DisputePhase, type SettlementPhase } from './financial/manage';
 
 /**

@@ -123,7 +123,7 @@ test('each payment operation retains one explicit canonical transaction path', (
   expect(source('core/entity/tx/handlers/account/lifecycle/admin.ts'))
     .toContain("type: 'set_credit_limit'");
 
-  const lendingCommands = source('ui/src/runtime/financial/lending.ts');
+  const lendingCommands = source('core/presentation/lending.ts');
   for (const type of ['lendingOffer', 'lendingBorrow', 'lendingRepay']) {
     expect(lendingCommands).toContain(`type: '${type}'`);
   }

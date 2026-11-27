@@ -13,7 +13,7 @@ import { loadStackJurisdictions } from '../runtime/hosted';
 import { nativeInvoiceJurisdictionKeys } from '../native/payment-request';
 import { jurisdictionRef } from '../runtime/financial/swap';
 import { paymentMode } from '../runtime/financial/payment-funding';
-import { accountNetBalance } from '@xln/frontend/lib/utils/ui/accountBalance';
+import { accountNetBalance } from '@xln/core/presentation/account-balance';
 import { useApp } from '../runtime/store';
 import { peekXLN } from '../runtime/xln-loader';
 import { DELIVERY_OPTIONS, eligibleRoutes, quotePaymentRoutes, routeModeError, submitPayment, type PaymentRouteQuote } from '../runtime/financial/payments';

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { LendingSavings } from '../runtime/financial/lending';
+import type { LendingSavings } from '@xln/core/presentation/lending';
 import type { WalletView } from '../runtime/views';
 import { sendEntityTxs } from '../runtime/tx';
 import { useApp } from '../runtime/store';

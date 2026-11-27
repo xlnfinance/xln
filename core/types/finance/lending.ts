@@ -30,7 +30,7 @@ type LendingSavingsStatus = 'open' | 'queued' | 'closed' | 'disputed';
  * `defaulted` remains repayable. Changing a receivable's status never changes
  * the bank's independent savings liabilities or creates payment capacity.
  */
-type LendingLoanStatus = 'opening' | 'active' | 'closing' | 'repaid' | 'defaulted' | 'disputed';
+export type LendingLoanStatus = 'opening' | 'active' | 'closing' | 'repaid' | 'defaulted' | 'disputed';
 
 export interface LendingSavings {
   positionId: string;

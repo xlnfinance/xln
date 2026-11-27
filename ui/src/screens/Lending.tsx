@@ -13,7 +13,7 @@ import { useApp } from '../runtime/store';
 import { sendEntityTxs, waitFor } from '../runtime/tx';
 import { getJson, postJson } from '../runtime/http';
 import { fetchLendingState } from '../runtime/financial/lending-http';
-import { requestCreditFacility } from '../runtime/credit-officer/request';
+import { requestCreditFacility } from '@xln/core/presentation/credit-officer/request';
 import { formatAmount, formatMoney, parseAmount } from '../runtime/format';
 import { getTokenMeta } from '../runtime/token-meta';
 import { useWallet } from '../runtime/views';
@@ -26,7 +26,7 @@ import {
 	bankOfferFor,
 	type LendingState,
 	type TermId,
-} from '../runtime/financial/lending';
+} from '@xln/core/presentation/lending';
 
 const rate = (bps: number): string => `${(bps / 100).toFixed(2)}%`;
 
