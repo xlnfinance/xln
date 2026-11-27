@@ -183,7 +183,13 @@ transitions, one canonical production path, no silent fallback.
 
 ## GIT AND SHARED WORKSPACE
 
-- Always work on `main` (owner 2026-10-17). No task branches or worktrees; never force-push.
+- Work one feature at a time in local `main`; a worktree may carry parallel work and merges
+  back into `main`. The no-branches rule of 2026-10-17 existed to combine the two Macs'
+  histories and is lifted (owner 2026-11-27). Never force-push `main`.
+- `origin` is the owner's fork; `xlnfinance/xln` is upstream and accepts no direct push.
+  Finished work goes upstream as one pull request from `main`. A pull request tracks its head
+  branch, so every later `main` commit joins an open one: land or close it before starting the
+  next feature, or give that feature its own branch.
 - Preserve unrelated user changes on every machine, including owner files held by the
   synchronization controller; synchronization never discards or overwrites them.
 - No `wip:` commits. Commit only owned paths with `git commit -- <paths>`. Before a shared-tree
