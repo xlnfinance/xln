@@ -209,6 +209,7 @@
     "check:unsafe-types": "bun core/scripts/checks/architecture/check-unsafe-types.ts",
     "check:frontend-unsafe-types": "cd frontend && bun run check:unsafe-types",
     "check:runtime-dependencies": "bun core/scripts/checks/architecture/check-runtime-dependencies.ts",
+    "check:wallet-boundaries": "bun core/scripts/checks/repository/check-wallet-boundaries.ts",
     "check:e2e-categories": "bun core/scripts/checks/policy/check-e2e-test-categories.ts",
     "check:frontend": "cd frontend && bun run check",
     "check:ui-types": "cd ui && bun run check",

@@ -1,4 +1,4 @@
-import { decodeCreditRequest, type CreditRequest } from '@xln/core/orchestrator/credit-officer/proof';
+import { decodeCreditRequest, type CreditRequest } from '../../orchestrator/credit-officer/proof';
 
 function solve(request: CreditRequest, bits: number): Promise<CreditRequest> {
   return new Promise((resolve, reject) => {

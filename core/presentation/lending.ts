@@ -1,15 +1,15 @@
-import type { TokenDecimals } from '@xln/core/account/tx/units';
+import type { TokenDecimals } from '../account/tx/units';
 /**
  * Hub lending: offer liquidity to a hub's pool, borrow from it, repay. Entity
  * txs are the frontend's exact shapes; the pool and loan state is served by
  * the hub runtime's HTTP API, so it is live only against a hosted runtime.
  */
-import type { EntityTx } from '@xln/core/api/public/runtime-module';
-import { computeLendingInterest, normalizeInterestBps, normalizeLendingTerm, lendingLoanMaximumAmount } from '@xln/core/lendbook/state';
-import type { LendingRisk } from '@xln/core/account/validation/lending-risk';
-import { parseAmount } from '../format';
-import { decodeLendingBankTerms, decodeLendingFacility } from '@xln/core/lendbook/policy';
-import type { LendingTermId, LendingBankTerms, LendingFacility, LendingLoan as CoreLendingLoan } from '@xln/core/types/finance/lending';
+import type { EntityTx } from '../api/public/runtime-module';
+import { computeLendingInterest, normalizeInterestBps, normalizeLendingTerm, lendingLoanMaximumAmount } from '../lendbook/state';
+import type { LendingRisk } from '../account/validation/lending-risk';
+import { parseAmount } from './amount';
+import { decodeLendingBankTerms, decodeLendingFacility } from '../lendbook/policy';
+import type { LendingTermId, LendingBankTerms, LendingFacility, LendingLoanStatus } from '../types/finance/lending';
 
 export function previewLendingTerms(amount: string, rate: string, decimals: TokenDecimals, late?: { termMs: number; lateMs: number }) {
   if (!amount.trim()) return null;
@@ -105,7 +105,7 @@ export type LendingState = {
 	loans: LendingLoan[];
 	terms: LendingBankTerms[];
 	facilities: LendingFacility[];
-	requestStatus: CoreLendingLoan['status'] | 'unseen' | 'not-funded' | null;
+	requestStatus: LendingLoanStatus | 'unseen' | 'not-funded' | null;
 	totals: { savingsPrincipal: bigint; loanPrincipal: bigint; activePrincipal: bigint };
 };
 
@@ -218,7 +218,7 @@ export function decodeLendingState(
 }
 
 /** 'lend-<16 hex>' / 'borrow-<16 hex>', the frontend's intent id shape. */
-export function newIntentId(prefix: 'lend' | 'borrow'): string {
+function newIntentId(prefix: 'lend' | 'borrow'): string {
 	const bytes = new Uint8Array(8);
 	crypto.getRandomValues(bytes);
 	return `${prefix}-${Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')}`;

@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { deriveDelta } from '../../../../core/account/utils';
 import type { Delta } from '../../../../core/types/account';
 import { accountNetBalance } from '@xln/frontend/lib/utils/ui/accountBalance';
-import { buildLendingRepayTx, isLendingLoanRepayable, type LendingLoan } from './lending';
+import { buildLendingRepayTx, isLendingLoanRepayable, type LendingLoan } from '@xln/core/presentation/lending';
 import { walletTokenTotals } from './token-totals';
 import { applyDebtCreated, applyDebtEnforced } from '../../../../core/entity/tx/j-events-observations/debt';
 import { projectEntityCoreDoc } from '../../../../core/storage/read/projections';

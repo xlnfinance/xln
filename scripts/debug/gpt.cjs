@@ -119,7 +119,7 @@ function readGitCommit(projectRoot) {
 // CORE FILES ONLY - Everything an LLM needs to understand XLN
 // READ ORDER: Solidity contracts FIRST (source of truth), then TypeScript runtime
 const CORE_FILES = {
-  root: ['ui/src/screens/Lending.tsx', 'ui/src/runtime/financial/lending.ts'],
+  root: ['ui/src/screens/Lending.tsx', 'core/presentation/lending.ts'],
   contracts: [
     // * READ THESE FIRST - On-chain source of truth for all invariants
     'Types.sol',           // Shared types: Diff, BatchArgs, InsuranceReg

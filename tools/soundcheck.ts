@@ -22,6 +22,7 @@ const gates: Gate[] = [
   { name: 'determinism', command: ['bun', 'core/scripts/checks/architecture/check-determinism.ts', '--static-only'] },
   { name: 'no-weak-collections', command: ['bun', 'core/scripts/checks/policy/check-no-weak-collections.ts'] },
   { name: 'runtime-dependencies', command: ['bun', 'core/scripts/checks/architecture/check-runtime-dependencies.ts'] },
+  { name: 'wallet-boundaries', command: ['bun', 'core/scripts/checks/repository/check-wallet-boundaries.ts'] },
   { name: 'fints-negative-types', command: ['bun', 'run', 'check:fints-negative-types'] },
   { name: 'fints-compiler-policy', command: ['bun', 'run', 'check:fints-compiler-policy'] },
   { name: 'fints-decoder-authority', command: ['bun', 'run', 'check:fints-decoder-authority'] },

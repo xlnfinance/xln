@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { decodeLendingState } from '../lending';
+import { decodeLendingState } from '@xln/core/presentation/lending';
 
 const hubEntityId = `0x${'11'.repeat(32)}`;
 const response = () => ({

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { buildLendingRepayTx, isLendingLoanRepayable, type LendingLoan } from '../runtime/financial/lending';
+import { buildLendingRepayTx, isLendingLoanRepayable, type LendingLoan } from '@xln/core/presentation/lending';
 import type { WalletView } from '../runtime/views';
 import { parseAmount } from '../runtime/format';
 import { getTokenMeta } from '../runtime/token-meta';

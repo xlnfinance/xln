@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { renderToStaticMarkup } from '../../../../ui/node_modules/react-dom/server';
 import { LendingPositionSummary } from '../../../../ui/src/components/LendingPositionSummary';
-import type { LendingState } from '../../../../ui/src/runtime/financial/lending';
+import type { LendingState } from '../../../presentation/lending';
 import { asTokenDecimals } from '../../../account/tx/units';
 import { asTokenId } from '../../../protocol/units';
 

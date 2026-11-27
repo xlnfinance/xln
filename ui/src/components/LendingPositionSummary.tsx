@@ -1,6 +1,6 @@
 import { lendingLoanMaximumAmount } from '@xln/core/lendbook/state';
 import { formatAmount, formatMoney } from '../runtime/format';
-import { isLendingLoanRepayable, type LendingLoan, type LendingSavings } from '../runtime/financial/lending';
+import { isLendingLoanRepayable, type LendingLoan, type LendingSavings } from '@xln/core/presentation/lending';
 import { tokenCatalogMeta } from '../runtime/financial/swap-assets/metadata';
 import type { TokenCatalogEntry } from '../runtime/token-meta';
 

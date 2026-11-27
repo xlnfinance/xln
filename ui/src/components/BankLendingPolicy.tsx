@@ -4,7 +4,7 @@ import { useApp } from '../runtime/store';
 import { normalizeInterestBps } from '@xln/core/lendbook/state';
 import type { EntityTx } from '@xln/core/types/entity-tx';
 import type { WalletView } from '../runtime/views';
-import { LENDING_TERMS, type LendingState, type TermId } from '../runtime/financial/lending';
+import { LENDING_TERMS, type LendingState, type TermId } from '@xln/core/presentation/lending';
 import { formatAmount, parseAmount } from '../runtime/format';
 import { getTokenMeta } from '../runtime/token-meta';
 import { sendEntityTxs } from '../runtime/tx';
