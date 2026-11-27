@@ -2,7 +2,7 @@ import { getAssetValueUsd } from '@xln/frontend/lib/components/Entity/assets/ent
 import { describe, expect, test } from 'bun:test';
 import { deriveDelta } from '../../../../core/account/utils';
 import type { Delta } from '../../../../core/types/account';
-import { accountNetBalance } from '@xln/frontend/lib/utils/ui/accountBalance';
+import { accountNetBalance } from '@xln/core/presentation/account-balance';
 import { buildLendingRepayTx, isLendingLoanRepayable, type LendingLoan } from '@xln/core/presentation/lending';
 import { walletTokenTotals } from './token-totals';
 import { applyDebtCreated, applyDebtEnforced } from '../../../../core/entity/tx/j-events-observations/debt';

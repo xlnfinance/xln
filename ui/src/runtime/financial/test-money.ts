@@ -3,7 +3,7 @@ import { requireAdapter } from '../adapter';
 import { peekXLN } from '../xln-loader';
 import { requestFaucet } from '../financial/external';
 import { readAccountState } from '../financial/swap';
-import { accountNetBalance } from '@xln/frontend/lib/utils/ui/accountBalance';
+import { accountNetBalance } from '@xln/core/presentation/account-balance';
 import { waitFor } from '../tx';
 import { formatAmount, parseAmount } from '../format';
 import { CreditLimitFullError } from './credit-limit';

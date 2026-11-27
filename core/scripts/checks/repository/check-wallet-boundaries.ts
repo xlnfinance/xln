@@ -36,7 +36,7 @@ const FORBIDDEN_EDGES = new Set(['frontend->ui', 'frontend->core-tests']);
 //
 // At zero, move the edge into FORBIDDEN_EDGES above.
 const EDGE_DEBT: Readonly<Record<string, number>> = {
-  'ui->frontend': 95,
+  'ui->frontend': 90,
   'ui->core-tests': 3,
 };
 
