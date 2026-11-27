@@ -184,7 +184,7 @@ transitions, one canonical production path, no silent fallback.
 ## GIT AND SHARED WORKSPACE
 
 - Always work on `main` (owner 2026-10-17). No task branches or worktrees; never force-push.
-- Preserve unrelated user changes on both Macs, including owner files held by the
+- Preserve unrelated user changes on every machine, including owner files held by the
   synchronization controller; synchronization never discards or overwrites them.
 - No `wip:` commits. Commit only owned paths with `git commit -- <paths>`. Before a shared-tree
   commit, stop concurrent writers, run formatting and `git diff --check`. Failed verification is
@@ -192,10 +192,10 @@ transitions, one canonical production path, no silent fallback.
 - Release evidence names a committed SHA checked on a clean tree; durable evidence lives under
   `docs/evidence/`, never only in `/tmp`. Auditors may use a read-only checkout at an immutable SHA.
 
-## STUDIO EXECUTION AND DEPENDENCIES (owner decision 2026-10-18)
+## EXECUTION AND DEPENDENCIES
 
-- All implementation, builds, tests and agents run on Mac Studio. MacBook is control, transfer
-  and exact-SHA proof retrieval only; no project verification there.
+- Implementation, builds, tests and agents may run on any owner machine (Mac Studio or
+  MacBook); the Studio-only rule of 2026-10-18 is lifted (owner 2026-11-27).
 - The sole integrator owns manifests, lockfiles and used JS CLI updates to current official
   stable releases, including necessary major API changes. Preserve exact pre-update source/locks;
   reconcile patches/overrides with upstream; regenerate ABI/bytecode/TypeChain with recorded
@@ -208,10 +208,10 @@ transitions, one canonical production path, no silent fallback.
 ## REVIEW AND EXTERNAL MODELS
 
 - External auditors/models run only when the owner explicitly requests them. Owner 2026-11-14:
-  a change lands after a green full Studio verify; the three-AI quorum of 2026-10-26 is no
+  a change lands after a green full verify; the three-AI quorum of 2026-10-26 is no
   longer required. When the owner does request a review, each leg is smoke-tested on a known
   answer first. Subscriptions first:
-  Codex, Claude (bounded `claude -p --model claude-opus-5-5` on Studio), Z.ai via pi
+  Codex, Claude (bounded `claude -p --model claude-opus-5-5`), Z.ai via pi
   `zai-coding-cn`. All paid external-model calls share USD 10 per rolling hour across
   providers, agents, harnesses and retries, administered by the sole integrator as the single
   Quorum reservation owner; preserve historical unresolved holds and costs. Reserve before
@@ -277,7 +277,7 @@ transitions, one canonical production path, no silent fallback.
   closures, exact main SHA and check result, first remaining failure, next single command and a
   method reflection. Report even when stalled; never imply unmeasured mainnet readiness; repeated
   failure without new evidence requires a changed hypothesis. No separate progress log.
-  Scheduling runs only on Studio via a verified native heartbeat; never claim a paused scheduler
+  Scheduling runs via a verified native heartbeat; never claim a paused scheduler
   is active or replace it with handwritten automation/cron.
 - Track delivered product outcomes and one final immutable SHA. A saved report, PID, review or
   commit is not owner delivery or release approval.
